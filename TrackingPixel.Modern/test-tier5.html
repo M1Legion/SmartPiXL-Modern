@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tier 5 Test Page</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            max-width: 800px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #0f9; }
+        .section { 
+            background: #16213e; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin: 20px 0; 
+        }
+        code { 
+            background: #0d0d1a; 
+            padding: 2px 8px; 
+            border-radius: 4px; 
+            color: #0f9;
+        }
+        pre {
+            background: #0d0d1a;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            color: #0f9;
+        }
+        .status { 
+            padding: 10px 20px; 
+            border-radius: 5px; 
+            display: inline-block;
+            margin: 10px 0;
+        }
+        .loaded { background: #1a472a; color: #0f9; }
+        .waiting { background: #472a1a; color: #f90; }
+        a { color: #09f; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Tier 5 Test Page</h1>
+    
+    <div class="section">
+        <h2>How This Works</h2>
+        <p>This page includes our Tier 5 script - a single line that loads an external JavaScript file:</p>
+        <pre>&lt;script src="http://localhost:5000/js/12346/00009.js" async&gt;&lt;/script&gt;</pre>
+        
+        <p><strong>What happens:</strong></p>
+        <ol>
+            <li>Browser loads this page</li>
+            <li>Browser sees the <code>&lt;script src&gt;</code> tag</li>
+            <li>Browser requests <code>/js/12346/00009.js</code> from our server</li>
+            <li>Our server returns JavaScript code (not a .gif)</li>
+            <li>Browser <em>executes</em> that JavaScript</li>
+            <li>The JavaScript collects screen size, CPU cores, timezone, etc.</li>
+            <li>The JavaScript fires <code>new Image().src = "/12346/00009_SMART.GIF?sw=1920&cores=8..."</code></li>
+            <li>Our server captures all the headers + query params</li>
+            <li>Done! Maximum data collected with one line of code.</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>Script Status</h2>
+        <p id="status" class="status waiting">⏳ Script loading...</p>
+    </div>
+
+    <div class="section">
+        <h2>View the Results</h2>
+        <p>After this page loads:</p>
+        <ol>
+            <li>Check the <a href="http://localhost:5000/debug/headers" target="_blank">Debug Endpoint</a> (shows what data was captured)</li>
+            <li>Or query the database to see the Tier 5 record</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>What Makes Tier 5 Special</h2>
+        <p>The JavaScript file we serve can collect data that a simple <code>&lt;img&gt;</code> tag cannot:</p>
+        <ul>
+            <li><code>screen.width</code> / <code>screen.height</code> - Screen resolution</li>
+            <li><code>navigator.hardwareConcurrency</code> - CPU cores</li>
+            <li><code>navigator.deviceMemory</code> - RAM in GB (Chrome only)</li>
+            <li><code>Intl.DateTimeFormat().resolvedOptions().timeZone</code> - Full timezone like "America/Chicago"</li>
+            <li><code>navigator.connection.effectiveType</code> - Network speed (4g, 3g, etc.)</li>
+            <li><code>ontouchstart</code> - Touch screen support</li>
+            <li><code>devicePixelRatio</code> - Retina/HiDPI detection</li>
+            <li><code>location.href</code> - Full page URL</li>
+            <li><code>document.referrer</code> - Where they came from</li>
+        </ul>
+        <p>This is data the server <em>cannot</em> see from HTTP headers alone!</p>
+    </div>
+
+    <!-- 
+    =========================================================================
+    THIS IS THE TIER 5 SCRIPT - Just one line!
+    Client just copies this one line before </body> and they're done.
+    =========================================================================
+    -->
+    <script src="http://localhost:5000/js/12346/00009.js" async></script>
+    
+    <script>
+        // This is just for demo purposes - shows when our script loads
+        // The actual tracking doesn't need this
+        setTimeout(() => {
+            document.getElementById('status').className = 'status loaded';
+            document.getElementById('status').innerHTML = '✅ Script loaded and fired! Check the database.';
+        }, 1000);
+    </script>
+</body>
+</html>

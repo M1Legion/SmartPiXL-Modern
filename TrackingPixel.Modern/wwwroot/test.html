@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>M1 Data & Analytics - Maximum Data Collection Demo</title>
+    <meta charset="UTF-8">
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            padding: 40px 20px; 
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #00d4ff 0%, #0099ff 50%, #0066cc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 5px;
+        }
+        .tagline { color: #888; font-size: 1.1rem; letter-spacing: 2px; text-transform: uppercase; }
+        .card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 30px;
+            margin: 25px 0;
+        }
+        .cheeky {
+            background: linear-gradient(135deg, rgba(0,212,255,0.1) 0%, rgba(0,102,204,0.1) 100%);
+            border-color: rgba(0,153,255,0.3);
+            text-align: center;
+            padding: 40px;
+        }
+        .cheeky h2 { font-size: 1.8rem; margin-bottom: 15px; color: #00d4ff; }
+        .cheeky p { font-size: 1.2rem; color: #aaa; margin: 10px 0; }
+        .cheeky .emoji { font-size: 4rem; margin-bottom: 20px; }
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 12px;
+            margin-top: 20px;
+        }
+        .data-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        .data-label { color: #888; min-width: 130px; }
+        .data-value { color: #00d4ff; font-family: 'Consolas', monospace; font-weight: 600; text-align: right; max-width: 65%; word-break: break-all; }
+        .data-value.hash { font-size: 0.8rem; color: #ff9f43; }
+        .data-value.warning { color: #ff6b6b; }
+        .data-value.good { color: #51cf66; }
+        .data-value.muted { color: #666; }
+        .section-title {
+            color: #00d4ff;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 25px 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid rgba(0,212,255,0.2);
+        }
+        .section-title:first-child { margin-top: 0; }
+        .fine-print {
+            text-align: center;
+            color: #555;
+            font-size: 0.8rem;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 25px;
+            flex-wrap: wrap;
+        }
+        .stat { text-align: center; }
+        .stat-num { font-size: 2.5rem; font-weight: 800; color: #00d4ff; }
+        .stat-label { font-size: 0.9rem; color: #888; }
+        .highlight { background: rgba(255,159,67,0.1); border-color: rgba(255,159,67,0.3); }
+        .loading { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">M1 Data & Analytics</div>
+        <div class="tagline">Maximum Data Collection Demo</div>
+    </div>
+
+    <div class="card cheeky">
+        <div class="emoji">🎯</div>
+        <h2>Everything About YOU — From ONE Script Tag</h2>
+        <p>No cookies. No permissions. Just <strong>one line of JavaScript</strong>.</p>
+        <div class="stats-bar">
+            <div class="stat"><div class="stat-num" id="total-count">...</div><div class="stat-label">Data Points</div></div>
+            <div class="stat"><div class="stat-num">0</div><div class="stat-label">Cookies Used</div></div>
+            <div class="stat"><div class="stat-num">1</div><div class="stat-label">Line of Code</div></div>
+            <div class="stat"><div class="stat-num" id="fingerprint-count">...</div><div class="stat-label">Fingerprints</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="color: #00d4ff; margin-top: 0;">📊 Everything We Just Captured From YOU:</h3>
+        <div id="collected-data"><p class="loading">Collecting data from every possible source...</p></div>
+    </div>
+
+    <div class="fine-print">
+        <p>🔒 Internal testing only • Not for production use • Data stored locally</p>
+        <p style="margin-top: 10px;">© 2026 M1 Data & Analytics • Powered by SmartPiXL</p>
+    </div>
+
+    <script>
+    (function() {
+        var s = screen;
+        var n = navigator;
+        var w = window;
+        var d = new Date();
+        var c = n.connection || {};
+        var perf = w.performance || {};
+        var asyncData = {};
+        
+        // ============================================
+        // CANVAS FINGERPRINT
+        // ============================================
+        var canvasFP = (function() {
+            try {
+                var canvas = document.createElement('canvas');
+                canvas.width = 280; canvas.height = 60;
+                var ctx = canvas.getContext('2d');
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillStyle = '#f60';
+                ctx.fillRect(10, 10, 100, 40);
+                ctx.fillStyle = '#069';
+                ctx.font = '15px Arial';
+                ctx.fillText('SmartPiXL <canvas> 1.0', 2, 15);
+                ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+                ctx.font = '18px Times New Roman';
+                ctx.fillText('Fingerprint!', 4, 45);
+                ctx.strokeStyle = 'rgb(120,186,176)';
+                ctx.arc(80, 30, 20, 0, Math.PI * 2);
+                ctx.stroke();
+                var hash = 0, str = canvas.toDataURL();
+                for (var i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
+                return Math.abs(hash).toString(16);
+            } catch(e) { return ''; }
+        })();
+        
+        // ============================================
+        // WEBGL FINGERPRINT + GPU
+        // ============================================
+        var webglData = (function() {
+            try {
+                var canvas = document.createElement('canvas');
+                var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) return { fp: '', gpu: '', gpuVendor: '', params: '', extensions: 0 };
+                var ext = gl.getExtension('WEBGL_debug_renderer_info');
+                var params = [
+                    gl.getParameter(gl.VERSION),
+                    gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                    gl.getParameter(gl.VENDOR),
+                    gl.getParameter(gl.RENDERER),
+                    gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+                    gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+                    gl.getParameter(gl.MAX_VARYING_VECTORS),
+                    gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS),
+                    gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
+                    gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
+                    gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+                    gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
+                    gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+                    gl.getParameter(gl.MAX_VIEWPORT_DIMS) ? gl.getParameter(gl.MAX_VIEWPORT_DIMS).join(',') : '',
+                    gl.getParameter(gl.MAX_TEXTURE_SIZE),
+                    gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE) ? gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE).join(',') : '',
+                    gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE) ? gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE).join(',') : '',
+                    gl.getParameter(gl.RED_BITS),
+                    gl.getParameter(gl.GREEN_BITS),
+                    gl.getParameter(gl.BLUE_BITS),
+                    gl.getParameter(gl.ALPHA_BITS),
+                    gl.getParameter(gl.DEPTH_BITS),
+                    gl.getParameter(gl.STENCIL_BITS)
+                ];
+                var extensions = gl.getSupportedExtensions() || [];
+                var hash = 0, str = params.join('|') + extensions.join(',');
+                for (var i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
+                return {
+                    fp: Math.abs(hash).toString(16),
+                    gpu: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '',
+                    gpuVendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '',
+                    params: params.slice(0, 4).join(' | '),
+                    extensions: extensions.length
+                };
+            } catch(e) { return { fp: '', gpu: '', gpuVendor: '', params: '', extensions: 0 }; }
+        })();
+        
+        // ============================================
+        // AUDIO FINGERPRINT
+        // ============================================
+        var audioFP = (function() {
+            try {
+                var ctx = new (w.OfflineAudioContext || w.webkitOfflineAudioContext)(1, 44100, 44100);
+                return ctx.length.toString();
+            } catch(e) { return ''; }
+        })();
+        
+        // ============================================
+        // FONT DETECTION (expanded)
+        // ============================================
+        var fonts = (function() {
+            var testFonts = [
+                'Arial','Arial Black','Arial Narrow','Verdana','Times New Roman','Courier New',
+                'Georgia','Comic Sans MS','Impact','Trebuchet MS','Lucida Console','Tahoma',
+                'Palatino Linotype','Segoe UI','Calibri','Cambria','Consolas','Helvetica',
+                'Monaco','Menlo','Ubuntu','Roboto','Open Sans','Lato','Montserrat',
+                'Source Sans Pro','Droid Sans','Century Gothic','Futura','Gill Sans',
+                'Lucida Grande','Optima','Book Antiqua','Garamond','Bookman Old Style',
+                'MS Gothic','MS PGothic','MS Mincho','SimSun','SimHei','Microsoft YaHei',
+                'Malgun Gothic'
+            ];
+            var detected = [];
+            var baseline = 'monospace';
+            var span = document.createElement('span');
+            span.style.cssText = 'position:absolute;left:-9999px;font-size:72px;';
+            span.innerHTML = 'mmmmmmmmmmlli';
+            document.body.appendChild(span);
+            span.style.fontFamily = baseline;
+            var baseWidth = span.offsetWidth;
+            var baseHeight = span.offsetHeight;
+            for (var i = 0; i < testFonts.length; i++) {
+                span.style.fontFamily = testFonts[i] + ',' + baseline;
+                if (span.offsetWidth !== baseWidth || span.offsetHeight !== baseHeight) detected.push(testFonts[i]);
+            }
+            document.body.removeChild(span);
+            return detected;
+        })();
+        
+        // ============================================
+        // SPEECH SYNTHESIS VOICES
+        // ============================================
+        var voices = (function() {
+            try {
+                var v = speechSynthesis.getVoices();
+                return v.map(function(x) { return x.name; });
+            } catch(e) { return []; }
+        })();
+        
+        // ============================================
+        // MATH FINGERPRINT
+        // ============================================
+        var mathFP = (function() {
+            var m = Math;
+            return [
+                m.tan(-1e300),
+                m.sin(1),
+                m.acos(0.5),
+                m.atan(2),
+                m.exp(1),
+                m.log(2),
+                m.sqrt(2)
+            ].map(function(x) { return x.toString().slice(0, 12); }).join(' | ');
+        })();
+        
+        // ============================================
+        // ERROR FINGERPRINT
+        // ============================================
+        var errorFP = (function() {
+            try { null[0](); } catch(e) { return 'msg:' + e.message.length + ' stack:' + (e.stack ? e.stack.length : 0); }
+            return '';
+        })();
+        
+        // ============================================
+        // GAMEPAD DETECTION
+        // ============================================
+        var gamepads = (function() {
+            try {
+                var gp = n.getGamepads ? n.getGamepads() : [];
+                var found = [];
+                for (var i = 0; i < gp.length; i++) {
+                    if (gp[i]) found.push(gp[i].id);
+                }
+                return found;
+            } catch(e) { return []; }
+        })();
+        
+        // ============================================
+        // WEBRTC LOCAL IP (async)
+        // ============================================
+        (function() {
+            try {
+                var rtc = new RTCPeerConnection({iceServers: []});
+                rtc.createDataChannel('');
+                rtc.createOffer().then(function(offer) { return rtc.setLocalDescription(offer); });
+                rtc.onicecandidate = function(e) {
+                    if (e && e.candidate && e.candidate.candidate) {
+                        var match = /([0-9]{1,3}\.){3}[0-9]{1,3}/.exec(e.candidate.candidate);
+                        if (match && !asyncData.localIp) {
+                            asyncData.localIp = match[0];
+                            updateDisplay();
+                        }
+                    }
+                };
+            } catch(e) {}
+        })();
+        
+        // ============================================
+        // STORAGE ESTIMATION (async)
+        // ============================================
+        (function() {
+            try {
+                if (n.storage && n.storage.estimate) {
+                    n.storage.estimate().then(function(est) {
+                        asyncData.storageQuota = Math.round((est.quota || 0) / 1073741824) + ' GB';
+                        asyncData.storageUsed = Math.round((est.usage || 0) / 1048576) + ' MB';
+                        updateDisplay();
+                    });
+                }
+            } catch(e) {}
+        })();
+        
+        // ============================================
+        // BATTERY STATUS (async)
+        // ============================================
+        (function() {
+            try {
+                if (n.getBattery) {
+                    n.getBattery().then(function(b) {
+                        asyncData.batteryLevel = Math.round(b.level * 100) + '%';
+                        asyncData.batteryCharging = b.charging ? '⚡ Charging' : '🔋 Not Charging';
+                        updateDisplay();
+                    });
+                }
+            } catch(e) {}
+        })();
+        
+        // ============================================
+        // MEDIA DEVICES COUNT (async)
+        // ============================================
+        (function() {
+            try {
+                if (n.mediaDevices && n.mediaDevices.enumerateDevices) {
+                    n.mediaDevices.enumerateDevices().then(function(devices) {
+                        var audio = 0, video = 0;
+                        devices.forEach(function(d) {
+                            if (d.kind === 'audioinput') audio++;
+                            if (d.kind === 'videoinput') video++;
+                        });
+                        asyncData.audioInputs = audio;
+                        asyncData.videoInputs = video;
+                        updateDisplay();
+                    });
+                }
+            } catch(e) {}
+        })();
+        
+        // Helper function
+        function bool(v) { return v ? '✅' : '❌'; }
+        function connSpeed(t) { return {'slow-2g':'🐌 Very Slow','2g':'🐢 Slow','3g':'🚶 Medium','4g':'🚀 Fast'}[t] || '❓ Unknown'; }
+        
+        // ============================================
+        // BUILD DATA DISPLAY
+        // ============================================
+        function buildDisplayData() {
+            return {
+                '🔥 FINGERPRINTS (High Entropy - Cross-Site Tracking)': {
+                    'Canvas Hash': canvasFP || 'N/A',
+                    'WebGL Hash': webglData.fp || 'N/A',
+                    'Audio Fingerprint': audioFP || 'N/A',
+                    'Math Fingerprint': mathFP || 'N/A',
+                    'Error Fingerprint': errorFP || 'N/A',
+                    'Fonts Detected': fonts.length + ' fonts'
+                },
+                '🌐 NETWORK & IDENTITY': {
+                    'WebRTC Local IP': asyncData.localIp || '(detecting...)',
+                    'Online Status': n.onLine ? '✅ Online' : '❌ Offline',
+                    'Connection Type': connSpeed(c.effectiveType),
+                    'Downlink Speed': c.downlink ? c.downlink + ' Mbps' : 'N/A',
+                    'Round Trip Time': c.rtt ? c.rtt + ' ms' : 'N/A',
+                    'Data Saver Mode': c.saveData ? '⚠️ ON' : 'OFF'
+                },
+                '💾 STORAGE & BATTERY': {
+                    'Storage Quota': asyncData.storageQuota || '(detecting...)',
+                    'Storage Used': asyncData.storageUsed || '(detecting...)',
+                    'Battery Level': asyncData.batteryLevel || '(detecting...)',
+                    'Charging Status': asyncData.batteryCharging || '(detecting...)',
+                    'LocalStorage': bool((function() { try { return !!w.localStorage; } catch(e) { return false; } })()),
+                    'SessionStorage': bool((function() { try { return !!w.sessionStorage; } catch(e) { return false; } })()),
+                    'IndexedDB': bool(!!w.indexedDB),
+                    'Cache API': bool(!!w.caches)
+                },
+                '🖥️ SCREEN & DISPLAY': {
+                    'Screen Resolution': s.width + ' × ' + s.height,
+                    'Available Screen': s.availWidth + ' × ' + s.availHeight,
+                    'Viewport Size': w.innerWidth + ' × ' + w.innerHeight,
+                    'Outer Window': w.outerWidth + ' × ' + w.outerHeight,
+                    'Window Position': (w.screenX || 0) + ', ' + (w.screenY || 0),
+                    'Color Depth': s.colorDepth + '-bit',
+                    'Pixel Ratio': (w.devicePixelRatio || 1) + 'x DPI',
+                    'Orientation': (s.orientation && s.orientation.type) || 'N/A'
+                },
+                '⚙️ DEVICE HARDWARE': {
+                    'CPU Cores': n.hardwareConcurrency || 'N/A',
+                    'RAM': n.deviceMemory ? n.deviceMemory + ' GB' : 'N/A',
+                    'GPU': webglData.gpu || 'N/A',
+                    'GPU Vendor': webglData.gpuVendor || 'N/A',
+                    'WebGL Extensions': webglData.extensions || 0,
+                    'Touch Points': n.maxTouchPoints || '0',
+                    'Audio Inputs': asyncData.audioInputs !== undefined ? asyncData.audioInputs : '(detecting...)',
+                    'Video Inputs': asyncData.videoInputs !== undefined ? asyncData.videoInputs : '(detecting...)',
+                    'Gamepads': gamepads.length > 0 ? gamepads.join(', ') : 'None detected'
+                },
+                '🌍 LOCALE & TIME': {
+                    'Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    'UTC Offset': 'UTC' + (d.getTimezoneOffset() > 0 ? '-' : '+') + Math.abs(d.getTimezoneOffset()/60),
+                    'Language': n.language,
+                    'All Languages': (n.languages || []).join(', '),
+                    'Timestamp': d.getTime()
+                },
+                '🗣️ SPEECH SYNTHESIS': {
+                    'Voices Available': voices.length + ' voices',
+                    'Voice List': voices.slice(0, 10).join(', ') + (voices.length > 10 ? '...' : '') || 'None'
+                },
+                '🔤 DETECTED FONTS': {
+                    'Font List': fonts.join(', ') || 'None detected'
+                },
+                '🤖 BOT DETECTION': {
+                    'WebDriver (Selenium)': n.webdriver ? '🤖 DETECTED!' : '✅ Not a bot',
+                    'Platform': n.platform || 'N/A',
+                    'Vendor': n.vendor || 'N/A',
+                    'Product': n.product || 'N/A',
+                    'App Name': n.appName || 'N/A',
+                    'App Code Name': n.appCodeName || 'N/A'
+                },
+                '🔐 BROWSER CAPABILITIES': {
+                    'Cookies Enabled': bool(n.cookieEnabled),
+                    'Do Not Track': n.doNotTrack === '1' ? '⚠️ ON' : 'OFF',
+                    'PDF Viewer': bool(n.pdfViewerEnabled),
+                    'Java Enabled': n.javaEnabled ? bool(n.javaEnabled()) : 'N/A',
+                    'Plugins Count': n.plugins ? n.plugins.length : 0,
+                    'MIME Types': n.mimeTypes ? n.mimeTypes.length : 0
+                },
+                '🎨 DISPLAY PREFERENCES': {
+                    'Color Scheme': w.matchMedia && w.matchMedia('(prefers-color-scheme: dark)').matches ? '🌙 Dark' : '☀️ Light',
+                    'Reduced Motion': w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches ? '⚠️ Yes' : 'No',
+                    'Reduced Data': w.matchMedia && w.matchMedia('(prefers-reduced-data: reduce)').matches ? '⚠️ Yes' : 'No',
+                    'High Contrast': w.matchMedia && w.matchMedia('(prefers-contrast: high)').matches ? '⚠️ Yes' : 'No',
+                    'Forced Colors': w.matchMedia && w.matchMedia('(forced-colors: active)').matches ? '⚠️ Yes' : 'No',
+                    'Inverted Colors': w.matchMedia && w.matchMedia('(inverted-colors: inverted)').matches ? '⚠️ Yes' : 'No',
+                    'Hover Capability': w.matchMedia && w.matchMedia('(hover: hover)').matches ? 'Mouse/Trackpad' : 'Touch Only',
+                    'Pointer Type': w.matchMedia && w.matchMedia('(pointer: fine)').matches ? 'Fine (Mouse)' : (w.matchMedia && w.matchMedia('(pointer: coarse)').matches ? 'Coarse (Touch)' : 'Unknown'),
+                    'Standalone Mode': w.matchMedia && w.matchMedia('(display-mode: standalone)').matches ? '📱 PWA' : 'Browser'
+                },
+                '⚡ FEATURE SUPPORT': {
+                    'Web Workers': bool(!!w.Worker),
+                    'Service Worker': bool(!!n.serviceWorker),
+                    'WebAssembly': bool(typeof WebAssembly === 'object'),
+                    'WebGL': bool((function() { try { return !!document.createElement('canvas').getContext('webgl'); } catch(e) { return false; } })()),
+                    'WebGL 2': bool((function() { try { return !!document.createElement('canvas').getContext('webgl2'); } catch(e) { return false; } })()),
+                    'WebRTC': bool(!!w.RTCPeerConnection),
+                    'WebSocket': bool(!!w.WebSocket),
+                    'Touch Events': bool('ontouchstart' in w),
+                    'Pointer Events': bool(!!w.PointerEvent),
+                    'Canvas': bool(!!document.createElement('canvas').getContext)
+                },
+                '🔌 ADVANCED APIS': {
+                    'Media Devices': bool(!!n.mediaDevices),
+                    'Bluetooth': bool(!!n.bluetooth),
+                    'USB': bool(!!n.usb),
+                    'Serial': bool(!!n.serial),
+                    'HID (Gamepads)': bool(!!n.hid),
+                    'MIDI': bool(!!n.requestMIDIAccess),
+                    'WebXR (VR/AR)': bool(!!n.xr),
+                    'Share API': bool(!!n.share),
+                    'Clipboard': bool(!!(n.clipboard && n.clipboard.writeText)),
+                    'Credentials': bool(!!n.credentials),
+                    'Geolocation': bool(!!n.geolocation),
+                    'Notifications': bool(!!w.Notification),
+                    'Push API': bool(!!w.PushManager),
+                    'Payment Request': bool(!!w.PaymentRequest),
+                    'Speech Recognition': bool(!!(w.SpeechRecognition || w.webkitSpeechRecognition)),
+                    'Speech Synthesis': bool(!!w.speechSynthesis)
+                },
+                '📄 DOCUMENT INFO': {
+                    'Character Set': document.characterSet || 'N/A',
+                    'Compat Mode': document.compatMode || 'N/A',
+                    'Ready State': document.readyState || 'N/A',
+                    'Hidden': document.hidden ? 'Yes' : 'No',
+                    'Visibility': document.visibilityState || 'N/A'
+                },
+                '⏱️ PERFORMANCE': {
+                    'Page Load': perf.timing ? (perf.timing.loadEventEnd - perf.timing.navigationStart) + ' ms' : 'N/A',
+                    'DOM Ready': perf.timing ? (perf.timing.domContentLoadedEventEnd - perf.timing.navigationStart) + ' ms' : 'N/A',
+                    'DNS Lookup': perf.timing ? (perf.timing.domainLookupEnd - perf.timing.domainLookupStart) + ' ms' : 'N/A',
+                    'TCP Connect': perf.timing ? (perf.timing.connectEnd - perf.timing.connectStart) + ' ms' : 'N/A',
+                    'TTFB': perf.timing ? (perf.timing.responseStart - perf.timing.requestStart) + ' ms' : 'N/A'
+                },
+                '📍 SESSION': {
+                    'Page URL': location.href,
+                    'Referrer': document.referrer || '(direct)',
+                    'Domain': location.hostname,
+                    'Path': location.pathname,
+                    'Protocol': location.protocol,
+                    'Title': document.title,
+                    'History Depth': history.length + ' pages'
+                }
+            };
+        }
+        
+        // ============================================
+        // RENDER DISPLAY
+        // ============================================
+        function updateDisplay() {
+            var data = buildDisplayData();
+            var html = '';
+            var totalFields = 0;
+            var fingerprintCount = 0;
+            
+            for (var section in data) {
+                var isFingerprint = section.indexOf('FINGERPRINT') >= 0;
+                html += '<div class="section-title">' + section + '</div>';
+                html += '<div class="data-grid">';
+                for (var key in data[section]) {
+                    var val = data[section][key];
+                    var cls = 'data-value';
+                    if (key.indexOf('Hash') >= 0 || key.indexOf('Fingerprint') >= 0) { cls += ' hash'; fingerprintCount++; }
+                    if (val && String(val).indexOf('🤖') >= 0) cls += ' warning';
+                    if (val && String(val).indexOf('⚠️') >= 0) cls += ' warning';
+                    if (val && String(val).indexOf('detecting') >= 0) cls += ' muted loading';
+                    html += '<div class="data-item"><span class="data-label">' + key + '</span><span class="' + cls + '">' + val + '</span></div>';
+                    totalFields++;
+                }
+                html += '</div>';
+            }
+            
+            document.getElementById('collected-data').innerHTML = html;
+            document.getElementById('total-count').textContent = totalFields + '+';
+            document.getElementById('fingerprint-count').textContent = fingerprintCount;
+        }
+        
+        // Initial render
+        updateDisplay();
+        
+        // ============================================
+        // FIRE THE TRACKING PIXEL
+        // ============================================
+        setTimeout(function() {
+            var raw = {
+                // Screen
+                sw: s.width, sh: s.height, saw: s.availWidth, sah: s.availHeight,
+                cd: s.colorDepth, pd: w.devicePixelRatio || 1,
+                ori: (s.orientation && s.orientation.type) || '',
+                vw: w.innerWidth, vh: w.innerHeight,
+                ow: w.outerWidth, oh: w.outerHeight,
+                sx: w.screenX || w.screenLeft || 0,
+                sy: w.screenY || w.screenTop || 0,
+                
+                // Time
+                tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                tzo: d.getTimezoneOffset(), ts: d.getTime(),
+                
+                // Device
+                lang: n.language, langs: (n.languages || []).join(','),
+                plt: n.platform || '', vnd: n.vendor || '',
+                ua: n.userAgent || '',
+                cores: n.hardwareConcurrency || '', mem: n.deviceMemory || '',
+                touch: n.maxTouchPoints || 0,
+                product: n.product || '',
+                productSub: n.productSub || '',
+                appName: n.appName || '',
+                appVersion: n.appVersion || '',
+                appCodeName: n.appCodeName || '',
+                
+                // Capabilities
+                ck: n.cookieEnabled ? 1 : 0, dnt: n.doNotTrack || '',
+                pdf: n.pdfViewerEnabled ? 1 : 0, webdr: n.webdriver ? 1 : 0,
+                online: n.onLine ? 1 : 0,
+                java: n.javaEnabled ? (n.javaEnabled() ? 1 : 0) : 0,
+                plugins: n.plugins ? n.plugins.length : 0,
+                mimeTypes: n.mimeTypes ? n.mimeTypes.length : 0,
+                
+                // GPU
+                gpu: webglData.gpu, gpuVendor: webglData.gpuVendor,
+                webglExt: webglData.extensions,
+                
+                // Fingerprints
+                canvasFP: canvasFP, webglFP: webglData.fp, audioFP: audioFP,
+                mathFP: mathFP, errorFP: errorFP,
+                fonts: fonts.join(','),
+                voices: voices.slice(0, 10).join('|'),
+                gamepads: gamepads.join('|'),
+                
+                // Async data
+                localIp: asyncData.localIp || '',
+                storageQuota: asyncData.storageQuota || '',
+                storageUsed: asyncData.storageUsed || '',
+                batteryLevel: asyncData.batteryLevel || '',
+                batteryCharging: asyncData.batteryCharging || '',
+                audioInputs: asyncData.audioInputs || '',
+                videoInputs: asyncData.videoInputs || '',
+                
+                // Connection
+                conn: c.effectiveType || '', dl: c.downlink || '',
+                dlMax: c.downlinkMax || '',
+                rtt: c.rtt || '', save: c.saveData ? 1 : 0,
+                connType: c.type || '',
+                
+                // Session
+                url: location.href, ref: document.referrer, hist: history.length,
+                title: document.title, domain: location.hostname,
+                path: location.pathname, hash: location.hash,
+                protocol: location.protocol,
+                
+                // Performance
+                loadTime: perf.timing ? (perf.timing.loadEventEnd - perf.timing.navigationStart) : '',
+                domTime: perf.timing ? (perf.timing.domContentLoadedEventEnd - perf.timing.navigationStart) : '',
+                dnsTime: perf.timing ? (perf.timing.domainLookupEnd - perf.timing.domainLookupStart) : '',
+                tcpTime: perf.timing ? (perf.timing.connectEnd - perf.timing.connectStart) : '',
+                ttfb: perf.timing ? (perf.timing.responseStart - perf.timing.requestStart) : '',
+                
+                // Features
+                ww: !!w.Worker ? 1 : 0,
+                swk: !!n.serviceWorker ? 1 : 0,
+                wasm: typeof WebAssembly === 'object' ? 1 : 0,
+                webgl: (function() { try { return !!document.createElement('canvas').getContext('webgl'); } catch(e) { return false; } })() ? 1 : 0,
+                webgl2: (function() { try { return !!document.createElement('canvas').getContext('webgl2'); } catch(e) { return false; } })() ? 1 : 0,
+                canvas: !!document.createElement('canvas').getContext ? 1 : 0,
+                touchEvent: 'ontouchstart' in w ? 1 : 0,
+                pointerEvent: !!w.PointerEvent ? 1 : 0,
+                mediaDevices: !!n.mediaDevices ? 1 : 0,
+                bluetooth: !!n.bluetooth ? 1 : 0,
+                usb: !!n.usb ? 1 : 0,
+                serial: !!n.serial ? 1 : 0,
+                hid: !!n.hid ? 1 : 0,
+                midi: !!n.requestMIDIAccess ? 1 : 0,
+                xr: !!n.xr ? 1 : 0,
+                share: !!n.share ? 1 : 0,
+                clipboard: !!(n.clipboard && n.clipboard.writeText) ? 1 : 0,
+                credentials: !!n.credentials ? 1 : 0,
+                geolocation: !!n.geolocation ? 1 : 0,
+                notifications: !!w.Notification ? 1 : 0,
+                push: !!w.PushManager ? 1 : 0,
+                payment: !!w.PaymentRequest ? 1 : 0,
+                speechRecog: !!(w.SpeechRecognition || w.webkitSpeechRecognition) ? 1 : 0,
+                speechSynth: !!w.speechSynthesis ? 1 : 0,
+                
+                // Storage
+                ls: (function() { try { return !!w.localStorage; } catch(e) { return false; } })() ? 1 : 0,
+                ss: (function() { try { return !!w.sessionStorage; } catch(e) { return false; } })() ? 1 : 0,
+                idb: !!w.indexedDB ? 1 : 0,
+                caches: !!w.caches ? 1 : 0,
+                
+                // Preferences
+                darkMode: w.matchMedia && w.matchMedia('(prefers-color-scheme: dark)').matches ? 1 : 0,
+                lightMode: w.matchMedia && w.matchMedia('(prefers-color-scheme: light)').matches ? 1 : 0,
+                reducedMotion: w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0,
+                reducedData: w.matchMedia && w.matchMedia('(prefers-reduced-data: reduce)').matches ? 1 : 0,
+                contrast: w.matchMedia && w.matchMedia('(prefers-contrast: high)').matches ? 1 : 0,
+                forcedColors: w.matchMedia && w.matchMedia('(forced-colors: active)').matches ? 1 : 0,
+                invertedColors: w.matchMedia && w.matchMedia('(inverted-colors: inverted)').matches ? 1 : 0,
+                hover: w.matchMedia && w.matchMedia('(hover: hover)').matches ? 1 : 0,
+                pointer: w.matchMedia && w.matchMedia('(pointer: fine)').matches ? 'fine' : (w.matchMedia && w.matchMedia('(pointer: coarse)').matches ? 'coarse' : ''),
+                standalone: w.matchMedia && w.matchMedia('(display-mode: standalone)').matches ? 1 : 0,
+                
+                // Document
+                docCharset: document.characterSet || '',
+                docCompat: document.compatMode || '',
+                docReady: document.readyState || '',
+                docHidden: document.hidden ? 1 : 0,
+                docVisibility: document.visibilityState || '',
+                
+                tier: 5
+            };
+            
+            var params = [];
+            for (var k in raw) {
+                if (raw[k] !== '' && raw[k] !== null && raw[k] !== undefined) {
+                    params.push(k + '=' + encodeURIComponent(raw[k]));
+                }
+            }
+            new Image().src = '/12346/00009_SMART.GIF?' + params.join('&');
+        }, 150);
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+# SmartPiXL Tracking Server - Modern Edition
+
+A high-performance, modern ASP.NET Core tracking pixel server that captures 100+ data points from website visitors using a single `<script>` tag. No cookies required.
+
+## 🎯 Overview
+
+SmartPiXL is a complete rewrite of the legacy ASP.NET WebForms tracking pixel system, rebuilt for speed and maximum data collection using .NET 8 Minimal APIs.
+
+### Key Features
+
+- **One Line Integration** - Clients add a single `<script>` tag to their site
+- **100+ Data Points** - Captures screen, device, browser, fingerprints, preferences, and more
+- **No Cookies Required** - Works in a post-cookie world
+- **High Performance** - Fire-and-forget SQL inserts, compiled regex, zero-allocation patterns
+- **Tiered Collection** - 5 tiers from basic pixel to full fingerprinting
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- .NET 8 SDK
+- SQL Server (localhost with Windows Auth or configure connection string)
+- HTTPS required for full Client Hints support
+
+### Run the Server
+
+```bash
+cd TrackingPixel.Modern
+dotnet run
+```
+
+Server starts on:
+- HTTP: `http://localhost:5000`
+- HTTPS: `https://localhost:5001` (required for Client Hints)
+
+### Test It
+
+Visit: `https://localhost:5001/test`
+
+See all 100+ data points captured in real-time from YOUR browser.
+
+## 📦 Client Integration
+
+### Tier 5 (Maximum Data - Recommended)
+
+Add this single line to any webpage:
+
+```html
+<script src="https://your-domain.com/js/CLIENT_ID/CAMPAIGN_ID.js"></script>
+```
+
+That's it. The script handles everything automatically.
+
+### What Gets Captured
+
+| Category | Data Points |
+|----------|-------------|
+| **Screen** | Resolution, available space, viewport, window position, color depth, pixel ratio, orientation |
+| **Device** | CPU cores, RAM, GPU, GPU vendor, touch points, platform, vendor |
+| **Fingerprints** | Canvas hash, WebGL hash, Audio hash, Math fingerprint, Error fingerprint, Font list |
+| **Network** | WebRTC local IP, connection type/speed, RTT, data saver mode |
+| **Storage** | Storage quota/usage, battery level/charging, media devices count |
+| **Browser** | Cookies, DNT, PDF viewer, WebDriver (bot detection), plugins, MIME types |
+| **Features** | WebGL, WebAssembly, Service Workers, Bluetooth, USB, MIDI, WebXR, and 20+ more |
+| **Preferences** | Dark mode, reduced motion, high contrast, forced colors, hover/pointer type |
+| **Performance** | Page load time, DOM ready, DNS lookup, TCP connect, TTFB |
+| **Session** | URL, referrer, title, domain, path, history depth |
+
+## 🔐 Fingerprinting Techniques
+
+SmartPiXL uses multiple browser fingerprinting techniques:
+
+### Canvas Fingerprint
+Renders specific shapes and text, then hashes the pixel data. Different GPUs/drivers produce different results.
+
+### WebGL Fingerprint
+Collects 23+ WebGL parameters including max texture sizes, shader precision, and supported extensions.
+
+### Audio Fingerprint
+Uses OfflineAudioContext to create a fingerprint from the audio processing stack.
+
+### Font Detection
+Tests 42 common fonts by measuring text rendering differences.
+
+### Math Fingerprint
+JavaScript math operations have subtle floating-point differences across systems.
+
+### WebRTC Local IP
+Uses RTCPeerConnection to discover the user's local network IP address.
+
+## 🏗️ Architecture
+
+```
+TrackingPixel.Modern/
+├── Program.cs           # Single-file Minimal API application (~900 lines)
+├── wwwroot/
+│   └── test.html        # Live data collection demo
+├── SQL/
+│   ├── 01_InitialSchema.sql    # Base table and function
+│   └── 02_ExpandedSchema.sql   # All 100+ columns
+└── FINGERPRINTING_EXPLAINED.md # Technical documentation
+```
+
+### Performance Optimizations
+
+- **Fire-and-Forget SQL** - BlockingCollection with batched bulk inserts
+- **Compiled Regex** - Pre-compiled patterns for URL parsing
+- **DataTable Template Cloning** - Avoids column recreation per batch
+- **Const JS Template** - Pre-built JavaScript with `string.Format` placeholder
+- **stackalloc** - Stack allocation for small tier arrays
+- **CORS Preflight Handling** - Immediate OPTIONS responses
+
+## 🗄️ Database
+
+### Quick Setup
+
+```sql
+-- Create database
+CREATE DATABASE SmartPixl;
+GO
+
+-- Run schema scripts
+-- 1. SQL/01_InitialSchema.sql
+-- 2. SQL/02_ExpandedSchema.sql
+```
+
+### Query Captured Data
+
+```sql
+-- View all parsed data (no manual parsing needed!)
+SELECT * FROM vw_PiXL_Parsed 
+WHERE ReceivedAt > DATEADD(hour, -1, GETDATE())
+ORDER BY ReceivedAt DESC;
+
+-- Fingerprint uniqueness
+SELECT CanvasFingerprint, WebGLFingerprint, COUNT(*) as Hits
+FROM vw_PiXL_Parsed
+GROUP BY CanvasFingerprint, WebGLFingerprint
+ORDER BY Hits DESC;
+
+-- Bot detection
+SELECT * FROM vw_PiXL_Parsed
+WHERE WebDriverDetected = 1;
+```
+
+## 📊 Tiered Collection
+
+| Tier | Method | Data Points | Use Case |
+|------|--------|-------------|----------|
+| 1 | Image pixel | ~5 | Email opens |
+| 2 | Basic JS | ~15 | Minimal tracking |
+| 3 | Standard JS | ~35 | Standard analytics |
+| 4 | Enhanced JS | ~50 | Detailed analytics |
+| 5 | Maximum JS | 100+ | Full fingerprinting |
+
+## 🔧 Configuration
+
+### Connection String
+
+Edit in `Program.cs`:
+
+```csharp
+const string connectionString = 
+    "Server=localhost;Database=SmartPixl;Integrated Security=True;TrustServerCertificate=True";
+```
+
+### Ports
+
+```csharp
+builder.WebHost.UseUrls("http://*:5000", "https://*:5001");
+```
+
+## 📝 Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/{clientId}/{campaignId}_SMART.GIF` | Tracking pixel (receives data) |
+| `/js/{clientId}/{campaignId}.js` | Tier 5 JavaScript |
+| `/test` | Live demo page |
+| `/debug/headers` | Debug incoming headers |
+
+## 🛡️ Privacy & Compliance
+
+This tool collects extensive data. Ensure you:
+
+- Have proper consent mechanisms
+- Include tracking in privacy policies
+- Comply with GDPR, CCPA, and other regulations
+- Consider data minimization principles
+
+## 📜 License
+
+Proprietary - M1 Data & Analytics
+
+## 🤝 Support
+
+Internal use only. Contact the development team for support.
+
+---
+
+Built with ❤️ by M1 Data & Analytics
