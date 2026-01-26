@@ -1,0 +1,138 @@
+/*CSS for Smart Pixel by Subeesh for MMDC*/
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+body{
+	margin: 0 auto;
+	padding: 0;
+		font-family: 'Open Sans', sans-serif;
+		color: #164c7f;
+		font-weight: normal;
+}
+a{
+	color: inherit;
+}
+header{
+	width: 100%;
+	background-color: #69b7ff;
+	padding-top: 20px;
+	padding-bottom: 20px;
+	text-align: center;
+	position: fixed;
+	top: 0;
+	z-index: 999;
+}
+	h1{
+		font-size: 24px;
+		color: #223855;
+		font-weight: 300;
+		margin: 8px 2%;
+	}
+	header a{
+		display: inline-block;
+		z-index: 9999;
+		position: absolute;
+		left: 75%;
+		top: 40%;
+		color: #fff;
+		font-weight: bold;
+		text-decoration: none;
+
+	}
+ section{
+ 	width: 70%;
+ 	margin: 15% auto 0;
+ 	padding:2% 15%;
+ 	text-align: center;
+ }
+ .content{
+ 	width: 42%;
+ 	display: inline-block;
+ 	padding:18px 2%;
+ 	text-align: left;
+ }
+ 	p{
+ 		font-size: 16px;
+ 		font-weight: lighter;
+ 		margin: 0 0 30px 0;
+ 		text-align: left;
+ 	}
+ 	h2{
+ 		font-weight: bolder;
+ 		margin: 0;
+ 		font-size: 16px;
+ 		text-align: left;
+
+ 	}
+ 	h3{
+ 		font-weight: bolder;
+ 		margin: 0 0 20px;
+ 		font-size: 28px;
+ 		text-align: left;
+ 		font-family: 'Montserrat', sans-serif;
+
+ 	}
+ 	h4{
+ 		font-weight: bolder;
+ 		margin: 10px 0 10px;
+ 		font-size: 24px;
+ 		font-family: 'Montserrat', sans-serif;
+ 		color: #cbcbcb;
+
+ 	}
+ 	.content-full-width{
+ 	width: 90%;
+ 	display: inline-block;
+ 	padding:18px 2%;
+ }
+ 	.content-full-width img{
+ 		text-align: center !important;
+ 		margin: 0 auto;
+ 	}
+ 	.cntr-align{
+ 		text-align: center !important;
+ 	}
+
+ 	.brdr{
+ 		border-bottom: 2px solid #808080;
+ 	}
+ 	.do-not-sell-my-info{
+ 		background-color: #223855;
+ 		text-align: center;
+ 		margin-top: 0 !important;
+ 		padding-top: 1%;
+ 		padding-bottom: 1%;
+ 	}
+footer{
+	background-color: #164c7f;
+	width: 100%;
+	padding-top: 20px;
+	padding-bottom: 20px;
+	text-align: center;
+	font-size: 14px;
+	color: #fff;
+ 		font-family: 'Montserrat', sans-serif;
+}
+/*Media Queries Start Here*/
+
+	@media only screen and (max-width: 600px) {
+		header a{
+		top: 5%;
+
+	}
+	section {
+    width: 95%;
+    margin: 60% auto 0;
+    padding: 2% 2%;
+    text-align: center;
+}
+	.content{
+ 	width: 94%;
+ 	display: block;
+ 	padding:18px 2%;
+ 	text-align: left;
+ }
+ .content-full-width img{
+ 	width: 100%;
+ 	}
+
+}

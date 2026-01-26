@@ -1,0 +1,144 @@
+<%
+'Response.Write Server.MapPath(Request.ServerVariables("SCRIPT_NAME"))
+
+' Function GetJsonValue(json, key)
+'     Dim pattern, startPos, endPos, value
+'     pattern = """" & key & """:"
+'     startPos = InStr(json, pattern)
+'     If startPos > 0 Then
+'         startPos = startPos + Len(pattern)
+'         ' Check if it's a string value
+'         If Mid(json, startPos, 1) = """" Then
+'             startPos = startPos + 1
+'             endPos = InStr(startPos, json, """")
+'             value = Mid(json, startPos, endPos - startPos)
+'         Else
+'             ' It's a boolean or numeric
+'             endPos = InStr(startPos, json & ",", ",")
+'             value = Trim(Mid(json, startPos, endPos - startPos))
+'         End If
+'         GetJsonValue = value
+'     Else
+'         GetJsonValue = ""
+'     End If
+' End Function
+
+Dim reresponse, secretKey, postData, url, score, action
+reresponse = Request.Form("g-recaptcha-response")
+secretKey = "6LeT3D8fAAAAAG88NoiiE-DZoD8pX5FOLSSzJ45o"
+
+' Build POST data
+postData = "secret=" & Server.URLEncode(secretKey) & _
+           "&response=" & Server.URLEncode(reresponse) & _
+           "&remoteip=" & Request.ServerVariables("REMOTE_ADDR")
+
+url = "https://www.google.com/recaptcha/api/siteverify"
+
+' Send POST request
+Dim objXmlHttp
+Set objXmlHttp = Server.CreateObject("MSXML2.XMLHTTP.6.0")
+objXmlHttp.open "POST", url, False
+objXmlHttp.setRequestHeader "Content-Type", "application/x-www-form-urlencoded"
+objXmlHttp.send postData
+
+Dim ResponseString
+ResponseString = objXmlHttp.responseText
+Set objXmlHttp = Nothing
+
+' Optional: Extract score (basic method)
+Dim isSuccess, scorePos, actionPos
+isSuccess = InStr(ResponseString, """success"": true") > 0
+
+score = 0
+scorePos = InStr(ResponseString, """score"":")
+If scorePos > 0 Then
+    score = CDbl(Mid(ResponseString, scorePos + 8, 4)) ' crude but works
+End If
+
+' action = ""
+' actionPos = InStr(ResponseString, """action"":")
+' If actionPos > 0 Then
+'     action = LCase(Mid(ResponseString, actionPos + 10, InStr(actionPos + 10, ResponseString, """") - (actionPos + 10)))
+' End If
+
+score = 0
+scorePos = InStr(ResponseString, """score"":")
+If scorePos > 0 Then
+    score = CDbl(Mid(ResponseString, scorePos + 8, 4)) ' crude but works
+End If
+
+' action = ""
+' actionPos = InStr(responseString, """action"":")
+' If actionPos > 0 Then
+'    action = LCase(Mid(ResponseString, actionPos + 8, 4)) ' crude but works
+' End If
+
+action = ""
+actionPos = InStr(ResponseString, """action"":")
+If actionPos > 0 Then
+    action = LCase(Mid(ResponseString, actionPos + 11, 11 ))
+End If
+
+
+
+' Example usage:
+'Dim success, score, hostname, action
+
+' isSuccess   = GetJsonValue(responseStr, "success")
+' score     = GetJsonValue(responseStr, "score")
+' hostname  = GetJsonValue(responseStr, "hostname")
+' action    = GetJsonValue(responseStr, "action")
+
+Response.Write "Success: " & isSuccess & "<br>"
+Response.Write "Score: " & score & "<br>"
+Response.Write "Action: " & action & "<br>"
+
+'remove the next line
+' Response.Write(score)
+' Response.Write("=")
+' Response.Write(action)
+
+Response.Write "<pre>" & Server.HTMLEncode(ResponseString) & "</pre>"
+'Response.End
+
+' Final validation: success + score + action
+If isSuccess And score >= 0.5 And action = "unsubscribe" Then
+
+  ' ' Capture form fields
+  ' Dim firstname, lastname, address1, address2, city, state, zip, email, phone, ipaddress, requesttype, source
+  ' firstname = Replace(Request.Form("FName"), "'", "")
+  ' lastname  = Replace(Request.Form("LName"), "'", "")
+  ' address1  = Replace(Request.Form("Address"), "'", "")
+  ' address2  = Replace(Request.Form("Apartment"), "'", "")
+  ' city      = Replace(Request.Form("City"), "'", "")
+  ' state     = Replace(Request.Form("State"), "'", "")
+  ' zip       = Replace(Request.Form("Zip"), "'", "")
+  ' email     = Replace(Request.Form("EmailId"), "'", "")
+  ' phone     = Replace(Request.Form("Phone"), "'", "")
+  ' requesttype = Request.Form("RequestType")
+  ' source = "m1-data.com"
+  ' UserAgent = Request.ServerVariables("HTTP_USER_AGENT")
+  ' ipaddress = Request.ServerVariables("REMOTE_ADDR")
+
+  ' ' Connect to DB and execute stored procedure
+  ' Dim oConn, connStr, SQL
+  ' set oConn = Server.CreateObject("ADODB.connection")
+  ' connStr = "Driver={ODBC Driver 13 for SQL Server};" & _
+  '            "Server=127.0.0.1;" & _
+  '            "Database=SmartPiXL;" & _
+  '            "Uid=PiXL;" & _
+  '            "Pwd=9f2A$_!;"
+  ' oConn.Open connStr
+
+  ' SQL = "exec SP_PiXL_Unsub '" & firstname & "', '" & lastname & "', '" & address1 & "', '" & address2 & "', '" & city & "', '" & state & "', '" & zip & "', '" & email & "', '" & phone & "', '" & requesttype & "', '" & ipaddress & "', '" & source & "', '" & UserAgent & "'"
+  ' oConn.Execute SQL
+  ' oConn.Close
+  ' Set oConn = Nothing
+
+  Response.Write("Thank you for your request. We will unsubscribe you from our mailing lists.")
+
+Else
+  Response.Write("Robot verification failed. Please try again.")
+End If
+
+%>

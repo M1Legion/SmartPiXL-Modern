@@ -166,8 +166,8 @@ GO
 CREATE VIEW dbo.vw_PiXL_Parsed AS
 SELECT 
     p.Id,
-    p.ClientID,
-    p.CampaignID,
+    p.CompanyID,
+    p.PiXLID,
     p.TrackingCode,
     p.IPAddress,
     p.ReceivedAt,

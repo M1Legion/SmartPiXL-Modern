@@ -30,12 +30,12 @@ dotnet run
 ```
 
 Server starts on:
-- HTTP: `http://localhost:5000`
-- HTTPS: `https://localhost:5001` (required for Client Hints)
+- HTTP: `http://localhost:6000`
+- HTTPS: `https://localhost:6001` (required for Client Hints)
 
 ### Test It
 
-Visit: `https://localhost:5001/test`
+Visit: `https://localhost:6001/test`
 
 See all 100+ data points captured in real-time from YOUR browser.
 
