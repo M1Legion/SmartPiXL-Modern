@@ -429,6 +429,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_Canv
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_Domain')
     CREATE INDEX IX_PiXL_Materialized_Domain ON dbo.PiXL_Materialized(Domain) ON [SmartPixl];
 
+-- UNIQUE constraint to prevent duplicate materialization from concurrent runs
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PiXL_Materialized_SourceId')
+    CREATE UNIQUE INDEX UX_PiXL_Materialized_SourceId ON dbo.PiXL_Materialized(SourceId) ON [SmartPixl];
+
 PRINT 'Indexes created on SmartPixl filegroup.';
 GO
 
@@ -445,38 +449,61 @@ AS
 BEGIN
     SET NOCOUNT ON;
     
+    -- Prevent concurrent execution with application lock
+    DECLARE @LockResult INT;
+    EXEC @LockResult = sp_getapplock 
+        @Resource = 'MaterializePiXLData', 
+        @LockMode = 'Exclusive', 
+        @LockTimeout = 0;  -- Don't wait, just exit if locked
+    
+    IF @LockResult < 0
+    BEGIN
+        PRINT 'Another materialization is in progress. Exiting.';
+        SELECT 0 AS RecordsMaterialized, 'Skipped - concurrent execution' AS Status;
+        RETURN;
+    END
+    
     DECLARE @LastProcessedId INT;
     DECLARE @RowsInserted INT;
     
-    -- Get the last ID we processed
-    SELECT @LastProcessedId = ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Materialized;
+    BEGIN TRY
+        -- Get the last ID we processed
+        SELECT @LastProcessedId = ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Materialized;
+        
+        -- Insert new records from the view
+        INSERT INTO dbo.PiXL_Materialized (
+            SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            [Platform], CPUCores, DeviceMemory, GPU,
+            CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
+            Timezone, [Language],
+            PageURL, PageReferrer, Domain,
+            DarkModePreferred, CookiesEnabled, WebDriverDetected
+        )
+        SELECT 
+            Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            [Platform], CPUCores, DeviceMemory, GPU,
+            CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
+            Timezone, [Language],
+            PageURL, PageReferrer, Domain,
+            DarkModePreferred, CookiesEnabled, WebDriverDetected
+        FROM dbo.vw_PiXL_Parsed
+        WHERE Id > @LastProcessedId
+        ORDER BY Id;
+        
+        SET @RowsInserted = @@ROWCOUNT;
+        
+        PRINT 'Materialized ' + CAST(@RowsInserted AS VARCHAR(20)) + ' records.';
+        SELECT @RowsInserted AS RecordsMaterialized, 'Success' AS Status;
+    END TRY
+    BEGIN CATCH
+        SELECT 0 AS RecordsMaterialized, ERROR_MESSAGE() AS Status;
+        THROW;
+    END CATCH
     
-    -- Insert new records from the view
-    INSERT INTO dbo.PiXL_Materialized (
-        SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
-        ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-        [Platform], CPUCores, DeviceMemory, GPU,
-        CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-        Timezone, [Language],
-        PageURL, PageReferrer, Domain,
-        DarkModePreferred, CookiesEnabled, WebDriverDetected
-    )
-    SELECT 
-        Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
-        ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-        [Platform], CPUCores, DeviceMemory, GPU,
-        CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-        Timezone, [Language],
-        PageURL, PageReferrer, Domain,
-        DarkModePreferred, CookiesEnabled, WebDriverDetected
-    FROM dbo.vw_PiXL_Parsed
-    WHERE Id > @LastProcessedId
-    ORDER BY Id;
-    
-    SET @RowsInserted = @@ROWCOUNT;
-    
-    PRINT 'Materialized ' + CAST(@RowsInserted AS VARCHAR(20)) + ' records.';
-    SELECT @RowsInserted AS RecordsMaterialized;
+    -- Release the lock
+    EXEC sp_releaseapplock @Resource = 'MaterializePiXLData';
 END
 GO
 
