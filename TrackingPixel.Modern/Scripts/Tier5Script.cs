@@ -128,31 +128,34 @@ public static class Tier5Script
         // FONT DETECTION
         // ============================================
         data.fonts = (function() {
-            var testFonts = [
-                'Arial','Arial Black','Arial Narrow','Verdana','Times New Roman','Courier New',
-                'Georgia','Comic Sans MS','Impact','Trebuchet MS','Lucida Console','Tahoma',
-                'Palatino Linotype','Segoe UI','Calibri','Cambria','Consolas','Helvetica',
-                'Monaco','Menlo','Ubuntu','Roboto','Open Sans','Lato','Montserrat',
-                'Source Sans Pro','Droid Sans','Century Gothic','Futura','Gill Sans',
-                'Lucida Grande','Optima','Book Antiqua','Garamond','Bookman Old Style',
-                'MS Gothic','MS PGothic','MS Mincho','SimSun','SimHei','Microsoft YaHei',
-                'Malgun Gothic','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji'
-            ];
-            var detected = [];
-            var baseline = 'monospace';
-            var span = document.createElement('span');
-            span.style.cssText = 'position:absolute;left:-9999px;font-size:72px;';
-            span.innerHTML = 'mmmmmmmmmmlli';
-            document.body.appendChild(span);
-            span.style.fontFamily = baseline;
-            var baseWidth = span.offsetWidth;
-            var baseHeight = span.offsetHeight;
-            for (var i = 0; i < testFonts.length; i++) {
-                span.style.fontFamily = testFonts[i] + ',' + baseline;
-                if (span.offsetWidth !== baseWidth || span.offsetHeight !== baseHeight) detected.push(testFonts[i]);
-            }
-            document.body.removeChild(span);
-            return detected.join(',');
+            try {
+                if (!document.body) return '';
+                var testFonts = [
+                    'Arial','Arial Black','Arial Narrow','Verdana','Times New Roman','Courier New',
+                    'Georgia','Comic Sans MS','Impact','Trebuchet MS','Lucida Console','Tahoma',
+                    'Palatino Linotype','Segoe UI','Calibri','Cambria','Consolas','Helvetica',
+                    'Monaco','Menlo','Ubuntu','Roboto','Open Sans','Lato','Montserrat',
+                    'Source Sans Pro','Droid Sans','Century Gothic','Futura','Gill Sans',
+                    'Lucida Grande','Optima','Book Antiqua','Garamond','Bookman Old Style',
+                    'MS Gothic','MS PGothic','MS Mincho','SimSun','SimHei','Microsoft YaHei',
+                    'Malgun Gothic','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji'
+                ];
+                var detected = [];
+                var baseline = 'monospace';
+                var span = document.createElement('span');
+                span.style.cssText = 'position:absolute;left:-9999px;font-size:72px;';
+                span.innerHTML = 'mmmmmmmmmmlli';
+                document.body.appendChild(span);
+                span.style.fontFamily = baseline;
+                var baseWidth = span.offsetWidth;
+                var baseHeight = span.offsetHeight;
+                for (var i = 0; i < testFonts.length; i++) {
+                    span.style.fontFamily = testFonts[i] + ',' + baseline;
+                    if (span.offsetWidth !== baseWidth || span.offsetHeight !== baseHeight) detected.push(testFonts[i]);
+                }
+                document.body.removeChild(span);
+                return detected.join(',');
+            } catch(e) { return ''; }
         })();
         
         // ============================================
