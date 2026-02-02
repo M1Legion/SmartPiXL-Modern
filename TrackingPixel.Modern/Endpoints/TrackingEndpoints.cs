@@ -79,10 +79,15 @@ public static class TrackingEndpoints
         // ============================================================================
         // TIER 5: JAVASCRIPT FILE ENDPOINT
         // ============================================================================
-        app.MapGet("/js/{companyId}/{pixlId}.js", (HttpContext ctx, string companyId, string pixlId) =>
+        app.MapGet("/js/{companyId}/{pixlId}.js", (HttpContext ctx, string companyId, string pixlId, IConfiguration config) =>
         {
-            var pixelUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/{companyId}/{pixlId}_SMART.GIF";
-            var javascript = string.Format(Tier5Script.Template, pixelUrl);
+            var baseUrl = config["Tracking:BaseUrl"];
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+            }
+            var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
+            var javascript = Tier5Script.Template.Replace("{{PIXEL_URL}}", pixelUrl);
             
             ctx.Response.ContentType = "application/javascript; charset=utf-8";
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";

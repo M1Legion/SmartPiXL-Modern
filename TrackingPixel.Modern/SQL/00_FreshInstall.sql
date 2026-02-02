@@ -1,35 +1,27 @@
 -- =============================================
 -- SmartPiXL Database - FRESH INSTALL SCRIPT
 -- 
--- Run this on a new SQL Server to set up everything:
--- 1. Creates the SmartPixl database
--- 2. Creates the main PiXL_Test table (raw data storage)
--- 3. Creates GetQueryParam function (parses query strings)
--- 4. Creates vw_PiXL_Parsed view (extracts 90+ fingerprinting fields)
--- 5. Creates PiXL_Permanent table (materialized indexed data)
--- 6. Creates sp_MaterializePiXLData (scheduled data processing)
+-- PREREQUISITES: 
+--   Database 'SmartPixl' must exist with filegroup 'SmartPixl' on D:
+--
+-- This script creates:
+-- 1. PiXL_Test table (raw data storage) on SmartPixl filegroup
+-- 2. GetQueryParam function (parses query strings)
+-- 3. vw_PiXL_Parsed view (extracts 100+ fingerprinting fields)
+-- 4. PiXL_Materialized table (indexed data) on SmartPixl filegroup
+-- 5. sp_MaterializePiXLData (scheduled data processing)
+-- 6. Indexes on SmartPixl filegroup
 --
 -- Last Updated: 2026-01-26
 -- =============================================
 
 -- =============================================
--- STEP 1: CREATE DATABASE
+-- STEP 1: USE EXISTING DATABASE
 -- =============================================
-USE master;
-GO
-
-IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'SmartPixl')
-BEGIN
-    CREATE DATABASE SmartPixl;
-    PRINT 'Database SmartPixl created.';
-END
-ELSE
-BEGIN
-    PRINT 'Database SmartPixl already exists.';
-END
-GO
-
 USE SmartPixl;
+GO
+
+PRINT 'Using database SmartPixl with filegroup SmartPixl on D:';
 GO
 
 -- =============================================
@@ -46,14 +38,14 @@ BEGIN
         PiXLID          NVARCHAR(100)   NULL,
         IPAddress       NVARCHAR(50)    NULL,
         RequestPath     NVARCHAR(500)   NULL,
-        QueryString     NVARCHAR(MAX)   NULL,  -- Holds all 90+ fingerprinting params
+        QueryString     NVARCHAR(MAX)   NULL,  -- Holds all 100+ fingerprinting params
         HeadersJson     NVARCHAR(MAX)   NULL,  -- Raw HTTP headers as JSON
         UserAgent       NVARCHAR(2000)  NULL,
         Referer         NVARCHAR(2000)  NULL,
         ReceivedAt      DATETIME2       NOT NULL DEFAULT GETUTCDATE()
-    );
+    ) ON [SmartPixl];
     
-    PRINT 'Table PiXL_Test created.';
+    PRINT 'Table PiXL_Test created on SmartPixl filegroup.';
 END
 ELSE
 BEGIN
@@ -410,34 +402,34 @@ BEGIN
         
         -- Processing metadata
         MaterializedAt  DATETIME2 DEFAULT GETUTCDATE()
-    );
+    ) ON [SmartPixl];
     
-    PRINT 'Table PiXL_Materialized created.';
+    PRINT 'Table PiXL_Materialized created on SmartPixl filegroup.';
 END
 GO
 
 -- =============================================
--- STEP 6: CREATE INDEXES
+-- STEP 6: CREATE INDEXES (on SmartPixl filegroup)
 -- =============================================
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Test_ReceivedAt')
-    CREATE INDEX IX_PiXL_Test_ReceivedAt ON dbo.PiXL_Test(ReceivedAt DESC);
+    CREATE INDEX IX_PiXL_Test_ReceivedAt ON dbo.PiXL_Test(ReceivedAt DESC) ON [SmartPixl];
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Test_CompanyPixl')
-    CREATE INDEX IX_PiXL_Test_CompanyPixl ON dbo.PiXL_Test(CompanyID, PiXLID);
+    CREATE INDEX IX_PiXL_Test_CompanyPixl ON dbo.PiXL_Test(CompanyID, PiXLID) ON [SmartPixl];
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_ReceivedAt')
-    CREATE INDEX IX_PiXL_Materialized_ReceivedAt ON dbo.PiXL_Materialized(ReceivedAt DESC);
+    CREATE INDEX IX_PiXL_Materialized_ReceivedAt ON dbo.PiXL_Materialized(ReceivedAt DESC) ON [SmartPixl];
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_CompanyPixl')
-    CREATE INDEX IX_PiXL_Materialized_CompanyPixl ON dbo.PiXL_Materialized(CompanyID, PiXLID);
+    CREATE INDEX IX_PiXL_Materialized_CompanyPixl ON dbo.PiXL_Materialized(CompanyID, PiXLID) ON [SmartPixl];
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_CanvasFP')
-    CREATE INDEX IX_PiXL_Materialized_CanvasFP ON dbo.PiXL_Materialized(CanvasFingerprint);
+    CREATE INDEX IX_PiXL_Materialized_CanvasFP ON dbo.PiXL_Materialized(CanvasFingerprint) ON [SmartPixl];
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PiXL_Materialized_Domain')
-    CREATE INDEX IX_PiXL_Materialized_Domain ON dbo.PiXL_Materialized(Domain);
+    CREATE INDEX IX_PiXL_Materialized_Domain ON dbo.PiXL_Materialized(Domain) ON [SmartPixl];
 
-PRINT 'Indexes created.';
+PRINT 'Indexes created on SmartPixl filegroup.';
 GO
 
 -- =============================================

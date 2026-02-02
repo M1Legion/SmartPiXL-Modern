@@ -7,8 +7,8 @@ namespace TrackingPixel.Scripts;
 public static class Tier5Script
 {
     /// <summary>
-    /// JavaScript template with {0} placeholder for pixel URL.
-    /// Use string.Format(Template, pixelUrl) to generate per-request.
+    /// JavaScript template with {{PIXEL_URL}} placeholder for pixel URL.
+    /// Use Template.Replace("{{PIXEL_URL}}", pixelUrl) to generate per-request.
     /// </summary>
     public const string Template = @"
 // SmartPiXL Tracking Script - Tier 5 (Maximum Data Collection)
@@ -431,11 +431,11 @@ public static class Tier5Script
                     params.push(key + '=' + encodeURIComponent(data[key]));
                 }
             }
-            new Image().src = '{0}?' + params.join('&');
+            new Image().src = '{{PIXEL_URL}}?' + params.join('&');
         }, 100);
         
     } catch (e) {
-        new Image().src = '{0}?error=1&msg=' + encodeURIComponent(e.message);
+        new Image().src = '{{PIXEL_URL}}?error=1&msg=' + encodeURIComponent(e.message);
     }
 })();
 ";
