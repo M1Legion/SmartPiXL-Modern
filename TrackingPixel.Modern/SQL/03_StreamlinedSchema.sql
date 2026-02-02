@@ -360,6 +360,9 @@ BEGIN
     CREATE INDEX IX_PiXL_Permanent_CompanyPixl ON dbo.PiXL_Permanent(CompanyID, PiXLID);
     CREATE INDEX IX_PiXL_Permanent_CanvasFP ON dbo.PiXL_Permanent(CanvasFingerprint);
     CREATE INDEX IX_PiXL_Permanent_Domain ON dbo.PiXL_Permanent(Domain);
+    
+    -- UNIQUE constraint to prevent duplicate materialization from concurrent runs
+    CREATE UNIQUE INDEX UX_PiXL_Permanent_SourceId ON dbo.PiXL_Permanent(SourceId);
 END
 GO
 
@@ -376,34 +379,57 @@ AS
 BEGIN
     SET NOCOUNT ON;
     
+    -- Prevent concurrent execution with application lock
+    DECLARE @LockResult INT;
+    EXEC @LockResult = sp_getapplock 
+        @Resource = 'MaterializePiXLData', 
+        @LockMode = 'Exclusive', 
+        @LockTimeout = 0;  -- Don't wait, just exit if locked
+    
+    IF @LockResult < 0
+    BEGIN
+        PRINT 'Another materialization is in progress. Exiting.';
+        SELECT 0 AS RecordsMaterialized, 'Skipped - concurrent execution' AS Status;
+        RETURN;
+    END
+    
     DECLARE @LastProcessedId INT;
     
-    -- Get the last ID we processed
-    SELECT @LastProcessedId = ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Permanent;
+    BEGIN TRY
+        -- Get the last ID we processed
+        SELECT @LastProcessedId = ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Permanent;
+        
+        -- Insert new records from the view
+        INSERT INTO dbo.PiXL_Permanent (
+            SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            Platform, CPUCores, DeviceMemory, GPU,
+            CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
+            Timezone, Language,
+            PageURL, PageReferrer, Domain,
+            DarkModePreferred, CookiesEnabled, WebDriverDetected
+        )
+        SELECT 
+            Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            Platform, CPUCores, DeviceMemory, GPU,
+            CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
+            Timezone, Language,
+            PageURL, PageReferrer, Domain,
+            DarkModePreferred, CookiesEnabled, WebDriverDetected
+        FROM dbo.vw_PiXL_Parsed
+        WHERE Id > @LastProcessedId
+        ORDER BY Id;
+        
+        SELECT @@ROWCOUNT AS RecordsMaterialized, 'Success' AS Status;
+    END TRY
+    BEGIN CATCH
+        SELECT 0 AS RecordsMaterialized, ERROR_MESSAGE() AS Status;
+        THROW;
+    END CATCH
     
-    -- Insert new records from the view
-    INSERT INTO dbo.PiXL_Permanent (
-        SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
-        ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-        Platform, CPUCores, DeviceMemory, GPU,
-        CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-        Timezone, Language,
-        PageURL, PageReferrer, Domain,
-        DarkModePreferred, CookiesEnabled, WebDriverDetected
-    )
-    SELECT 
-        Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
-        ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-        Platform, CPUCores, DeviceMemory, GPU,
-        CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-        Timezone, Language,
-        PageURL, PageReferrer, Domain,
-        DarkModePreferred, CookiesEnabled, WebDriverDetected
-    FROM dbo.vw_PiXL_Parsed
-    WHERE Id > @LastProcessedId
-    ORDER BY Id;
-    
-    SELECT @@ROWCOUNT AS RecordsMaterialized;
+    -- Release the lock
+    EXEC sp_releaseapplock @Resource = 'MaterializePiXLData';
 END
 GO
 
@@ -411,5 +437,5 @@ PRINT 'Streamlined schema complete!';
 PRINT '- Base table updated with HeadersJson column';
 PRINT '- View vw_PiXL_Parsed parses all 90+ parameters from QueryString';
 PRINT '- Table PiXL_Permanent ready for materialized indexed data';
-PRINT '- Stored proc sp_MaterializePiXLData ready to run on schedule';
+PRINT '- Stored proc sp_MaterializePiXLData ready to run on schedule (with concurrency protection)';
 GO
