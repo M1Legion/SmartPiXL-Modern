@@ -11,6 +11,7 @@ publish/
 # NuGet
 *.nupkg
 packages/
+.nuget/
 
 # Logs
 *.log
