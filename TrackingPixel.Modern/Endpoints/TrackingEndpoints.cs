@@ -155,16 +155,31 @@ public static class TrackingEndpoints
         });
         
         // ============================================================================
-        // MAIN PIXEL ENDPOINT - Returns 1x1 GIF (catch-all, must be last)
+        // MAIN PIXEL ENDPOINT - Returns 1x1 GIF
+        // TIER 5 ONLY: Only records requests with actual tracking data (querystring)
+        // Ignores favicon.ico, robots.txt, and other browser chrome requests
         // ============================================================================
         app.MapGet("/{**path}", (HttpContext ctx) =>
         {
-            var trackingData = captureService.CaptureFromRequest(ctx.Request);
+            var path = ctx.Request.Path.ToString();
+            var queryString = ctx.Request.QueryString.ToString();
             
-            if (!writerService.TryQueue(trackingData))
+            // Only record if:
+            // 1. Path ends with _SMART.GIF (tracking pixel pattern)
+            // 2. Has a querystring with actual data (from JS)
+            var isTrackingPixel = path.EndsWith("_SMART.GIF", StringComparison.OrdinalIgnoreCase);
+            var hasTrackingData = queryString.Length > 10; // More than just "?"
+            
+            if (isTrackingPixel && hasTrackingData)
             {
-                logger.Warning("Queue full - dropped tracking request");
+                var trackingData = captureService.CaptureFromRequest(ctx.Request);
+                
+                if (!writerService.TryQueue(trackingData))
+                {
+                    logger.Warning("Queue full - dropped tracking request");
+                }
             }
+            // Else: silently return the GIF without recording (favicon, robots, etc.)
             
             ctx.Response.ContentType = "image/gif";
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -175,12 +190,22 @@ public static class TrackingEndpoints
         });
         
         // ============================================================================
-        // ALTERNATIVE 204 ENDPOINT - No body, slightly faster
+        // ALTERNATIVE 204 ENDPOINT - No body, slightly faster (TIER 5 ONLY)
         // ============================================================================
         app.MapGet("/pixel204/{**path}", (HttpContext ctx) =>
         {
-            var trackingData = captureService.CaptureFromRequest(ctx.Request);
-            writerService.TryQueue(trackingData);
+            var path = ctx.Request.Path.ToString();
+            var queryString = ctx.Request.QueryString.ToString();
+            
+            // Only record Tier 5 tracking data
+            var isTrackingPixel = path.Contains("_SMART.GIF", StringComparison.OrdinalIgnoreCase);
+            var hasTrackingData = queryString.Length > 10;
+            
+            if (isTrackingPixel && hasTrackingData)
+            {
+                var trackingData = captureService.CaptureFromRequest(ctx.Request);
+                writerService.TryQueue(trackingData);
+            }
             
             return Results.NoContent();
         });
