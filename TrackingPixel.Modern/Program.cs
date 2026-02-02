@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using TrackingPixel.Configuration;
 using TrackingPixel.Endpoints;
 using TrackingPixel.Services;
@@ -75,6 +76,18 @@ var app = builder.Build();
 // ============================================================================
 // MIDDLEWARE PIPELINE
 // ============================================================================
+
+// Forwarded Headers - MUST be first to populate RemoteIpAddress from X-Forwarded-For
+// Required when behind reverse proxy (IIS, nginx, Cloudflare)
+var forwardedOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    // Trust all proxies - required when behind multiple proxies or unknown proxy IPs
+    ForwardLimit = null
+};
+forwardedOptions.KnownNetworks.Clear(); // Trust any source network
+forwardedOptions.KnownProxies.Clear();  // Trust any proxy
+app.UseForwardedHeaders(forwardedOptions);
 
 // CORS - must be before endpoints
 app.UseCors(policy => policy

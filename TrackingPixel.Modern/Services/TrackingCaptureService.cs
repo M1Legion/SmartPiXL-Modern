@@ -47,18 +47,57 @@ public sealed partial class TrackingCaptureService
         // Build headers JSON directly - avoids Dictionary + JsonSerializer allocations
         var headersJson = BuildHeadersJson(headers);
         
+        // Extract client IP from proxy headers (priority order) with fallback to connection IP
+        var clientIp = ExtractClientIp(headers, connection);
+        
         return new TrackingData
         {
             ReceivedAt = DateTime.UtcNow,
             CompanyID = companyId,
             PiXLID = pixlId,
-            IPAddress = connection.RemoteIpAddress?.ToString(),
+            IPAddress = clientIp,
             RequestPath = path,
             QueryString = request.QueryString.ToString().TrimStart('?'),
             HeadersJson = headersJson,
             UserAgent = Truncate(headers.UserAgent.ToString(), 2000),
             Referer = Truncate(headers.Referer.ToString(), 2000)
         };
+    }
+    
+    /// <summary>
+    /// Extracts the real client IP from reverse proxy headers.
+    /// Priority: Cloudflare > True-Client-IP > X-Real-IP > X-Forwarded-For > Connection
+    /// </summary>
+    private static string? ExtractClientIp(IHeaderDictionary headers, ConnectionInfo connection)
+    {
+        // Cloudflare-specific header (most reliable when using CF)
+        var cfConnectingIp = headers["CF-Connecting-IP"].ToString();
+        if (!string.IsNullOrEmpty(cfConnectingIp))
+            return cfConnectingIp.Trim();
+        
+        // Akamai / some CDNs use True-Client-IP
+        var trueClientIp = headers["True-Client-IP"].ToString();
+        if (!string.IsNullOrEmpty(trueClientIp))
+            return trueClientIp.Trim();
+        
+        // nginx/HAProxy typically use X-Real-IP
+        var realIp = headers["X-Real-IP"].ToString();
+        if (!string.IsNullOrEmpty(realIp))
+            return realIp.Trim();
+        
+        // Standard proxy header - may contain chain: "client, proxy1, proxy2"
+        var forwardedFor = headers["X-Forwarded-For"].ToString();
+        if (!string.IsNullOrEmpty(forwardedFor))
+        {
+            // Take the first (leftmost) IP - that's the original client
+            var firstComma = forwardedFor.IndexOf(',');
+            return firstComma > 0 
+                ? forwardedFor[..firstComma].Trim() 
+                : forwardedFor.Trim();
+        }
+        
+        // Fallback to connection IP (direct connection or middleware-populated)
+        return connection.RemoteIpAddress?.ToString();
     }
     
     private static string BuildHeadersJson(IHeaderDictionary headers)
