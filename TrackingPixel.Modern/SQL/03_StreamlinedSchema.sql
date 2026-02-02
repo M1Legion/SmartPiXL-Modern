@@ -296,6 +296,63 @@ SELECT
     dbo.GetQueryParam(p.QueryString, 'docVisibility') AS DocVisibility,
     
     -- ============================================
+    -- BOT DETECTION (added 2026-02-02)
+    -- ============================================
+    dbo.GetQueryParam(p.QueryString, 'botSignals') AS BotSignals,           -- Comma-separated list of detected bot indicators
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'botScore') AS INT) AS BotScore,  -- Cumulative risk score (higher = more likely bot)
+    dbo.GetQueryParam(p.QueryString, 'evasionDetected') AS EvasionDetected, -- Privacy tools/spoofing detected
+    
+    -- scriptExecTime: Milliseconds from page load to script execution
+    -- KEY BOT INDICATOR:
+    --   < 10ms  = Almost certainly bot (instant DOM, no network stack)
+    --   10-50ms = Suspicious (could be fast cache hit)
+    --   50-200ms = Normal human range
+    --   > 200ms = Slow connection/device, definitely human
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'scriptExecTime') AS INT) AS ScriptExecTimeMs,
+    
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'canvasEvasion') AS BIT) AS CanvasEvasionDetected,
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'webglEvasion') AS BIT) AS WebGLEvasionDetected,
+    
+    -- ============================================
+    -- HIGH-ENTROPY CLIENT HINTS (added 2026-02-02)
+    -- ============================================
+    dbo.GetQueryParam(p.QueryString, 'uaArch') AS UA_Architecture,          -- x86, arm, etc.
+    dbo.GetQueryParam(p.QueryString, 'uaBitness') AS UA_Bitness,            -- 32 or 64
+    dbo.GetQueryParam(p.QueryString, 'uaModel') AS UA_Model,                -- Device model (mobile)
+    dbo.GetQueryParam(p.QueryString, 'uaPlatformVersion') AS UA_PlatformVersion, -- Full OS version
+    dbo.GetQueryParam(p.QueryString, 'uaFullVersion') AS UA_FullVersionList,-- Browser version details
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'uaWow64') AS BIT) AS UA_Wow64,
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'uaMobile') AS BIT) AS UA_Mobile,
+    dbo.GetQueryParam(p.QueryString, 'uaPlatform') AS UA_Platform,
+    dbo.GetQueryParam(p.QueryString, 'uaBrands') AS UA_Brands,
+    
+    -- ============================================
+    -- FIREFOX-SPECIFIC (added 2026-02-02)
+    -- ============================================
+    dbo.GetQueryParam(p.QueryString, 'oscpu') AS Firefox_OSCPU,
+    dbo.GetQueryParam(p.QueryString, 'buildID') AS Firefox_BuildID,
+    
+    -- ============================================
+    -- CHROME-SPECIFIC (added 2026-02-02)
+    -- ============================================
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'chromeObj') AS BIT) AS Chrome_ObjectPresent,
+    TRY_CAST(dbo.GetQueryParam(p.QueryString, 'chromeRuntime') AS BIT) AS Chrome_RuntimePresent,
+    dbo.GetQueryParam(p.QueryString, 'jsHeapLimit') AS Chrome_JSHeapLimit,
+    dbo.GetQueryParam(p.QueryString, 'jsHeapTotal') AS Chrome_JSHeapTotal,
+    dbo.GetQueryParam(p.QueryString, 'jsHeapUsed') AS Chrome_JSHeapUsed,
+    
+    -- ============================================
+    -- ADDITIONAL FINGERPRINTS (added 2026-02-02)
+    -- ============================================
+    dbo.GetQueryParam(p.QueryString, 'audioHash') AS AudioHash,             -- Full audio buffer hash
+    dbo.GetQueryParam(p.QueryString, 'pluginList') AS PluginListDetail,     -- Full plugin names/descriptions
+    dbo.GetQueryParam(p.QueryString, 'mimeList') AS MimeTypeList,           -- Full MIME type list
+    dbo.GetQueryParam(p.QueryString, 'tzLocale') AS TimezoneLocale,         -- Locale formatting details
+    dbo.GetQueryParam(p.QueryString, 'dateFormat') AS DateFormatSample,     -- How dates render
+    dbo.GetQueryParam(p.QueryString, 'numberFormat') AS NumberFormatSample, -- How numbers render
+    dbo.GetQueryParam(p.QueryString, 'cssFontVariant') AS CSSFontVariant,   -- CSS font feature support
+    
+    -- ============================================
     -- RAW DATA (for debugging/reprocessing)
     -- ============================================
     p.QueryString AS RawQueryString

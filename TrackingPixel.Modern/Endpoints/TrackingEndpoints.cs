@@ -19,8 +19,8 @@ public static class TrackingEndpoints
     // Pre-configured JSON options - avoid allocation per request
     private static readonly JsonSerializerOptions DebugJsonOptions = new() { WriteIndented = true };
     
-    // Cached test page path - resolved once at startup
-    private static string? _testPagePath;
+    // Cached static file paths - resolved once at startup
+    private static string? _wwwrootPath;
     
     /// <summary>
     /// Maps all tracking-related endpoints.
@@ -32,33 +32,92 @@ public static class TrackingEndpoints
         var writerService = app.Services.GetRequiredService<DatabaseWriterService>();
         var logger = app.Services.GetRequiredService<ITrackingLogger>();
         
-        // Resolve test page path once at startup
-        _testPagePath = ResolveTestPagePath();
+        // Resolve wwwroot path once at startup
+        _wwwrootPath = ResolveWwwrootPath();
         
         // ============================================================================
-        // DEBUG ENDPOINT - Shows all captured data
+        // LANDING PAGE - Simple logo page at root
+        // ============================================================================
+        app.MapGet("/", async (HttpContext ctx) =>
+        {
+            var indexPath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "index.html") : null;
+            if (indexPath != null && File.Exists(indexPath))
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.SendFileAsync(indexPath);
+            }
+            else
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.WriteAsync("<html><body><h1>SmartPiXL</h1></body></html>");
+            }
+        });
+        
+        // ============================================================================
+        // DEMO PAGE - Shows data collection in action
+        // ============================================================================
+        app.MapGet("/demo", async (HttpContext ctx) =>
+        {
+            var demoPath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "demo.html") : null;
+            if (demoPath != null && File.Exists(demoPath))
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.SendFileAsync(demoPath);
+            }
+            else
+            {
+                ctx.Response.StatusCode = 404;
+                await ctx.Response.WriteAsync("Demo page not found.");
+            }
+        });
+        
+        // ============================================================================
+        // STATIC IMAGES - Serve logo and other assets
+        // ============================================================================
+        app.MapGet("/images/{fileName}", async (HttpContext ctx, string fileName) =>
+        {
+            // Sanitize filename to prevent path traversal
+            if (fileName.Contains("..") || fileName.Contains("/") || fileName.Contains("\\"))
+            {
+                ctx.Response.StatusCode = 400;
+                return;
+            }
+            
+            var imagePath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "images", fileName) : null;
+            if (imagePath != null && File.Exists(imagePath))
+            {
+                var ext = Path.GetExtension(fileName).ToLowerInvariant();
+                ctx.Response.ContentType = ext switch
+                {
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    ".svg" => "image/svg+xml",
+                    ".ico" => "image/x-icon",
+                    ".webp" => "image/webp",
+                    _ => "application/octet-stream"
+                };
+                ctx.Response.Headers.CacheControl = "public, max-age=86400"; // Cache for 1 day
+                await ctx.Response.SendFileAsync(imagePath);
+            }
+            else
+            {
+                ctx.Response.StatusCode = 404;
+            }
+        });
+        
+        // ============================================================================
+        // INTERNAL TEST PAGE - Removed from public access
+        // This was at /test but is now only accessible locally via file
+        // ============================================================================
+        
+        // ============================================================================
+        // DEBUG ENDPOINT - Shows all captured data (consider restricting in production)
         // ============================================================================
         app.MapGet("/debug/headers", (HttpContext ctx) =>
         {
             var data = captureService.CaptureFromRequest(ctx.Request);
             return Results.Json(data, DebugJsonOptions);
-        });
-        
-        // ============================================================================
-        // TEST PAGE - Path resolved once at startup
-        // ============================================================================
-        app.MapGet("/test", async (HttpContext ctx) =>
-        {
-            if (_testPagePath != null)
-            {
-                ctx.Response.ContentType = "text/html; charset=utf-8";
-                await ctx.Response.SendFileAsync(_testPagePath);
-            }
-            else
-            {
-                ctx.Response.StatusCode = 404;
-                await ctx.Response.WriteAsync("Test page not found.");
-            }
         });
         
         // ============================================================================
@@ -96,7 +155,7 @@ public static class TrackingEndpoints
         });
         
         // ============================================================================
-        // MAIN PIXEL ENDPOINT - Returns 1x1 GIF
+        // MAIN PIXEL ENDPOINT - Returns 1x1 GIF (catch-all, must be last)
         // ============================================================================
         app.MapGet("/{**path}", (HttpContext ctx) =>
         {
@@ -128,14 +187,14 @@ public static class TrackingEndpoints
         
         return;
         
-        // Local function to resolve path once - static to avoid closure allocation
-        static string? ResolveTestPagePath()
+        // Local function to resolve wwwroot path once
+        static string? ResolveWwwrootPath()
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "wwwroot", "test.html");
-            if (File.Exists(path)) return path;
+            var path = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+            if (Directory.Exists(path)) return path;
             
-            path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "test.html");
-            return File.Exists(path) ? path : null;
+            path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            return Directory.Exists(path) ? path : null;
         }
     }
 }

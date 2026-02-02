@@ -23,9 +23,24 @@ public static class Tier5Script
         var data = {};
         
         // ============================================
+        // SHARED HASH FUNCTION (optimized - single allocation)
+        // ============================================
+        var hashStr = (function() {
+            var h = 0;
+            return function(str) {
+                h = 0;
+                for (var i = 0, len = str.length; i < len; i++) {
+                    h = ((h << 5) - h) + str.charCodeAt(i);
+                    h = h & h; // Convert to 32-bit integer
+                }
+                return Math.abs(h).toString(16);
+            };
+        })();
+        
+        // ============================================
         // CANVAS FINGERPRINT
         // ============================================
-        data.canvasFP = (function() {
+        var canvasResult = (function() {
             try {
                 var canvas = document.createElement('canvas');
                 canvas.width = 280; canvas.height = 60;
@@ -42,11 +57,30 @@ public static class Tier5Script
                 ctx.strokeStyle = 'rgb(120,186,176)';
                 ctx.arc(80, 30, 20, 0, Math.PI * 2);
                 ctx.stroke();
-                var hash = 0, str = canvas.toDataURL();
-                for (var i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
-                return Math.abs(hash).toString(16);
-            } catch(e) { return ''; }
+                var dataUrl = canvas.toDataURL();
+                var hash = hashStr(dataUrl);
+                
+                // Evasion detection: Check if canvas returns suspiciously uniform data
+                var imgData = ctx.getImageData(0, 0, 280, 60).data;
+                var variance = 0, sum = 0, samples = 100;
+                for (var i = 0; i < samples * 4; i += 4) {
+                    sum += imgData[i] + imgData[i+1] + imgData[i+2];
+                }
+                var mean = sum / (samples * 3);
+                for (var j = 0; j < samples * 4; j += 4) {
+                    var diff = ((imgData[j] + imgData[j+1] + imgData[j+2]) / 3) - mean;
+                    variance += diff * diff;
+                }
+                variance = variance / samples;
+                
+                // If variance is 0, canvas was likely blocked/spoofed
+                var evasion = (variance < 1 || dataUrl.length < 1000) ? 1 : 0;
+                
+                return { fp: hash, evasion: evasion };
+            } catch(e) { return { fp: '', evasion: 0 }; }
         })();
+        data.canvasFP = canvasResult.fp;
+        data.canvasEvasion = canvasResult.evasion;
         
         // ============================================
         // WEBGL FINGERPRINT
@@ -55,7 +89,7 @@ public static class Tier5Script
             try {
                 var canvas = document.createElement('canvas');
                 var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                if (!gl) return { fp: '', gpu: '', gpuVendor: '', params: '' };
+                if (!gl) return { fp: '', gpu: '', gpuVendor: '', params: '', evasion: 0 };
                 var ext = gl.getExtension('WEBGL_debug_renderer_info');
                 var params = [
                     gl.getParameter(gl.VERSION),
@@ -83,29 +117,41 @@ public static class Tier5Script
                     gl.getParameter(gl.STENCIL_BITS)
                 ];
                 var extensions = gl.getSupportedExtensions() || [];
-                var hash = 0, str = params.join('|') + extensions.join(',');
-                for (var i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
+                var str = params.join('|') + extensions.join(',');
+                
+                // Evasion detection: Check for suspiciously generic values
+                var gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+                var gpuVendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '';
+                var evasion = 0;
+                if (gpu && (gpu.indexOf('SwiftShader') > -1 || gpu.indexOf('llvmpipe') > -1 || gpu === 'Mesa' || gpu === 'Disabled')) {
+                    evasion = 1; // Software renderer often = headless/spoofed
+                }
+                
                 return {
-                    fp: Math.abs(hash).toString(16),
-                    gpu: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '',
-                    gpuVendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '',
+                    fp: hashStr(str),
+                    gpu: gpu,
+                    gpuVendor: gpuVendor,
                     params: params.slice(0, 5).join('|'),
-                    extensions: extensions.length
+                    extensions: extensions.length,
+                    evasion: evasion
                 };
-            } catch(e) { return { fp: '', gpu: '', gpuVendor: '', params: '', extensions: 0 }; }
+            } catch(e) { return { fp: '', gpu: '', gpuVendor: '', params: '', extensions: 0, evasion: 0 }; }
         })();
         data.webglFP = webglData.fp;
         data.gpu = webglData.gpu;
         data.gpuVendor = webglData.gpuVendor;
         data.webglParams = webglData.params;
         data.webglExt = webglData.extensions;
+        data.webglEvasion = webglData.evasion;
         
         // ============================================
-        // AUDIO FINGERPRINT (OfflineAudioContext)
+        // AUDIO FINGERPRINT (OfflineAudioContext) - FIXED: Now hashes actual buffer
         // ============================================
-        data.audioFP = (function() {
+        (function() {
             try {
-                var ctx = new (w.OfflineAudioContext || w.webkitOfflineAudioContext)(1, 44100, 44100);
+                var AudioContext = w.OfflineAudioContext || w.webkitOfflineAudioContext;
+                if (!AudioContext) return;
+                var ctx = new AudioContext(1, 44100, 44100);
                 var osc = ctx.createOscillator();
                 var comp = ctx.createDynamicsCompressor();
                 osc.type = 'triangle';
@@ -118,10 +164,25 @@ public static class Tier5Script
                 osc.connect(comp);
                 comp.connect(ctx.destination);
                 osc.start(0);
-                ctx.startRendering();
-                var hash = ctx.length.toString();
-                return hash;
-            } catch(e) { return ''; }
+                ctx.startRendering().then(function(buffer) {
+                    var channelData = buffer.getChannelData(0);
+                    // Sum absolute values from samples 4500-5000 for unique fingerprint
+                    var sum = 0;
+                    for (var i = 4500; i < 5000; i++) {
+                        sum += Math.abs(channelData[i]);
+                    }
+                    data.audioFP = sum.toFixed(6);
+                    
+                    // Additional hash of full sample for extra entropy
+                    var sampleStr = '';
+                    for (var j = 0; j < channelData.length; j += 100) {
+                        sampleStr += channelData[j].toFixed(4);
+                    }
+                    data.audioHash = hashStr(sampleStr);
+                }).catch(function() {
+                    data.audioFP = 'blocked';
+                });
+            } catch(e) { data.audioFP = ''; }
         })();
         
         // ============================================
@@ -276,6 +337,39 @@ public static class Tier5Script
         data.langs = (n.languages || []).join(',');
         
         // ============================================
+        // TIMEZONE LOCALE FORMATTING (High Entropy)
+        // ============================================
+        data.tzLocale = (function() {
+            try {
+                var opts = Intl.DateTimeFormat().resolvedOptions();
+                return [
+                    opts.locale,
+                    opts.calendar,
+                    opts.numberingSystem,
+                    opts.hourCycle
+                ].filter(Boolean).join('|');
+            } catch(e) { return ''; }
+        })();
+        data.dateFormat = (function() {
+            try {
+                return new Intl.DateTimeFormat().format(new Date(2024, 0, 15));
+            } catch(e) { return ''; }
+        })();
+        data.numberFormat = (function() {
+            try {
+                return new Intl.NumberFormat().format(1234567.89);
+            } catch(e) { return ''; }
+        })();
+        data.relativeTime = (function() {
+            try {
+                if (Intl.RelativeTimeFormat) {
+                    return new Intl.RelativeTimeFormat().format(-1, 'day');
+                }
+            } catch(e) {}
+            return '';
+        })();
+        
+        // ============================================
         // DEVICE & BROWSER
         // ============================================
         data.plt = n.platform || '';
@@ -287,6 +381,89 @@ public static class Tier5Script
         data.product = n.product || '';
         data.productSub = n.productSub || '';
         data.vendorSub = n.vendorSub || '';
+        
+        // ============================================
+        // FIREFOX-SPECIFIC SIGNALS
+        // ============================================
+        data.oscpu = n.oscpu || '';  // Firefox only
+        data.buildID = n.buildID || '';  // Firefox only (version fingerprint)
+        
+        // ============================================
+        // CHROME-SPECIFIC SIGNALS
+        // ============================================
+        data.chromeObj = w.chrome ? 1 : 0;
+        data.chromeRuntime = (w.chrome && w.chrome.runtime) ? 1 : 0;
+        
+        // Performance.memory (Chrome only - heap size fingerprint)
+        if (perf.memory) {
+            data.jsHeapLimit = perf.memory.jsHeapSizeLimit || '';
+            data.jsHeapTotal = perf.memory.totalJSHeapSize || '';
+            data.jsHeapUsed = perf.memory.usedJSHeapSize || '';
+        }
+        
+        // ============================================
+        // HIGH-ENTROPY CLIENT HINTS (async)
+        // ============================================
+        (function() {
+            try {
+                if (n.userAgentData && n.userAgentData.getHighEntropyValues) {
+                    n.userAgentData.getHighEntropyValues([
+                        'architecture', 'bitness', 'model', 'platformVersion',
+                        'fullVersionList', 'wow64', 'formFactor'
+                    ]).then(function(ua) {
+                        data.uaArch = ua.architecture || '';
+                        data.uaBitness = ua.bitness || '';
+                        data.uaModel = ua.model || '';
+                        data.uaPlatformVersion = ua.platformVersion || '';
+                        data.uaWow64 = ua.wow64 ? 1 : 0;
+                        data.uaFormFactor = (ua.formFactor || []).join(',');
+                        if (ua.fullVersionList) {
+                            data.uaFullVersion = ua.fullVersionList.map(function(b) {
+                                return b.brand + '/' + b.version;
+                            }).join('|');
+                        }
+                    }).catch(function() {});
+                }
+            } catch(e) {}
+        })();
+        
+        // Low-entropy client hints (sync)
+        if (n.userAgentData) {
+            data.uaMobile = n.userAgentData.mobile ? 1 : 0;
+            data.uaPlatform = n.userAgentData.platform || '';
+            data.uaBrands = (n.userAgentData.brands || []).map(function(b) {
+                return b.brand + '/' + b.version;
+            }).join('|');
+        }
+        
+        // ============================================
+        // DETAILED PLUGIN ENUMERATION
+        // ============================================
+        data.pluginList = (function() {
+            try {
+                if (!n.plugins || n.plugins.length === 0) return '';
+                var plugs = [];
+                for (var i = 0; i < Math.min(n.plugins.length, 20); i++) {
+                    var p = n.plugins[i];
+                    if (p && p.name) {
+                        plugs.push(p.name + '::' + (p.filename || '') + '::' + (p.description || '').substring(0, 50));
+                    }
+                }
+                return plugs.join('|');
+            } catch(e) { return ''; }
+        })();
+        
+        data.mimeList = (function() {
+            try {
+                if (!n.mimeTypes || n.mimeTypes.length === 0) return '';
+                var mimes = [];
+                for (var i = 0; i < Math.min(n.mimeTypes.length, 30); i++) {
+                    var m = n.mimeTypes[i];
+                    if (m && m.type) mimes.push(m.type);
+                }
+                return mimes.join(',');
+            } catch(e) { return ''; }
+        })();
         data.appName = n.appName || '';
         data.appVersion = n.appVersion || '';
         data.appCodeName = n.appCodeName || '';
@@ -302,6 +479,265 @@ public static class Tier5Script
         data.java = n.javaEnabled ? (n.javaEnabled() ? 1 : 0) : 0;
         data.plugins = n.plugins ? n.plugins.length : 0;
         data.mimeTypes = n.mimeTypes ? n.mimeTypes.length : 0;
+        
+        // ============================================
+        // BOT DETECTION (Comprehensive)
+        // ============================================
+        var botSignals = (function() {
+            var signals = [];
+            var score = 0;
+            
+            // 1. WebDriver detection (most common)
+            if (n.webdriver) { signals.push('webdriver'); score += 10; }
+            
+            // 2. Headless Chrome detection
+            if (!w.chrome && /Chrome/.test(n.userAgent)) {
+                signals.push('headless-no-chrome-obj');
+                score += 8;
+            }
+            
+            // 3. PhantomJS detection
+            if (w._phantom || w.phantom || w.callPhantom) {
+                signals.push('phantomjs');
+                score += 10;
+            }
+            
+            // 4. Nightmare.js detection
+            if (w.__nightmare) {
+                signals.push('nightmare');
+                score += 10;
+            }
+            
+            // 5. Selenium detection
+            if (w.document.__selenium_unwrapped || w.document.__webdriver_evaluate ||
+                w.document.__driver_evaluate || w.document.__webdriver_unwrapped ||
+                w.document.__fxdriver_evaluate || w.document.__driver_unwrapped) {
+                signals.push('selenium');
+                score += 10;
+            }
+            
+            // 6. Puppeteer/Playwright detection
+            if (n.languages && n.languages.length === 0) {
+                signals.push('empty-languages');
+                score += 5;
+            }
+            
+            // 7. Chrome DevTools Protocol (CDP) detection
+            if (w.cdc_adoQpoasnfa76pfcZLmcfl_Array ||
+                w.cdc_adoQpoasnfa76pfcZLmcfl_Promise ||
+                w.cdc_adoQpoasnfa76pfcZLmcfl_Symbol) {
+                signals.push('cdp');
+                score += 10;
+            }
+            
+            // 8. Permission inconsistencies (bots often have weird permission states)
+            try {
+                if (n.permissions) {
+                    n.permissions.query({name: 'notifications'}).then(function(p) {
+                        if (p.state === 'denied' && Notification && Notification.permission === 'default') {
+                            signals.push('perm-inconsistent');
+                            data.botPermInconsistent = 1;
+                        }
+                    }).catch(function(){});
+                }
+            } catch(e) {}
+            
+            // 9. Plugin/mimeType inconsistencies
+            if (n.plugins && n.plugins.length === 0 && n.mimeTypes && n.mimeTypes.length > 0) {
+                signals.push('plugin-mime-mismatch');
+                score += 3;
+            }
+            
+            // 10. Suspicious screen dimensions
+            if (s.width === 0 || s.height === 0 || s.availHeight === 0) {
+                signals.push('zero-screen');
+                score += 8;
+            }
+            
+            // 11. No browser plugins (very rare for real users)
+            if ((!n.plugins || n.plugins.length === 0) && !/Firefox/.test(n.userAgent)) {
+                signals.push('no-plugins');
+                score += 2;
+            }
+            
+            // 12. Automation-specific properties
+            if (w.domAutomation || w.domAutomationController) {
+                signals.push('dom-automation');
+                score += 10;
+            }
+            
+            // 13. Inconsistent outerWidth/innerWidth (headless often has issues)
+            if (w.outerWidth === 0 && w.innerWidth > 0) {
+                signals.push('outer-zero');
+                score += 5;
+            }
+            
+            // 14. Check for automation flags in navigator
+            for (var key in n) {
+                if (/webdriver|selenium|puppeteer|playwright/i.test(key)) {
+                    signals.push('nav-' + key);
+                    score += 10;
+                }
+            }
+            
+            // 15. Function.toString tampering (bots often patch native functions)
+            try {
+                var fnStr = Function.prototype.toString.call(n.permissions.query);
+                if (fnStr.indexOf('[native code]') === -1) {
+                    signals.push('fn-tampered');
+                    score += 5;
+                }
+            } catch(e) {}
+            
+            // ============================================
+            // PLAYWRIGHT-SPECIFIC DETECTION
+            // ============================================
+            
+            // 16. Playwright injects __playwright into window in some modes
+            if (w.__playwright || w.__pw_manual) {
+                signals.push('playwright-global');
+                score += 10;
+            }
+            
+            // 17. Playwright default viewport sizes (common defaults)
+            // 1280x720 is Playwright's default, 800x600 is also common for headless
+            if ((w.innerWidth === 1280 && w.innerHeight === 720) ||
+                (w.innerWidth === 800 && w.innerHeight === 600)) {
+                signals.push('default-viewport');
+                score += 2; // Low score - could be legitimate
+            }
+            
+            // 18. Headless detection via missing plugins in Chromium
+            if (/HeadlessChrome/.test(n.userAgent)) {
+                signals.push('headless-ua');
+                score += 10;
+            }
+            
+            // 19. Notification permission in headless is always 'denied'
+            // but Notification.permission might report 'default' - inconsistency
+            try {
+                if (w.Notification && Notification.permission === 'denied' && 
+                    n.permissions) {
+                    // Already checked above, but Playwright specifically has this issue
+                }
+            } catch(e) {}
+            
+            // 20. Chrome runtime inconsistency (Playwright/Puppeteer headless)
+            if (w.chrome && !w.chrome.runtime) {
+                signals.push('chrome-no-runtime');
+                score += 3;
+            }
+            
+            // 21. Automated browsers often have identical screen and viewport
+            if (s.width === w.outerWidth && s.height === w.outerHeight && s.availHeight === s.height) {
+                signals.push('fullscreen-match');
+                score += 2;
+            }
+            
+            // 22. Missing connection info (common in headless)
+            if (!n.connection && /Chrome/.test(n.userAgent)) {
+                signals.push('no-connection-api');
+                score += 3;
+            }
+            
+            // 23. Script Execution Time (BOT DETECTION - HIGH VALUE)
+            // =========================================================
+            // scriptExecTime = milliseconds from page load to this point in script execution
+            // 
+            // INTERPRETATION:
+            //   < 10ms  : Almost certainly a bot (instant DOM ready, no network latency)
+            //   10-50ms : Suspicious, could be very fast connection + SSD + cached
+            //   50-200ms: Normal range for real users
+            //   > 200ms : Slow connection/device, definitely human
+            //
+            // WHY IT WORKS:
+            //   Real browsers: DNS lookup + TCP + TLS + HTML parse + JS load + execute
+            //   Bots: DOM is pre-constructed or instant, no real network stack
+            //
+            // ANALYSIS: Group by scriptExecTime in SQL to find bot clusters
+            // =========================================================
+            data.scriptExecTime = Date.now() - d.getTime();
+            
+            // 24. Check if eval is native (some bots override it)
+            try {
+                if (eval.toString().indexOf('[native code]') === -1) {
+                    signals.push('eval-tampered');
+                    score += 5;
+                }
+            } catch(e) {}
+            
+            // 25. Check for Playwright's browser context fingerprint override
+            // Playwright can set a specific fingerprint, but the override pattern is detectable
+            try {
+                var descGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+                if (descGetter && descGetter.get && descGetter.get.toString().indexOf('[native code]') === -1) {
+                    signals.push('webdriver-getter-override');
+                    score += 8;
+                }
+            } catch(e) {}
+            
+            return { signals: signals.join(','), score: score };
+        })();
+        
+        data.botSignals = botSignals.signals;
+        data.botScore = botSignals.score;
+        
+        // ============================================
+        // PRIVACY/EVASION TOOL DETECTION
+        // ============================================
+        var evasionResult = (function() {
+            var detected = [];
+            
+            // 1. Tor Browser (standardized values)
+            if (s.width === 1000 && s.height === 1000) {
+                detected.push('tor-screen');
+            }
+            if (n.platform === 'Win32' && s.colorDepth === 24 && !w.chrome) {
+                // Tor on Windows has specific fingerprint
+                detected.push('tor-likely');
+            }
+            
+            // 2. Brave Browser (randomizes fingerprints)
+            if (n.brave && typeof n.brave.isBrave === 'function') {
+                detected.push('brave');
+            }
+            
+            // 3. Privacy Badger / uBlock patterns
+            // These often block WebRTC
+            if (typeof RTCPeerConnection === 'undefined') {
+                detected.push('webrtc-blocked');
+            }
+            
+            // 4. Canvas Blocker extensions (already in canvasEvasion)
+            
+            // 5. User Agent spoofing detection
+            var platform = n.platform.toLowerCase();
+            var ua = n.userAgent.toLowerCase();
+            if ((platform.indexOf('win') > -1 && ua.indexOf('mac') > -1) ||
+                (platform.indexOf('mac') > -1 && ua.indexOf('windows') > -1) ||
+                (platform.indexOf('linux') > -1 && ua.indexOf('windows') > -1 && ua.indexOf('android') === -1)) {
+                detected.push('ua-platform-mismatch');
+            }
+            
+            // 6. Screen resolution vs. User Agent mismatch (mobile UA on desktop resolution)
+            if (/Mobile|Android|iPhone/.test(n.userAgent) && s.width > 1024) {
+                detected.push('mobile-ua-desktop-screen');
+            }
+            
+            // 7. Touch capability mismatch
+            if (n.maxTouchPoints > 0 && !/Mobile|Android|iPhone|iPad|Touch/.test(n.userAgent) && s.width > 1024) {
+                detected.push('touch-mismatch');
+            }
+            
+            // 8. NoScript detection - check if key APIs are undefined
+            if (typeof w.Worker === 'undefined' && typeof w.fetch !== 'undefined') {
+                detected.push('partial-js-block');
+            }
+            
+            return detected.join(',');
+        })();
+        
+        data.evasionDetected = evasionResult;
         
         // ============================================
         // CONNECTION
@@ -411,6 +847,39 @@ public static class Tier5Script
                 m.sqrt(2),
                 m.pow(2, 53)
             ].map(function(x) { return x.toString().slice(0, 10); }).join(',');
+        })();
+        
+        // ============================================
+        // CSS FONT-VARIANT FINGERPRINT
+        // ============================================
+        data.cssFontVariant = (function() {
+            try {
+                var el = document.createElement('span');
+                el.style.cssText = 'position:absolute;left:-9999px;';
+                el.innerHTML = 'Test';
+                document.body.appendChild(el);
+                
+                var variants = [];
+                var testProps = [
+                    'font-variant-ligatures',
+                    'font-variant-caps', 
+                    'font-variant-numeric',
+                    'font-variant-east-asian',
+                    'font-feature-settings',
+                    'font-kerning'
+                ];
+                
+                for (var i = 0; i < testProps.length; i++) {
+                    var prop = testProps[i];
+                    var camelProp = prop.replace(/-([a-z])/g, function(m, c) { return c.toUpperCase(); });
+                    if (el.style[camelProp] !== undefined) {
+                        variants.push(prop.charAt(0));
+                    }
+                }
+                
+                document.body.removeChild(el);
+                return variants.join('');
+            } catch(e) { return ''; }
         })();
         
         // ============================================
