@@ -9,12 +9,11 @@ namespace TrackingPixel.Services;
 /// Captures tracking data from HTTP requests.
 /// Stateless service - allocates minimally per request.
 /// </summary>
-public sealed class TrackingCaptureService
+public sealed partial class TrackingCaptureService
 {
-    // Pre-compiled regex for path parsing
-    private static readonly Regex PathParseRegex = new(
-        @"^/?(?<client>[^/]+)/(?<campaign>[^_]+)",
-        RegexOptions.Compiled);
+    // Source-generated regex for path parsing - AOT-friendly, zero-allocation matching
+    [GeneratedRegex(@"^/?(?<client>[^/]+)/(?<campaign>[^_]+)")]
+    private static partial Regex PathParseRegex();
     
     // Static header keys - no allocation per request
     private static readonly string[] HeaderKeysToCapture =
@@ -38,7 +37,7 @@ public sealed class TrackingCaptureService
         // Parse CompanyID and PiXLID from path: /12345/1_SMART.GIF
         string? companyId = null;
         string? pixlId = null;
-        var pathMatch = PathParseRegex.Match(path);
+        var pathMatch = PathParseRegex().Match(path);
         if (pathMatch.Success)
         {
             companyId = pathMatch.Groups["client"].Value;
