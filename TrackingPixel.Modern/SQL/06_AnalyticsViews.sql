@@ -756,6 +756,170 @@ GROUP BY
     dbo.GetQueryParam(QueryString, 'audioHash');
 GO
 
+-- =============================================
+-- Network/Household Analysis
+-- How many distinct devices behind the same external IP?
+-- =============================================
+IF OBJECT_ID('dbo.vw_PiXL_NetworkHouseholds', 'V') IS NOT NULL
+    DROP VIEW dbo.vw_PiXL_NetworkHouseholds;
+GO
+
+CREATE VIEW dbo.vw_PiXL_NetworkHouseholds AS
+SELECT 
+    IPAddress,
+    
+    -- Device counts
+    COUNT(DISTINCT dbo.GetQueryParam(QueryString, 'canvasFP')) AS UniqueCanvasFingerprints,
+    COUNT(DISTINCT dbo.GetQueryParam(QueryString, 'audioHash')) AS UniqueAudioFingerprints,
+    COUNT(DISTINCT CONCAT(
+        dbo.GetQueryParam(QueryString, 'canvasFP'), '-',
+        dbo.GetQueryParam(QueryString, 'webglFP'), '-',
+        dbo.GetQueryParam(QueryString, 'audioHash')
+    )) AS UniqueCompositeFingerprints,
+    
+    -- Browser/OS diversity
+    COUNT(DISTINCT CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%OPR%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%Opera%' THEN 'Opera'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Edg%' THEN 'Edge'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Firefox%' THEN 'Firefox'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Safari%' AND dbo.GetQueryParam(QueryString, 'ua') NOT LIKE '%Chrome%' THEN 'Safari'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Chrome%' THEN 'Chrome'
+        ELSE 'Other'
+    END) AS UniqueBrowsers,
+    
+    -- Screen diversity  
+    COUNT(DISTINCT CONCAT(
+        dbo.GetQueryParam(QueryString, 'sw'), 'x',
+        dbo.GetQueryParam(QueryString, 'sh')
+    )) AS UniqueScreenSizes,
+    
+    -- Hardware diversity
+    COUNT(DISTINCT dbo.GetQueryParam(QueryString, 'gpu')) AS UniqueGPUs,
+    COUNT(DISTINCT dbo.GetQueryParam(QueryString, 'cores')) AS UniqueCPUCoreConfigs,
+    
+    -- Activity
+    COUNT(*) AS TotalHits,
+    MIN(ReceivedAt) AS FirstSeen,
+    MAX(ReceivedAt) AS LastSeen,
+    DATEDIFF(DAY, MIN(ReceivedAt), MAX(ReceivedAt)) AS DaysActive
+    
+FROM dbo.PiXL_Test
+WHERE dbo.GetQueryParam(QueryString, 'canvasFP') IS NOT NULL  -- Only Tier 5 data
+GROUP BY IPAddress;
+GO
+
+-- Detailed device list per IP (for drilling down)
+IF OBJECT_ID('dbo.vw_PiXL_NetworkDevices', 'V') IS NOT NULL
+    DROP VIEW dbo.vw_PiXL_NetworkDevices;
+GO
+
+CREATE VIEW dbo.vw_PiXL_NetworkDevices AS
+SELECT 
+    IPAddress,
+    
+    -- Composite fingerprint as device ID
+    CONCAT(
+        ISNULL(dbo.GetQueryParam(QueryString, 'canvasFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'webglFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
+    ) AS DeviceFingerprint,
+    
+    -- Device identification
+    CASE 
+        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
+        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
+        ELSE 'Desktop'
+    END AS DeviceType,
+    
+    -- Browser
+    CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%OPR%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%Opera%' THEN 'Opera'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Edg%' THEN 'Edge'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Firefox%' THEN 'Firefox'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Safari%' AND dbo.GetQueryParam(QueryString, 'ua') NOT LIKE '%Chrome%' THEN 'Safari'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Chrome%' THEN 'Chrome'
+        ELSE 'Other'
+    END AS Browser,
+    
+    -- OS
+    CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Windows%' THEN 'Windows'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Mac%' THEN 'macOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Android%' THEN 'Android'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPhone%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPad%' THEN 'iOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Linux%' THEN 'Linux'
+        ELSE 'Other'
+    END AS OperatingSystem,
+    
+    -- Screen
+    CONCAT(
+        dbo.GetQueryParam(QueryString, 'sw'), 'x',
+        dbo.GetQueryParam(QueryString, 'sh'),
+        ' @', dbo.GetQueryParam(QueryString, 'pd'), 'x'
+    ) AS Screen,
+    
+    -- Hardware
+    dbo.GetQueryParam(QueryString, 'gpu') AS GPU,
+    dbo.GetQueryParam(QueryString, 'cores') AS CPUCores,
+    dbo.GetQueryParam(QueryString, 'mem') AS MemoryGB,
+    
+    -- Individual fingerprints
+    dbo.GetQueryParam(QueryString, 'canvasFP') AS CanvasFP,
+    dbo.GetQueryParam(QueryString, 'webglFP') AS WebGLFP,
+    dbo.GetQueryParam(QueryString, 'audioHash') AS AudioFP,
+    
+    -- Activity
+    COUNT(*) AS HitsFromThisDevice,
+    MIN(ReceivedAt) AS FirstSeen,
+    MAX(ReceivedAt) AS LastSeen
+    
+FROM dbo.PiXL_Test
+WHERE dbo.GetQueryParam(QueryString, 'canvasFP') IS NOT NULL
+GROUP BY 
+    IPAddress,
+    CONCAT(
+        ISNULL(dbo.GetQueryParam(QueryString, 'canvasFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'webglFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
+    ),
+    CASE 
+        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
+        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
+        ELSE 'Desktop'
+    END,
+    CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%OPR%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%Opera%' THEN 'Opera'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Edg%' THEN 'Edge'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Firefox%' THEN 'Firefox'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Safari%' AND dbo.GetQueryParam(QueryString, 'ua') NOT LIKE '%Chrome%' THEN 'Safari'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Chrome%' THEN 'Chrome'
+        ELSE 'Other'
+    END,
+    CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Windows%' THEN 'Windows'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Mac%' THEN 'macOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Android%' THEN 'Android'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPhone%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPad%' THEN 'iOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Linux%' THEN 'Linux'
+        ELSE 'Other'
+    END,
+    CONCAT(
+        dbo.GetQueryParam(QueryString, 'sw'), 'x',
+        dbo.GetQueryParam(QueryString, 'sh'),
+        ' @', dbo.GetQueryParam(QueryString, 'pd'), 'x'
+    ),
+    dbo.GetQueryParam(QueryString, 'gpu'),
+    dbo.GetQueryParam(QueryString, 'cores'),
+    dbo.GetQueryParam(QueryString, 'mem'),
+    dbo.GetQueryParam(QueryString, 'canvasFP'),
+    dbo.GetQueryParam(QueryString, 'webglFP'),
+    dbo.GetQueryParam(QueryString, 'audioHash');
+GO
+
 PRINT '';
 PRINT '======================================';
 PRINT 'Analytics Views Created Successfully!';
@@ -766,10 +930,14 @@ PRINT '  vw_PiXL_Summary        - 15 columns with composite scores';
 PRINT '  vw_PiXL_Complete       - 130+ columns, every data point';
 PRINT '  vw_PiXL_ColumnMap      - Maps summary columns to source columns';
 PRINT '';
-PRINT 'BONUS AGGREGATE VIEWS:';
+PRINT 'AGGREGATE VIEWS:';
 PRINT '  vw_PiXL_HourlyStats    - Hourly hit counts with unique counts';
 PRINT '  vw_PiXL_DeviceBreakdown- Device/OS/Browser breakdown by day';
 PRINT '  vw_PiXL_BotAnalysis    - Bot risk bucketing with evasion counts';
 PRINT '  vw_PiXL_FingerprintUniqueness - How unique is each fingerprint?';
+PRINT '';
+PRINT 'NETWORK/HOUSEHOLD VIEWS:';
+PRINT '  vw_PiXL_NetworkHouseholds - Devices per external IP (NAT detection)';
+PRINT '  vw_PiXL_NetworkDevices    - Detailed device list per IP';
 PRINT '';
 GO
