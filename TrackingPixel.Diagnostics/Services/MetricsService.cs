@@ -165,23 +165,26 @@ public class MetricsService(SqlConnection db)
     {
         await db.OpenAsync();
         
+        // Use vw_PiXL_Complete for fingerprint components, vw_PiXL_Summary for composite
         var metrics = await db.QueryFirstOrDefaultAsync<dynamic>(@"
             SELECT 
-                COUNT(DISTINCT CompositeFingerprint) AS TotalUnique,
                 COUNT(DISTINCT CanvasFingerprint) AS CanvasUnique,
                 COUNT(DISTINCT WebGLFingerprint) AS WebGLUnique,
                 COUNT(DISTINCT AudioFingerprintHash) AS AudioUnique,
-                COUNT(DISTINCT FontHash) AS FontCombinations,
+                COUNT(DISTINCT DetectedFonts) AS FontCombinations,
                 COUNT(DISTINCT CONCAT(ScreenWidth, 'x', ScreenHeight)) AS ScreenResolutions
             FROM vw_PiXL_Complete
             WHERE CanvasFingerprint IS NOT NULL");
 
-        // Calculate collision rate
-        var collisions = await db.QueryFirstOrDefaultAsync<dynamic>(@"
+        // Get total unique from Summary view which has CompositeFingerprint
+        var summary = await db.QueryFirstOrDefaultAsync<dynamic>(@"
             SELECT 
                 COUNT(*) AS TotalHits,
                 COUNT(DISTINCT CompositeFingerprint) AS UniqueFingerprints
-            FROM vw_PiXL_Complete");
+            FROM vw_PiXL_Summary");
+
+        // Calculate collision rate
+        var collisions = summary;
 
         double collisionRate = 0;
         if (collisions?.UniqueFingerprints > 0 && collisions?.TotalHits > 0)
@@ -191,7 +194,7 @@ public class MetricsService(SqlConnection db)
 
         return new FingerprintMetrics
         {
-            TotalUnique = (int)(metrics?.TotalUnique ?? 0),
+            TotalUnique = (int)(summary?.UniqueFingerprints ?? 0),
             CollisionRate = Math.Round(collisionRate, 2),
             CanvasUnique = (int)(metrics?.CanvasUnique ?? 0),
             WebGLUnique = (int)(metrics?.WebGLUnique ?? 0),
