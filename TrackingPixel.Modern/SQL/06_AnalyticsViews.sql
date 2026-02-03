@@ -12,6 +12,45 @@ USE SmartPixl;
 GO
 
 -- =============================================
+-- HELPER FUNCTION: Device type detection
+-- Uses corrected logic: large screen = desktop even with touch (touchscreen monitors)
+-- =============================================
+IF OBJECT_ID('dbo.GetDeviceType', 'FN') IS NOT NULL
+    DROP FUNCTION dbo.GetDeviceType;
+GO
+
+CREATE FUNCTION dbo.GetDeviceType(
+    @ScreenWidth INT,
+    @MaxTouchPoints INT,
+    @uaMobile INT
+)
+RETURNS NVARCHAR(20)
+AS
+BEGIN
+    -- Priority order:
+    -- 1. If uaMobile = 1, it's a mobile device
+    -- 2. If screen >= 1200px, it's a desktop (even with touch - touchscreen monitors)
+    -- 3. If touch > 0 AND screen < 768, it's mobile
+    -- 4. If touch > 0 AND screen 768-1199, it's tablet
+    -- 5. Everything else is desktop
+    
+    IF @uaMobile = 1
+        RETURN 'Mobile'
+    
+    IF @ScreenWidth >= 1200
+        RETURN 'Desktop'
+    
+    IF @MaxTouchPoints > 0 AND @ScreenWidth < 768
+        RETURN 'Mobile'
+    
+    IF @MaxTouchPoints > 0 AND @ScreenWidth < 1200
+        RETURN 'Tablet'
+    
+    RETURN 'Desktop'
+END
+GO
+
+-- =============================================
 -- HELPER FUNCTION: Count detected items in comma-separated list
 -- =============================================
 IF OBJECT_ID('dbo.CountListItems', 'FN') IS NOT NULL
@@ -58,11 +97,12 @@ SELECT
     
     -- ====== DEVICE SUMMARY ======
     -- Single string: "Desktop/Win/Chrome" or "Mobile/iOS/Safari"
-    CASE 
-        WHEN TRY_CAST(dbo.GetQueryParam(p.QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
-        WHEN TRY_CAST(dbo.GetQueryParam(p.QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
-        ELSE 'Desktop'
-    END + '/' +
+    -- Uses GetDeviceType function: large screen = desktop even with touch (touchscreen monitors)
+    dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(p.QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(p.QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(p.QueryString, 'uaMobile') AS INT)
+    ) + '/' +
     CASE 
         WHEN dbo.GetQueryParam(p.QueryString, 'ua') LIKE '%Windows%' THEN 'Win'
         WHEN dbo.GetQueryParam(p.QueryString, 'ua') LIKE '%Mac%' THEN 'Mac'
@@ -631,12 +671,12 @@ SELECT
     CompanyID,
     CAST(ReceivedAt AS DATE) AS DateBucket,
     
-    -- Device Type
-    CASE 
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
-        ELSE 'Desktop'
-    END AS DeviceType,
+    -- Device Type (uses GetDeviceType function for correct classification)
+    dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT)
+    ) AS DeviceType,
     
     -- OS
     CASE 
@@ -664,12 +704,12 @@ FROM dbo.PiXL_Test
 GROUP BY 
     CompanyID,
     CAST(ReceivedAt AS DATE),
-    -- Device Type
-    CASE 
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
-        ELSE 'Desktop'
-    END,
+    -- Device Type (uses function)
+    dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT)
+    ),
     -- OS
     CASE 
         WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Windows%' THEN 'Windows'
@@ -940,4 +980,127 @@ PRINT 'NETWORK/HOUSEHOLD VIEWS:';
 PRINT '  vw_PiXL_NetworkHouseholds - Devices per external IP (NAT detection)';
 PRINT '  vw_PiXL_NetworkDevices    - Detailed device list per IP';
 PRINT '';
+PRINT 'CROSS-NETWORK IDENTITY VIEWS:';
+PRINT '  vw_PiXL_DeviceIdentity       - Track devices across networks (key FP value)';
+PRINT '  vw_PiXL_DeviceNetworkHistory - All IPs a device has connected from';
+PRINT '';
+GO
+
+-- =============================================
+-- CROSS-NETWORK DEVICE IDENTITY
+-- Tracks the same device across different IPs/networks
+-- This is the key fingerprinting value: device follows user, not network
+-- =============================================
+IF OBJECT_ID('dbo.vw_PiXL_DeviceIdentity', 'V') IS NOT NULL
+    DROP VIEW dbo.vw_PiXL_DeviceIdentity;
+GO
+
+CREATE VIEW dbo.vw_PiXL_DeviceIdentity AS
+SELECT 
+    -- Composite fingerprint IS the device identity
+    CONCAT(
+        ISNULL(dbo.GetQueryParam(QueryString, 'canvasFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'webglFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
+    ) AS DeviceFingerprint,
+    
+    -- Individual fingerprint components
+    dbo.GetQueryParam(QueryString, 'canvasFP') AS CanvasFP,
+    dbo.GetQueryParam(QueryString, 'webglFP') AS WebGLFP,
+    dbo.GetQueryParam(QueryString, 'audioHash') AS AudioFP,
+    
+    -- Network mobility: How many different IPs has this device used?
+    COUNT(DISTINCT IPAddress) AS UniqueIPAddresses,
+    
+    -- Device characteristics (stable across networks)
+    MAX(dbo.GetQueryParam(QueryString, 'gpu')) AS GPU,
+    MAX(dbo.GetQueryParam(QueryString, 'cores')) AS CPUCores,
+    MAX(dbo.GetQueryParam(QueryString, 'mem')) AS MemoryGB,
+    MAX(dbo.GetQueryParam(QueryString, 'sw') + 'x' + dbo.GetQueryParam(QueryString, 'sh')) AS Screen,
+    
+    -- Device type (using function for correct classification)
+    MAX(dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT)
+    )) AS DeviceType,
+    
+    -- OS (stable)
+    MAX(CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Windows%' THEN 'Windows'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Mac%' THEN 'macOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Android%' THEN 'Android'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPhone%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%iPad%' THEN 'iOS'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Linux%' THEN 'Linux'
+        ELSE 'Other'
+    END) AS OperatingSystem,
+    
+    -- Browser diversity on this device
+    COUNT(DISTINCT CASE 
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%OPR%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%Opera%' THEN 'Opera'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Edg%' THEN 'Edge'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Firefox%' THEN 'Firefox'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Safari%' AND dbo.GetQueryParam(QueryString, 'ua') NOT LIKE '%Chrome%' THEN 'Safari'
+        WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Chrome%' THEN 'Chrome'
+        ELSE 'Other'
+    END) AS UniqueBrowsers,
+    
+    -- Activity
+    COUNT(*) AS TotalHits,
+    COUNT(DISTINCT CAST(ReceivedAt AS DATE)) AS UniqueDays,
+    MIN(ReceivedAt) AS FirstSeen,
+    MAX(ReceivedAt) AS LastSeen,
+    
+    -- Companies/Pixels this device has been seen on
+    COUNT(DISTINCT CompanyID) AS UniqueCompanies,
+    COUNT(DISTINCT PiXLID) AS UniquePiXLs
+    
+FROM dbo.PiXL_Test
+WHERE dbo.GetQueryParam(QueryString, 'canvasFP') IS NOT NULL
+GROUP BY 
+    CONCAT(
+        ISNULL(dbo.GetQueryParam(QueryString, 'canvasFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'webglFP'), ''),
+        '-',
+        ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
+    ),
+    dbo.GetQueryParam(QueryString, 'canvasFP'),
+    dbo.GetQueryParam(QueryString, 'webglFP'),
+    dbo.GetQueryParam(QueryString, 'audioHash');
+GO
+
+-- =============================================
+-- DEVICE NETWORK HISTORY
+-- Shows all IPs/networks a device has connected from
+-- Key for proving cross-network identity
+-- =============================================
+IF OBJECT_ID('dbo.vw_PiXL_DeviceNetworkHistory', 'V') IS NOT NULL
+    DROP VIEW dbo.vw_PiXL_DeviceNetworkHistory;
+GO
+
+CREATE VIEW dbo.vw_PiXL_DeviceNetworkHistory AS
+SELECT 
+    -- Device identity
+    dbo.GetQueryParam(QueryString, 'canvasFP') AS CanvasFP,
+    
+    -- Network used
+    IPAddress,
+    
+    -- When seen from this network
+    COUNT(*) AS HitsFromThisIP,
+    MIN(ReceivedAt) AS FirstSeenFromIP,
+    MAX(ReceivedAt) AS LastSeenFromIP,
+    
+    -- Connection type when on this network
+    MAX(dbo.GetQueryParam(QueryString, 'conn')) AS ConnectionType,
+    MAX(dbo.GetQueryParam(QueryString, 'rtt')) AS RTTMs
+    
+FROM dbo.PiXL_Test
+WHERE dbo.GetQueryParam(QueryString, 'canvasFP') IS NOT NULL
+GROUP BY 
+    dbo.GetQueryParam(QueryString, 'canvasFP'),
+    IPAddress;
 GO
