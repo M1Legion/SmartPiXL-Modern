@@ -1,0 +1,36 @@
+@page "/partial/bots"
+@using TrackingPixel.Diagnostics.Services
+@inject MetricsService Metrics
+
+@{
+    Layout = null;
+    dynamic botData = await Metrics.GetBotAnalysisAsync();
+    var indicators = (IEnumerable<TrackingPixel.Diagnostics.Models.BotIndicator>)botData.Indicators;
+}
+
+<h3>Bot Indicators Detected</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Indicator</th>
+            <th>Count</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var ind in indicators.Where(i => i.Count > 0))
+        {
+            <tr>
+                <td>@ind.Indicator</td>
+                <td>
+                    <span class="badge @(ind.Count > 100 ? "badge-danger" : ind.Count > 10 ? "badge-warning" : "")">
+                        @ind.Count
+                    </span>
+                </td>
+            </tr>
+        }
+        @if (!indicators.Any(i => i.Count > 0))
+        {
+            <tr><td colspan="2" style="color:#888;">No bot indicators detected</td></tr>
+        }
+    </tbody>
+</table>

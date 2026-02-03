@@ -1,0 +1,46 @@
+@page "/partial/evasion"
+@using TrackingPixel.Diagnostics.Services
+@inject MetricsService Metrics
+
+@{
+    Layout = null;
+    var evasions = (await Metrics.GetEvasionAttemptsAsync()).ToList();
+}
+
+@if (evasions.Any())
+{
+    <table>
+        <thead>
+            <tr>
+                <th>Fingerprint</th>
+                <th>Evasion Type</th>
+                <th>Canvas Variations</th>
+                <th>WebGL Blocked %</th>
+                <th>Last Seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var e in evasions.Take(50))
+            {
+                <tr>
+                    <td><code>@e.DeviceFingerprint.Substring(0, Math.Min(12, e.DeviceFingerprint.Length))...</code></td>
+                    <td>
+                        <span class="badge @(e.EvasionType == "Canvas Noise" ? "badge-warning" : "badge-danger")">
+                            @e.EvasionType
+                        </span>
+                    </td>
+                    <td>@e.CanvasVariations</td>
+                    <td>@((e.WebGLBlockedRate * 100).ToString("F0"))%</td>
+                    <td>@e.LastSeen.ToString("MM/dd HH:mm")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div style="text-align: center; padding: 2rem; color: #888;">
+        <p>✅ No evasion attempts detected</p>
+        <p style="font-size: 0.9rem;">This means visitors are not using canvas noise injection, Tor Browser standardization, or WebGL blocking.</p>
+    </div>
+}

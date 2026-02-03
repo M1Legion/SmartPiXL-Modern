@@ -1,0 +1,363 @@
+@page
+@{
+    ViewData["Title"] = "SmartPiXL Diagnostics";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"]</title>
+    <link href="https://cdn.jsdelivr.net/npm/water.css@2/out/dark.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-card: #1a1a2e;
+            --border: #2d2d44;
+            --accent: #4fc3f7;
+            --success: #66bb6a;
+            --warning: #ffa726;
+            --danger: #ef5350;
+        }
+        body { 
+            max-width: 1400px; 
+            background: #0f0f1a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1.5rem;
+        }
+        .header h1 { margin: 0; color: var(--accent); }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+        .stat-card .label { color: #888; font-size: 0.85rem; }
+        .stat-card.warning .value { color: var(--warning); }
+        .stat-card.danger .value { color: var(--danger); }
+        .stat-card.success .value { color: var(--success); }
+        
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        .tab {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+        }
+        .tab:hover, .tab.active { 
+            background: var(--bg-card); 
+            color: var(--accent);
+        }
+        
+        .panel {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+        .panel.active { display: block; }
+        
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @@media (max-width: 900px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 250px;
+        }
+        
+        .activity-feed {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .activity-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+        .activity-item:hover { background: rgba(255,255,255,0.05); }
+        .activity-time { color: #666; }
+        .activity-device { color: var(--accent); }
+        .activity-ip { color: #888; }
+        .risk-human { color: var(--success); }
+        .risk-low { color: #aaa; }
+        .risk-medium { color: var(--warning); }
+        .risk-high { color: var(--danger); font-weight: bold; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { 
+            padding: 0.5rem; 
+            text-align: left; 
+            border-bottom: 1px solid var(--border);
+        }
+        th { color: #888; font-weight: normal; }
+        
+        .progress-bar {
+            height: 20px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.25rem 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        .badge-success { background: var(--success); color: #000; }
+        .badge-warning { background: var(--warning); color: #000; }
+        .badge-danger { background: var(--danger); color: #fff; }
+        
+        .uptime { font-size: 0.8rem; color: #666; }
+        .refresh-btn {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .refresh-btn:hover { opacity: 0.8; }
+        
+        .htmx-request { opacity: 0.5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 SmartPiXL Diagnostics</h1>
+        <div>
+            <span class="uptime" hx-get="/api/health" hx-trigger="load, every 30s" hx-swap="innerHTML" hx-select-oob="true">
+                Loading...
+            </span>
+            <button class="refresh-btn" onclick="location.reload()">↻ Refresh</button>
+        </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="stat-grid" hx-get="/partial/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
+        <div class="stat-card"><div class="value">-</div><div class="label">Loading...</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" onclick="showPanel('overview')">Overview</button>
+        <button class="tab" onclick="showPanel('fingerprints')">Fingerprints</button>
+        <button class="tab" onclick="showPanel('bots')">Bot Detection</button>
+        <button class="tab" onclick="showPanel('evasion')">Evasion</button>
+        <button class="tab" onclick="showPanel('identity')">Cross-Network</button>
+        <button class="tab" onclick="showPanel('activity')">Live Feed</button>
+    </div>
+
+    <!-- Overview Panel -->
+    <div id="panel-overview" class="panel active">
+        <div class="grid-2">
+            <div>
+                <h3>Traffic (24h)</h3>
+                <div class="chart-container">
+                    <canvas id="hourlyChart"></canvas>
+                </div>
+            </div>
+            <div>
+                <h3>Device Breakdown</h3>
+                <div class="chart-container">
+                    <canvas id="deviceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fingerprints Panel -->
+    <div id="panel-fingerprints" class="panel">
+        <div hx-get="/partial/fingerprints" hx-trigger="load" hx-swap="innerHTML">
+            Loading fingerprint metrics...
+        </div>
+    </div>
+
+    <!-- Bot Detection Panel -->
+    <div id="panel-bots" class="panel">
+        <div class="grid-2">
+            <div>
+                <h3>Bot Risk Distribution</h3>
+                <div class="chart-container">
+                    <canvas id="botChart"></canvas>
+                </div>
+            </div>
+            <div hx-get="/partial/bots" hx-trigger="load" hx-swap="innerHTML">
+                Loading bot indicators...
+            </div>
+        </div>
+    </div>
+
+    <!-- Evasion Panel -->
+    <div id="panel-evasion" class="panel">
+        <h3>Anti-Fingerprinting Evasion Attempts</h3>
+        <div hx-get="/partial/evasion" hx-trigger="load" hx-swap="innerHTML">
+            Loading evasion data...
+        </div>
+    </div>
+
+    <!-- Cross-Network Identity Panel -->
+    <div id="panel-identity" class="panel">
+        <h3>Devices Tracked Across Multiple Networks</h3>
+        <p style="color:#888;">These devices have been seen from multiple IP addresses, demonstrating cross-network identity tracking.</p>
+        <div hx-get="/partial/identity" hx-trigger="load" hx-swap="innerHTML">
+            Loading cross-network data...
+        </div>
+    </div>
+
+    <!-- Live Activity Feed -->
+    <div id="panel-activity" class="panel">
+        <h3>Real-Time Activity Feed</h3>
+        <div class="activity-feed" hx-get="/partial/activity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            Loading activity...
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        function showPanel(name) {
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('panel-' + name).classList.add('active');
+            event.target.classList.add('active');
+            
+            // Load charts when switching to relevant panels
+            if (name === 'overview') loadOverviewCharts();
+            if (name === 'bots') loadBotChart();
+        }
+
+        // Load charts on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadOverviewCharts();
+        });
+
+        async function loadOverviewCharts() {
+            // Hourly traffic chart
+            const hourlyData = await fetch('/api/stats/hourly').then(r => r.json());
+            const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+            
+            if (window.hourlyChartInstance) window.hourlyChartInstance.destroy();
+            window.hourlyChartInstance = new Chart(hourlyCtx, {
+                type: 'line',
+                data: {
+                    labels: hourlyData.map(h => new Date(h.hour).toLocaleTimeString([], {hour: '2-digit'})),
+                    datasets: [{
+                        label: 'Hits',
+                        data: hourlyData.map(h => h.hits),
+                        borderColor: '#4fc3f7',
+                        backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#2d2d44' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Device breakdown chart
+            const deviceData = await fetch('/api/stats/devices').then(r => r.json());
+            const deviceCtx = document.getElementById('deviceChart').getContext('2d');
+            
+            // Aggregate by device type
+            const byType = {};
+            deviceData.forEach(d => {
+                byType[d.deviceType] = (byType[d.deviceType] || 0) + d.count;
+            });
+            
+            if (window.deviceChartInstance) window.deviceChartInstance.destroy();
+            window.deviceChartInstance = new Chart(deviceCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(byType),
+                    datasets: [{
+                        data: Object.values(byType),
+                        backgroundColor: ['#4fc3f7', '#66bb6a', '#ffa726', '#ef5350', '#ab47bc']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' }
+                    }
+                }
+            });
+        }
+
+        async function loadBotChart() {
+            const botData = await fetch('/api/stats/bots').then(r => r.json());
+            const ctx = document.getElementById('botChart').getContext('2d');
+            
+            if (window.botChartInstance) window.botChartInstance.destroy();
+            window.botChartInstance = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: botData.distribution.map(b => b.riskBucket),
+                    datasets: [{
+                        data: botData.distribution.map(b => b.hits),
+                        backgroundColor: ['#ef5350', '#ffa726', '#ffee58', '#66bb6a']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

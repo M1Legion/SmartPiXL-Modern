@@ -1,0 +1,54 @@
+@page "/partial/activity"
+@using TrackingPixel.Diagnostics.Services
+@inject MetricsService Metrics
+
+@{
+    Layout = null;
+    var activity = await Metrics.GetRecentActivityAsync(30);
+}
+
+@foreach (var a in activity)
+{
+    var riskClass = a.RiskLevel switch
+    {
+        "HIGH" => "risk-high",
+        "MEDIUM" => "risk-medium",
+        "LOW" => "risk-low",
+        _ => "risk-human"
+    };
+    <div class="activity-item">
+        <span>
+            <span class="activity-time">[@a.Timestamp.ToString("HH:mm:ss")]</span>
+            <span class="activity-device">@a.DeviceProfile</span>
+        </span>
+        <span>
+            <span class="activity-ip">@a.IPAddress</span>
+            @if (!string.IsNullOrEmpty(a.Location))
+            {
+                <span style="color:#666;">• @a.Location</span>
+            }
+        </span>
+        <span class="@riskClass">
+            @if (a.RiskLevel == "HIGH")
+            {
+                <span>⚠️ HIGH RISK (@a.BotRisk)</span>
+            }
+            else if (a.RiskLevel == "MEDIUM")
+            {
+                <span>⚡ Medium (@a.BotRisk)</span>
+            }
+            else
+            {
+                <span>Human (@a.BotRisk)</span>
+            }
+        </span>
+        <span style="color:#4fc3f7; font-family: monospace;">@a.Fingerprint</span>
+    </div>
+}
+
+@if (!activity.Any())
+{
+    <div style="text-align: center; padding: 2rem; color: #888;">
+        No recent activity
+    </div>
+}
