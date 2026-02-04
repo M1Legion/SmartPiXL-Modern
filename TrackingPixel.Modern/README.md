@@ -92,14 +92,23 @@ Uses RTCPeerConnection to discover the user's local network IP address.
 
 ```
 TrackingPixel.Modern/
-├── Program.cs           # Single-file Minimal API application (~900 lines)
+├── Program.cs           # Minimal API entry point (~130 lines)
+├── Configuration/       # App settings and configuration
+├── Endpoints/           # API endpoint handlers
+├── Models/              # Data models (TrackingData, etc.)
+├── Services/            # Business logic services
 ├── wwwroot/
 │   └── test.html        # Live data collection demo
 ├── SQL/
-│   ├── 01_InitialSchema.sql    # Base table and function
-│   └── 02_ExpandedSchema.sql   # All 100+ columns
+│   └── 00_FreshInstall.sql     # Complete schema (table + view + materialization)
 └── FINGERPRINTING_EXPLAINED.md # Technical documentation
 ```
+
+**Data Flow Architecture:**
+1. Client JS collects 100+ data points → sends via query string
+2. C# writes raw data to `PiXL_Test` table (8 columns)
+3. SQL view `vw_PiXL_Parsed` extracts all fields at query time
+4. Optional: `sp_MaterializePiXLData` copies to indexed table for fast queries
 
 ### Performance Optimizations
 
@@ -115,13 +124,12 @@ TrackingPixel.Modern/
 ### Quick Setup
 
 ```sql
--- Create database
+-- Create database with filegroup on D: drive
 CREATE DATABASE SmartPixl;
 GO
 
--- Run schema scripts
--- 1. SQL/01_InitialSchema.sql
--- 2. SQL/02_ExpandedSchema.sql
+-- Run the fresh install script
+-- SQL/00_FreshInstall.sql
 ```
 
 ### Query Captured Data
