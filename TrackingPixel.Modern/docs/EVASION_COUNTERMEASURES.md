@@ -50,7 +50,8 @@ const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
 CanvasRenderingContext2D.prototype.getImageData = function(...args) {
   const data = originalGetImageData.apply(this, args);
   for (let i = 0; i < data.data.length; i += 4) {
-    data.data[i] = (data.data[i] + Math.floor(Math.random() * 10) - 5) % 256;
+    // Clamp to valid pixel range 0-255
+    data.data[i] = Math.max(0, Math.min(255, data.data[i] + Math.floor(Math.random() * 10) - 5));
   }
   return data;
 };
@@ -307,6 +308,10 @@ var calculateMouseEntropy = function() {
 
 **Modify the setTimeout to include behavioral calculation:**
 
+**Note:** This is an intermediate step showing behavioral collection integration. 
+See V-06 below for the final Promise-based implementation that combines async handling 
+with behavioral analysis.
+
 ```javascript
 // ============================================
 // FIRE PIXEL (with delay for async data + behavior)
@@ -417,10 +422,13 @@ var stealthSignals = (function() {
     }
     
     // Check navigator prototype chain integrity
+    // Note: Navigator may not be accessible in all browsers (e.g., Firefox)
     try {
-        var proto = Object.getPrototypeOf(navigator);
-        if (proto !== Navigator.prototype) {
-            signals.push('navigator-prototype-modified');
+        if (typeof Navigator !== 'undefined') {
+            var proto = Object.getPrototypeOf(navigator);
+            if (proto !== Navigator.prototype) {
+                signals.push('navigator-prototype-modified');
+            }
         }
     } catch(e) {}
     
@@ -539,11 +547,11 @@ public record FingerprintStabilityResult
 
 ```sql
 -- Add columns to track fingerprint stability
-ALTER TABLE PiXL_Test ADD
-    FP_IsStable BIT NULL,
-    FP_UniqueCount INT NULL,
-    FP_ObservationCount INT NULL,
-    FP_SuspiciousVariation BIT NULL;
+-- Using separate statements with defaults for data consistency
+ALTER TABLE PiXL_Test ADD FP_IsStable BIT NULL DEFAULT NULL;
+ALTER TABLE PiXL_Test ADD FP_UniqueCount INT NULL DEFAULT NULL;
+ALTER TABLE PiXL_Test ADD FP_ObservationCount INT NULL DEFAULT NULL;
+ALTER TABLE PiXL_Test ADD FP_SuspiciousVariation BIT NULL DEFAULT NULL;
 
 -- Index for stability analysis
 CREATE INDEX IX_PiXL_Test_FP_Suspicious 
@@ -688,12 +696,17 @@ namespace TrackingPixel.Services;
 /// <summary>
 /// Detects if an IP belongs to a known cloud/datacenter provider.
 /// Downloads and caches official IP range lists.
+/// 
+/// DEPENDENCY: Requires 'IPNetwork2' NuGet package (or System.Net.IPNetwork)
+/// Install: dotnet add package IPNetwork2
 /// </summary>
 public sealed class DatacenterIpService : IHostedService
 {
     private readonly ILogger<DatacenterIpService> _logger;
     private readonly HttpClient _httpClient;
-    private readonly List<(IPNetwork Network, string Provider)> _ranges = new();
+    // Thread-safe: Use ReaderWriterLockSlim for concurrent reads during Check()
+    private List<(IPNetwork Network, string Provider)> _ranges = new();
+    private readonly ReaderWriterLockSlim _rangeLock = new();
     private readonly SemaphoreSlim _updateLock = new(1);
     private DateTime _lastUpdate = DateTime.MinValue;
     
@@ -725,10 +738,19 @@ public sealed class DatacenterIpService : IHostedService
         if (string.IsNullOrEmpty(ipAddress) || !IPAddress.TryParse(ipAddress, out var ip))
             return new DatacenterCheckResult(false, null);
         
-        foreach (var (network, provider) in _ranges)
+        // Thread-safe read access
+        _rangeLock.EnterReadLock();
+        try
         {
-            if (network.Contains(ip))
-                return new DatacenterCheckResult(true, provider);
+            foreach (var (network, provider) in _ranges)
+            {
+                if (network.Contains(ip))
+                    return new DatacenterCheckResult(true, provider);
+            }
+        }
+        finally
+        {
+            _rangeLock.ExitReadLock();
         }
         
         return new DatacenterCheckResult(false, null);
@@ -901,6 +923,8 @@ Current detection only checks for 1000x1000 screen size. Modern Tor uses variabl
 
 ```javascript
 // In evasionResult function, replace Tor detection:
+// Note: This assumes 's' is defined as 'var s = screen;' at the top of the script
+// and 'w' is defined as 'var w = window;' (see Tier5Script.cs lines 17-19)
 
 // 1. Tor Browser (letterboxing detection)
 // Tor rounds to 200x100 pixel increments
