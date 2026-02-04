@@ -111,27 +111,18 @@ public class MetricsService(SqlConnection db, ILogger<MetricsService> logger)
             catch (Exception fallbackEx)
             {
                 logger.LogError(fallbackEx, "GetDeviceBreakdownAsync: Fallback query also failed");
-                return [];
+                return Enumerable.Empty<DeviceBreakdown>();
             }
         }
     }
 
     public async Task<object> GetBotAnalysisAsync()
     {
-        try
-        {
-            await db.OpenAsync();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "GetBotAnalysisAsync: Failed to open database connection");
-            return new { Distribution = Enumerable.Empty<BotAnalysis>(), Indicators = Enumerable.Empty<BotIndicator>() };
-        }
-        
         // Try aggregate view first
         IEnumerable<BotAnalysis> distribution;
         try
         {
+            await db.OpenAsync();
             distribution = await db.QueryAsync<BotAnalysis>(@"
                 SELECT 
                     RiskBucket,
@@ -180,7 +171,7 @@ public class MetricsService(SqlConnection db, ILogger<MetricsService> logger)
             catch (Exception fallbackEx)
             {
                 logger.LogError(fallbackEx, "GetBotAnalysisAsync: Fallback distribution query also failed");
-                distribution = [];
+                distribution = Enumerable.Empty<BotAnalysis>();
             }
         }
 
@@ -200,7 +191,7 @@ public class MetricsService(SqlConnection db, ILogger<MetricsService> logger)
         catch (Exception ex)
         {
             logger.LogWarning(ex, "GetBotAnalysisAsync: Bot indicators query failed, returning empty list");
-            indicators = [];
+            indicators = Enumerable.Empty<BotIndicator>();
         }
 
         return new { Distribution = distribution, Indicators = indicators };
@@ -282,7 +273,7 @@ public class MetricsService(SqlConnection db, ILogger<MetricsService> logger)
         catch (Exception ex)
         {
             logger.LogWarning(ex, "GetEvasionAttemptsAsync: Query failed, returning empty list");
-            return [];
+            return Enumerable.Empty<EvasionAttempt>();
         }
     }
 
@@ -307,7 +298,7 @@ public class MetricsService(SqlConnection db, ILogger<MetricsService> logger)
         catch (Exception ex)
         {
             logger.LogWarning(ex, "GetCrossNetworkDevicesAsync: Query failed, returning empty list");
-            return [];
+            return Enumerable.Empty<CrossNetworkDevice>();
         }
     }
 
