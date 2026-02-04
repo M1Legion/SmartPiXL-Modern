@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartPiXL DevOps Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --red: #ef4444;
+            --blue: #3b82f6;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+        
+        h1 { font-size: 24px; font-weight: 600; }
+        
+        .refresh-info {
+            color: var(--text-dim);
+            font-size: 14px;
+        }
+        
+        /* KPI Cards Grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .kpi-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: border-color 0.2s, transform 0.1s;
+        }
+        
+        .kpi-card:hover {
+            border-color: var(--blue);
+            transform: translateY(-2px);
+        }
+        
+        .kpi-card.active {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+        
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        
+        .kpi-trend {
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        
+        .trend-up { color: var(--green); }
+        .trend-down { color: var(--red); }
+        .trend-neutral { color: var(--text-dim); }
+        
+        /* Drill-down Panel */
+        .drilldown-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        
+        .drilldown-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(59, 130, 246, 0.1);
+        }
+        
+        .drilldown-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .drilldown-close {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        
+        .drilldown-close:hover { color: var(--text); }
+        
+        .drilldown-content {
+            padding: 16px;
+        }
+        
+        /* Charts */
+        .chart-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .bar-chart {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .bar-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+        
+        .bar-item:hover { opacity: 0.8; }
+        
+        .bar-label {
+            width: 120px;
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+        
+        .bar-track {
+            flex: 1;
+            height: 24px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0 12px;
+        }
+        
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        
+        .bar-value {
+            width: 60px;
+            text-align: right;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        /* Data Table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        .data-table th {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 2px solid var(--card-border);
+            color: var(--text-dim);
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--card-border);
+        }
+        
+        .data-table tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+        
+        /* Status badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .badge-high { background: var(--red); color: white; }
+        .badge-medium { background: var(--orange); color: white; }
+        .badge-low { background: var(--yellow); color: black; }
+        .badge-human { background: var(--green); color: white; }
+        
+        /* Live Feed */
+        .live-feed {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .live-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+        
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--red);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            margin-right: 8px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .live-title {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+        }
+        
+        .feed-scroll {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .feed-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--card-border);
+            font-size: 13px;
+        }
+        
+        .feed-time {
+            width: 70px;
+            color: var(--text-dim);
+            font-family: monospace;
+        }
+        
+        .feed-ip {
+            width: 120px;
+            font-family: monospace;
+        }
+        
+        .feed-device {
+            width: 80px;
+        }
+        
+        .feed-screen {
+            width: 100px;
+            color: var(--text-dim);
+        }
+        
+        .feed-risk {
+            flex: 1;
+        }
+        
+        /* Two column layout */
+        .two-col {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+        
+        @media (max-width: 1024px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+        
+        /* Loading state */
+        .loading {
+            color: var(--text-dim);
+            text-align: center;
+            padding: 40px;
+        }
+        
+        /* Hidden */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔍 SmartPiXL DevOps</h1>
+        <div class="refresh-info">
+            Last updated: <span id="lastUpdate">--</span>
+            <span style="margin-left: 12px; color: var(--green);">● Live</span>
+        </div>
+    </header>
+    
+    <!-- KPI Cards -->
+    <div class="kpi-grid" id="kpiGrid">
+        <div class="kpi-card" data-drill="hits">
+            <div class="kpi-label">Hits Today</div>
+            <div class="kpi-value" id="kpiHits">--</div>
+            <div class="kpi-trend" id="kpiHitsTrend">vs yesterday</div>
+        </div>
+        <div class="kpi-card" data-drill="devices">
+            <div class="kpi-label">Unique Devices</div>
+            <div class="kpi-value" id="kpiDevices">--</div>
+            <div class="kpi-trend" id="kpiDevicesTrend">fingerprints</div>
+        </div>
+        <div class="kpi-card" data-drill="bots">
+            <div class="kpi-label">Bot Rate</div>
+            <div class="kpi-value" id="kpiBotRate">--</div>
+            <div class="kpi-trend" id="kpiBotTrend">high risk traffic</div>
+        </div>
+        <div class="kpi-card" data-drill="evasion">
+            <div class="kpi-label">Evasion Rate</div>
+            <div class="kpi-value" id="kpiEvasion">--</div>
+            <div class="kpi-trend" id="kpiEvasionTrend">privacy tools detected</div>
+        </div>
+        <div class="kpi-card" data-drill="timing">
+            <div class="kpi-label">Fast Execs</div>
+            <div class="kpi-value" id="kpiFastExec">--</div>
+            <div class="kpi-trend" id="kpiFastTrend">&lt;10ms = likely bot</div>
+        </div>
+        <div class="kpi-card" data-drill="crossnet">
+            <div class="kpi-label">Cross-Network</div>
+            <div class="kpi-value" id="kpiCrossNet">--</div>
+            <div class="kpi-trend">devices on multiple IPs</div>
+        </div>
+    </div>
+    
+    <!-- Drill-down Panel (hidden by default) -->
+    <div class="drilldown-panel hidden" id="drilldownPanel">
+        <div class="drilldown-header">
+            <span class="drilldown-title" id="drilldownTitle">Details</span>
+            <button class="drilldown-close" onclick="closeDrilldown()">&times;</button>
+        </div>
+        <div class="drilldown-content" id="drilldownContent">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+    
+    <!-- Main Content -->
+    <div class="two-col">
+        <!-- Left: Live Feed -->
+        <div class="live-feed">
+            <div class="live-header">
+                <div class="live-title">
+                    <div class="live-dot"></div>
+                    Live Feed
+                </div>
+                <span style="color: var(--text-dim); font-size: 13px;">Last 25 hits</span>
+            </div>
+            <div class="feed-scroll" id="liveFeed">
+                <div class="loading">Loading feed...</div>
+            </div>
+        </div>
+        
+        <!-- Right: Device Breakdown -->
+        <div class="live-feed">
+            <div class="live-header">
+                <div class="live-title">📱 Device Mix</div>
+            </div>
+            <div style="padding: 16px;" id="deviceMix">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // STATE
+        // =====================================================================
+        let currentDrill = null;
+        let refreshInterval = null;
+        
+        // =====================================================================
+        // API CALLS
+        // =====================================================================
+        async function fetchJson(url) {
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return await res.json();
+            } catch (e) {
+                console.error('Fetch error:', url, e);
+                return null;
+            }
+        }
+        
+        // =====================================================================
+        // KPI LOADING
+        // =====================================================================
+        async function loadKPIs() {
+            const data = await fetchJson('/api/dashboard/kpis');
+            if (!data) return;
+            
+            // Hits
+            document.getElementById('kpiHits').textContent = formatNumber(data.totalHitsToday);
+            const hitsDiff = data.totalHitsToday - data.totalHitsYesterday;
+            document.getElementById('kpiHitsTrend').innerHTML = formatTrend(hitsDiff, 'vs yesterday');
+            
+            // Devices
+            document.getElementById('kpiDevices').textContent = formatNumber(data.uniqueDevicesToday);
+            document.getElementById('kpiDevicesTrend').textContent = `${data.uniqueIPsToday} unique IPs`;
+            
+            // Bot Rate
+            document.getElementById('kpiBotRate').textContent = data.botRatePctToday.toFixed(1) + '%';
+            document.getElementById('kpiBotTrend').textContent = `${data.highRiskBotsToday} high risk`;
+            
+            // Evasion
+            document.getElementById('kpiEvasion').textContent = data.evasionRatePctToday.toFixed(1) + '%';
+            document.getElementById('kpiEvasionTrend').textContent = `${data.evasionDetectedToday} detected`;
+            
+            // Fast Execs
+            document.getElementById('kpiFastExec').textContent = data.fastExecsToday;
+            document.getElementById('kpiFastTrend').innerHTML = `avg ${Math.round(data.avgScriptExecMsToday || 0)}ms`;
+            
+            // Cross-network
+            document.getElementById('kpiCrossNet').textContent = data.crossNetworkDevicesToday;
+            
+            // Update timestamp
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+        
+        // =====================================================================
+        // LIVE FEED
+        // =====================================================================
+        async function loadLiveFeed() {
+            const data = await fetchJson('/api/dashboard/live-feed?limit=25');
+            if (!data) return;
+            
+            const container = document.getElementById('liveFeed');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<div class="loading">No data yet</div>';
+                return;
+            }
+            
+            container.innerHTML = data.map(row => `
+                <div class="feed-item">
+                    <span class="feed-time">${formatLocalTime(row.localReceivedAt)}</span>
+                    <span class="feed-ip">${row.ipAddress || '--'}</span>
+                    <span class="feed-device">${row.deviceType || '--'}</span>
+                    <span class="feed-screen">${row.screen || '--'}</span>
+                    <span class="feed-risk">
+                        <span class="badge badge-${getBadgeClass(row.riskBucket)}">${row.riskBucket || 'Unknown'}</span>
+                        ${row.evasionDetected ? '<span style="margin-left:8px;color:var(--orange)">🛡️</span>' : ''}
+                        ${row.colorDepthAnomaly ? '<span style="margin-left:4px;color:var(--red)" title="ColorDepth anomaly">🎨</span>' : ''}
+                    </span>
+                </div>
+            `).join('');
+        }
+        
+        // =====================================================================
+        // DEVICE MIX
+        // =====================================================================
+        async function loadDeviceMix() {
+            const kpis = await fetchJson('/api/dashboard/kpis');
+            if (!kpis) return;
+            
+            const total = kpis.desktopHitsToday + kpis.mobileHitsToday + kpis.tabletHitsToday;
+            if (total === 0) {
+                document.getElementById('deviceMix').innerHTML = '<div class="loading">No data</div>';
+                return;
+            }
+            
+            const devices = [
+                { label: 'Desktop', count: kpis.desktopHitsToday, color: 'var(--blue)' },
+                { label: 'Mobile', count: kpis.mobileHitsToday, color: 'var(--green)' },
+                { label: 'Tablet', count: kpis.tabletHitsToday, color: 'var(--orange)' }
+            ];
+            
+            document.getElementById('deviceMix').innerHTML = devices.map(d => {
+                const pct = ((d.count / total) * 100).toFixed(1);
+                return `
+                    <div class="bar-item">
+                        <span class="bar-label">${d.label}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width: ${pct}%; background: ${d.color}"></div>
+                        </div>
+                        <span class="bar-value">${d.count}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // =====================================================================
+        // DRILL-DOWN HANDLERS
+        // =====================================================================
+        function openDrilldown(type) {
+            currentDrill = type;
+            document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active'));
+            document.querySelector(`[data-drill="${type}"]`)?.classList.add('active');
+            
+            const panel = document.getElementById('drilldownPanel');
+            const content = document.getElementById('drilldownContent');
+            const title = document.getElementById('drilldownTitle');
+            
+            panel.classList.remove('hidden');
+            content.innerHTML = '<div class="loading">Loading...</div>';
+            
+            switch (type) {
+                case 'bots':
+                    title.textContent = '🤖 Bot Risk Breakdown';
+                    loadBotDrilldown(content);
+                    break;
+                case 'evasion':
+                    title.textContent = '🛡️ Evasion Breakdown';
+                    loadEvasionDrilldown(content);
+                    break;
+                case 'timing':
+                    title.textContent = '⏱️ Script Timing Analysis';
+                    loadTimingDrilldown(content);
+                    break;
+                case 'devices':
+                    title.textContent = '📱 Device & Browser Details';
+                    loadDeviceDrilldown(content);
+                    break;
+                case 'crossnet':
+                    title.textContent = '🌐 Cross-Network Devices';
+                    loadCrossNetDrilldown(content);
+                    break;
+                case 'hits':
+                    title.textContent = '📈 Traffic Trends';
+                    loadTrendsDrilldown(content);
+                    break;
+                default:
+                    content.innerHTML = '<div class="loading">Unknown view</div>';
+            }
+        }
+        
+        function closeDrilldown() {
+            currentDrill = null;
+            document.getElementById('drilldownPanel').classList.add('hidden');
+            document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active'));
+        }
+        
+        // Bot Risk Drilldown
+        async function loadBotDrilldown(container) {
+            const buckets = await fetchJson('/api/dashboard/risk-buckets');
+            if (!buckets || buckets.length === 0) {
+                container.innerHTML = '<div class="loading">No bot data</div>';
+                return;
+            }
+            
+            const total = buckets.reduce((sum, b) => sum + b.hitCount, 0);
+            
+            container.innerHTML = `
+                <div class="chart-row">
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">Risk Distribution (click to drill)</h4>
+                        ${buckets.map(b => {
+                            const pct = ((b.hitCount / total) * 100).toFixed(1);
+                            return `
+                                <div class="bar-item" onclick="loadBotDetails('${b.riskBucket}')">
+                                    <span class="bar-label">${b.riskBucket}</span>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width: ${pct}%; background: ${b.bucketColor}"></div>
+                                    </div>
+                                    <span class="bar-value">${b.hitCount}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                <div id="botDetailsTable" style="margin-top: 20px;"></div>
+            `;
+        }
+        
+        async function loadBotDetails(bucket) {
+            const container = document.getElementById('botDetailsTable');
+            container.innerHTML = '<div class="loading">Loading details...</div>';
+            
+            const data = await fetchJson(`/api/dashboard/bot-details?bucket=${encodeURIComponent(bucket)}&limit=20`);
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No records</div>';
+                return;
+            }
+            
+            container.innerHTML = `
+                <h4 style="margin-bottom: 12px; color: var(--text-dim);">${bucket} Records</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>IP</th>
+                            <th>Score</th>
+                            <th>WebDriver</th>
+                            <th>Exec Time</th>
+                            <th>Device</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(r => `
+                            <tr>
+                                <td>${formatTime(r.receivedAt)}</td>
+                                <td style="font-family: monospace">${r.ipAddress || '--'}</td>
+                                <td><span class="badge badge-${getBadgeClass(r.riskBucket)}">${r.botScore || 0}</span></td>
+                                <td>${r.webDriverDetected ? '⚠️ Yes' : '✓ No'}</td>
+                                <td>${r.scriptExecutionTimeMs || '--'}ms</td>
+                                <td>${r.deviceType || '--'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        // Evasion Drilldown
+        async function loadEvasionDrilldown(container) {
+            const data = await fetchJson('/api/dashboard/evasion-summary');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No evasion data</div>';
+                return;
+            }
+            
+            const total = data.reduce((sum, d) => sum + d.hitCount, 0);
+            
+            container.innerHTML = `
+                <div class="chart-row">
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">Evasion by Type</h4>
+                        ${data.map(d => {
+                            const pct = ((d.hitCount / total) * 100).toFixed(1);
+                            const color = d.evasionType === 'No Evasion' ? 'var(--green)' : 
+                                          d.evasionType === 'Both Blocked' ? 'var(--red)' : 'var(--orange)';
+                            return `
+                                <div class="bar-item">
+                                    <span class="bar-label">${d.evasionType}</span>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width: ${pct}%; background: ${color}"></div>
+                                    </div>
+                                    <span class="bar-value">${d.hitCount}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                <p style="margin-top: 16px; color: var(--text-dim); font-size: 13px;">
+                    Tor Browser Signature (1000x900): ${data.reduce((sum, d) => sum + (d.torSignatureCount || 0), 0)} detected
+                </p>
+            `;
+        }
+        
+        // Timing Drilldown
+        async function loadTimingDrilldown(container) {
+            const data = await fetchJson('/api/dashboard/timing');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No timing data</div>';
+                return;
+            }
+            
+            const total = data.reduce((sum, d) => sum + d.hitCount, 0);
+            
+            container.innerHTML = `
+                <div class="chart-row">
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">Script Execution Time</h4>
+                        ${data.map(d => {
+                            const pct = ((d.hitCount / total) * 100).toFixed(1);
+                            return `
+                                <div class="bar-item">
+                                    <span class="bar-label" style="width: 180px">${d.timingBucket}</span>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width: ${pct}%; background: ${d.bucketColor}"></div>
+                                    </div>
+                                    <span class="bar-value">${d.hitCount}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                <p style="margin-top: 16px; color: var(--text-dim); font-size: 13px;">
+                    <strong>Interpretation:</strong> Scripts executing in &lt;10ms are almost certainly bots (no human can load a page that fast).
+                </p>
+            `;
+        }
+        
+        // Device Drilldown
+        async function loadDeviceDrilldown(container) {
+            const data = await fetchJson('/api/dashboard/devices');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No device data</div>';
+                return;
+            }
+            
+            // Group by DeviceType
+            const byType = {};
+            const byBrowser = {};
+            const byOS = {};
+            
+            data.forEach(d => {
+                byType[d.deviceType] = (byType[d.deviceType] || 0) + d.hits;
+                byBrowser[d.browser] = (byBrowser[d.browser] || 0) + d.hits;
+                byOS[d.operatingSystem] = (byOS[d.operatingSystem] || 0) + d.hits;
+            });
+            
+            container.innerHTML = `
+                <div class="chart-row">
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">By Device Type</h4>
+                        ${renderBarChart(byType, 'var(--blue)')}
+                    </div>
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">By Browser</h4>
+                        ${renderBarChart(byBrowser, 'var(--green)')}
+                    </div>
+                    <div class="bar-chart">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">By OS</h4>
+                        ${renderBarChart(byOS, 'var(--orange)')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Cross-Network Drilldown
+        async function loadCrossNetDrilldown(container) {
+            const data = await fetchJson('/api/dashboard/cross-network?limit=15');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No cross-network devices found</div>';
+                return;
+            }
+            
+            container.innerHTML = `
+                <p style="margin-bottom: 16px; color: var(--text-dim);">
+                    These devices have been seen from multiple IP addresses, indicating they've moved between networks.
+                </p>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Device Fingerprint</th>
+                            <th>IPs</th>
+                            <th>Device</th>
+                            <th>OS</th>
+                            <th>GPU</th>
+                            <th>Hits</th>
+                            <th>Days Active</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(r => `
+                            <tr>
+                                <td style="font-family: monospace; font-size: 11px;">${truncate(r.deviceFingerprint, 20)}</td>
+                                <td><strong>${r.uniqueIPAddresses}</strong></td>
+                                <td>${r.deviceType || '--'}</td>
+                                <td>${r.operatingSystem || '--'}</td>
+                                <td style="font-size: 11px;">${truncate(r.gpu || '--', 25)}</td>
+                                <td>${r.totalHits}</td>
+                                <td>${r.uniqueDays}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        // Trends Drilldown
+        async function loadTrendsDrilldown(container) {
+            const data = await fetchJson('/api/dashboard/trends?days=7');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="loading">No trend data</div>';
+                return;
+            }
+            
+            const maxHits = Math.max(...data.map(d => d.totalHits));
+            
+            container.innerHTML = `
+                <div class="chart-row">
+                    <div class="bar-chart" style="flex: 2;">
+                        <h4 style="margin-bottom: 12px; color: var(--text-dim);">Hits by Day (Last 7 Days)</h4>
+                        ${data.reverse().map(d => {
+                            const pct = ((d.totalHits / maxHits) * 100).toFixed(1);
+                            const date = new Date(d.dateBucket).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                            return `
+                                <div class="bar-item">
+                                    <span class="bar-label">${date}</span>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width: ${pct}%; background: var(--blue)"></div>
+                                    </div>
+                                    <span class="bar-value">${d.totalHits}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                <table class="data-table" style="margin-top: 20px;">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Hits</th>
+                            <th>Devices</th>
+                            <th>High Risk</th>
+                            <th>Evasion</th>
+                            <th>Fast Exec</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(d => {
+                            const date = new Date(d.dateBucket).toLocaleDateString();
+                            return `
+                                <tr>
+                                    <td>${date}</td>
+                                    <td>${d.totalHits}</td>
+                                    <td>${d.uniqueDevices}</td>
+                                    <td>${d.highRiskCount}</td>
+                                    <td>${d.evasionCount}</td>
+                                    <td>${d.fastExecCount}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        // =====================================================================
+        // UTILITY FUNCTIONS
+        // =====================================================================
+        function formatNumber(n) {
+            if (n === null || n === undefined) return '--';
+            return n.toLocaleString();
+        }
+        
+        function formatTime(isoString) {
+            if (!isoString) return '--';
+            // SQL Server returns UTC without 'Z' suffix - add it so JS interprets correctly
+            const utcString = isoString.endsWith('Z') ? isoString : isoString + 'Z';
+            const d = new Date(utcString);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            const isYesterday = d.toDateString() === new Date(now - 86400000).toDateString();
+            
+            const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            
+            if (isToday) {
+                return time;
+            } else if (isYesterday) {
+                return `Yesterday ${time}`;
+            } else {
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + time;
+            }
+        }
+        
+        // Format LocalReceivedAt - already in visitor's local timezone from SQL
+        // No Z suffix needed since it's already local time
+        function formatLocalTime(isoString) {
+            if (!isoString) return '--';
+            // Parse as-is (no Z suffix) - SQL computed local time
+            const d = new Date(isoString);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            const isYesterday = d.toDateString() === new Date(now - 86400000).toDateString();
+            
+            const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            
+            if (isToday) {
+                return time;
+            } else if (isYesterday) {
+                return `Yesterday ${time}`;
+            } else {
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + time;
+            }
+        }
+        
+        function formatTrend(diff, suffix) {
+            if (diff > 0) return `<span class="trend-up">↑ +${diff} ${suffix}</span>`;
+            if (diff < 0) return `<span class="trend-down">↓ ${diff} ${suffix}</span>`;
+            return `<span class="trend-neutral">→ ${suffix}</span>`;
+        }
+        
+        function getBadgeClass(bucket) {
+            if (!bucket) return 'human';
+            if (bucket.includes('High')) return 'high';
+            if (bucket.includes('Medium')) return 'medium';
+            if (bucket.includes('Low')) return 'low';
+            return 'human';
+        }
+        
+        function truncate(str, len) {
+            if (!str) return '--';
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+        
+        function renderBarChart(obj, color) {
+            const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+            const max = Math.max(...entries.map(e => e[1]));
+            
+            return entries.map(([label, count]) => {
+                const pct = ((count / max) * 100).toFixed(1);
+                return `
+                    <div class="bar-item">
+                        <span class="bar-label">${label}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width: ${pct}%; background: ${color}"></div>
+                        </div>
+                        <span class="bar-value">${count}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // =====================================================================
+        // EVENT LISTENERS
+        // =====================================================================
+        document.querySelectorAll('.kpi-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const drill = card.dataset.drill;
+                if (currentDrill === drill) {
+                    closeDrilldown();
+                } else {
+                    openDrilldown(drill);
+                }
+            });
+        });
+        
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+        async function init() {
+            await Promise.all([
+                loadKPIs(),
+                loadLiveFeed(),
+                loadDeviceMix()
+            ]);
+            
+            // Auto-refresh every 10 seconds
+            refreshInterval = setInterval(async () => {
+                await loadKPIs();
+                await loadLiveFeed();
+                await loadDeviceMix();
+            }, 10000);
+        }
+        
+        init();
+    </script>
+</body>
+</html>

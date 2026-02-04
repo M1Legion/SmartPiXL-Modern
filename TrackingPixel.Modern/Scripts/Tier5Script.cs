@@ -18,9 +18,31 @@ public static class Tier5Script
         var n = navigator;
         var w = window;
         var d = new Date();
-        var c = n.connection || {};
         var perf = w.performance || {};
         var data = {};
+        
+        // ============================================
+        // SAFE ACCESSOR - Handles privacy extension Proxy traps
+        // Privacy extensions (JShelter, Trace, etc.) wrap navigator in Proxy
+        // which can throw on property access. This helper catches those.
+        // MUST be defined early before any navigator property access!
+        // ============================================
+        var safeGet = function(obj, prop, fallback) {
+            try {
+                var val = obj[prop];
+                // If it's a function, try to call it
+                if (typeof val === 'function') {
+                    try { return val.call(obj); } catch(e) { return fallback; }
+                }
+                return val !== undefined ? val : fallback;
+            } catch(e) {
+                data._proxyBlocked = (data._proxyBlocked || '') + prop + ',';
+                return fallback;
+            }
+        };
+        
+        // Connection object - use safeGet since this is navigator property
+        var c = safeGet(n, 'connection', {}) || {};
         
         // ============================================
         // SHARED HASH FUNCTION (optimized - single allocation)
@@ -250,12 +272,13 @@ public static class Tier5Script
         })();
         
         // ============================================
-        // STORAGE ESTIMATION
+        // STORAGE ESTIMATION (wrapped in try-catch + safeGet)
         // ============================================
         (function() {
             try {
-                if (n.storage && n.storage.estimate) {
-                    n.storage.estimate().then(function(est) {
+                var storage = safeGet(n, 'storage', null);
+                if (storage && storage.estimate) {
+                    storage.estimate().then(function(est) {
                         data.storageQuota = Math.round((est.quota || 0) / 1073741824);
                         data.storageUsed = Math.round((est.usage || 0) / 1048576);
                     });
@@ -264,11 +287,12 @@ public static class Tier5Script
         })();
         
         // ============================================
-        // GAMEPAD DETECTION
+        // GAMEPAD DETECTION (wrapped in try-catch + safeGet)
         // ============================================
         data.gamepads = (function() {
             try {
-                var gp = n.getGamepads ? n.getGamepads() : [];
+                var getGP = safeGet(n, 'getGamepads', null);
+                var gp = getGP ? getGP.call(n) : [];
                 var found = [];
                 for (var i = 0; i < gp.length; i++) {
                     if (gp[i]) found.push(gp[i].id);
@@ -278,12 +302,13 @@ public static class Tier5Script
         })();
         
         // ============================================
-        // BATTERY STATUS
+        // BATTERY STATUS (wrapped in try-catch + safeGet)
         // ============================================
         (function() {
             try {
-                if (n.getBattery) {
-                    n.getBattery().then(function(b) {
+                var getBat = safeGet(n, 'getBattery', null);
+                if (getBat) {
+                    getBat.call(n).then(function(b) {
                         data.batteryLevel = Math.round(b.level * 100);
                         data.batteryCharging = b.charging ? 1 : 0;
                     });
@@ -292,12 +317,13 @@ public static class Tier5Script
         })();
         
         // ============================================
-        // MEDIA DEVICES COUNT
+        // MEDIA DEVICES COUNT (wrapped in try-catch + safeGet)
         // ============================================
         (function() {
             try {
-                if (n.mediaDevices && n.mediaDevices.enumerateDevices) {
-                    n.mediaDevices.enumerateDevices().then(function(devices) {
+                var mediaDevices = safeGet(n, 'mediaDevices', null);
+                if (mediaDevices && mediaDevices.enumerateDevices) {
+                    mediaDevices.enumerateDevices().then(function(devices) {
                         var audio = 0, video = 0;
                         devices.forEach(function(d) {
                             if (d.kind === 'audioinput') audio++;
@@ -328,13 +354,13 @@ public static class Tier5Script
         data.sy = w.screenY || w.screenTop || 0;
         
         // ============================================
-        // TIME & LOCALE
+        // TIME & LOCALE (using safeGet for language properties)
         // ============================================
         data.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         data.tzo = d.getTimezoneOffset();
         data.ts = d.getTime();
-        data.lang = n.language;
-        data.langs = (n.languages || []).join(',');
+        data.lang = safeGet(n, 'language', '');
+        data.langs = (safeGet(n, 'languages', []) || []).join(',');
         
         // ============================================
         // TIMEZONE LOCALE FORMATTING (High Entropy)
@@ -370,23 +396,23 @@ public static class Tier5Script
         })();
         
         // ============================================
-        // DEVICE & BROWSER
+        // DEVICE & BROWSER (using safeGet for Proxy protection)
         // ============================================
-        data.plt = n.platform || '';
-        data.vnd = n.vendor || '';
-        data.ua = n.userAgent || '';
-        data.cores = n.hardwareConcurrency || '';
-        data.mem = n.deviceMemory || '';
-        data.touch = n.maxTouchPoints || 0;
-        data.product = n.product || '';
-        data.productSub = n.productSub || '';
-        data.vendorSub = n.vendorSub || '';
+        data.plt = safeGet(n, 'platform', '');
+        data.vnd = safeGet(n, 'vendor', '');
+        data.ua = safeGet(n, 'userAgent', '');
+        data.cores = safeGet(n, 'hardwareConcurrency', '');
+        data.mem = safeGet(n, 'deviceMemory', '');
+        data.touch = safeGet(n, 'maxTouchPoints', 0);
+        data.product = safeGet(n, 'product', '');
+        data.productSub = safeGet(n, 'productSub', '');
+        data.vendorSub = safeGet(n, 'vendorSub', '');
         
         // ============================================
-        // FIREFOX-SPECIFIC SIGNALS
+        // FIREFOX-SPECIFIC SIGNALS (using safeGet)
         // ============================================
-        data.oscpu = n.oscpu || '';  // Firefox only
-        data.buildID = n.buildID || '';  // Firefox only (version fingerprint)
+        data.oscpu = safeGet(n, 'oscpu', '');  // Firefox only
+        data.buildID = safeGet(n, 'buildID', '');  // Firefox only (version fingerprint)
         
         // ============================================
         // CHROME-SPECIFIC SIGNALS
@@ -402,12 +428,13 @@ public static class Tier5Script
         }
         
         // ============================================
-        // HIGH-ENTROPY CLIENT HINTS (async)
+        // HIGH-ENTROPY CLIENT HINTS (async) - using safeGet for userAgentData
         // ============================================
+        var userAgentData = safeGet(n, 'userAgentData', null);
         (function() {
             try {
-                if (n.userAgentData && n.userAgentData.getHighEntropyValues) {
-                    n.userAgentData.getHighEntropyValues([
+                if (userAgentData && userAgentData.getHighEntropyValues) {
+                    userAgentData.getHighEntropyValues([
                         'architecture', 'bitness', 'model', 'platformVersion',
                         'fullVersionList', 'wow64', 'formFactor'
                     ]).then(function(ua) {
@@ -427,24 +454,27 @@ public static class Tier5Script
             } catch(e) {}
         })();
         
-        // Low-entropy client hints (sync)
-        if (n.userAgentData) {
-            data.uaMobile = n.userAgentData.mobile ? 1 : 0;
-            data.uaPlatform = n.userAgentData.platform || '';
-            data.uaBrands = (n.userAgentData.brands || []).map(function(b) {
+        // Low-entropy client hints (sync) - using cached userAgentData
+        if (userAgentData) {
+            data.uaMobile = userAgentData.mobile ? 1 : 0;
+            data.uaPlatform = userAgentData.platform || '';
+            data.uaBrands = (userAgentData.brands || []).map(function(b) {
                 return b.brand + '/' + b.version;
             }).join('|');
         }
         
         // ============================================
-        // DETAILED PLUGIN ENUMERATION
+        // DETAILED PLUGIN ENUMERATION (using safeGet for Proxy protection)
         // ============================================
+        var pluginsArray = safeGet(n, 'plugins', null);
+        var mimeTypesArray = safeGet(n, 'mimeTypes', null);
+        
         data.pluginList = (function() {
             try {
-                if (!n.plugins || n.plugins.length === 0) return '';
+                if (!pluginsArray || pluginsArray.length === 0) return '';
                 var plugs = [];
-                for (var i = 0; i < Math.min(n.plugins.length, 20); i++) {
-                    var p = n.plugins[i];
+                for (var i = 0; i < Math.min(pluginsArray.length, 20); i++) {
+                    var p = pluginsArray[i];
                     if (p && p.name) {
                         plugs.push(p.name + '::' + (p.filename || '') + '::' + (p.description || '').substring(0, 50));
                     }
@@ -455,30 +485,30 @@ public static class Tier5Script
         
         data.mimeList = (function() {
             try {
-                if (!n.mimeTypes || n.mimeTypes.length === 0) return '';
+                if (!mimeTypesArray || mimeTypesArray.length === 0) return '';
                 var mimes = [];
-                for (var i = 0; i < Math.min(n.mimeTypes.length, 30); i++) {
-                    var m = n.mimeTypes[i];
+                for (var i = 0; i < Math.min(mimeTypesArray.length, 30); i++) {
+                    var m = mimeTypesArray[i];
                     if (m && m.type) mimes.push(m.type);
                 }
                 return mimes.join(',');
             } catch(e) { return ''; }
         })();
-        data.appName = n.appName || '';
-        data.appVersion = n.appVersion || '';
-        data.appCodeName = n.appCodeName || '';
+        data.appName = safeGet(n, 'appName', '');
+        data.appVersion = safeGet(n, 'appVersion', '');
+        data.appCodeName = safeGet(n, 'appCodeName', '');
         
         // ============================================
-        // BROWSER CAPABILITIES
+        // BROWSER CAPABILITIES (using safeGet for Proxy-protected properties)
         // ============================================
-        data.ck = n.cookieEnabled ? 1 : 0;
-        data.dnt = n.doNotTrack || '';
-        data.pdf = n.pdfViewerEnabled ? 1 : 0;
-        data.webdr = n.webdriver ? 1 : 0;
-        data.online = n.onLine ? 1 : 0;
-        data.java = n.javaEnabled ? (n.javaEnabled() ? 1 : 0) : 0;
-        data.plugins = n.plugins ? n.plugins.length : 0;
-        data.mimeTypes = n.mimeTypes ? n.mimeTypes.length : 0;
+        data.ck = safeGet(n, 'cookieEnabled', false) ? 1 : 0;
+        data.dnt = safeGet(n, 'doNotTrack', '');
+        data.pdf = safeGet(n, 'pdfViewerEnabled', false) ? 1 : 0;
+        data.webdr = safeGet(n, 'webdriver', false) ? 1 : 0;
+        data.online = safeGet(n, 'onLine', true) ? 1 : 0;
+        data.java = safeGet(n, 'javaEnabled', 0) ? 1 : 0;  // safeGet handles function call
+        data.plugins = pluginsArray ? pluginsArray.length : 0;
+        data.mimeTypes = mimeTypesArray ? mimeTypesArray.length : 0;
         
         // ============================================
         // BOT DETECTION (Comprehensive)
@@ -487,13 +517,26 @@ public static class Tier5Script
             var signals = [];
             var score = 0;
             
-            // 1. WebDriver detection (most common)
-            if (n.webdriver) { signals.push('webdriver'); score += 10; }
+            // 1. WebDriver detection (most common) - use data.webdr captured earlier
+            if (data.webdr) { signals.push('webdriver'); score += 10; }
             
-            // 2. Headless Chrome detection
-            if (!w.chrome && /Chrome/.test(n.userAgent)) {
+            // 2. Headless Chrome detection - use data.ua captured earlier
+            if (!w.chrome && /Chrome/.test(data.ua)) {
                 signals.push('headless-no-chrome-obj');
                 score += 8;
+            }
+            
+            // 2b. Minimal/Fake User-Agent detection
+            // Real browsers have UA strings 50+ chars, bots often set minimal strings
+            var ua = data.ua || '';
+            if (ua.length < 30) {
+                signals.push('minimal-ua');
+                score += 15;
+            }
+            // Known fake UA patterns
+            if (/^(desktop|mobile|bot|crawler|spider|scraper)$/i.test(ua)) {
+                signals.push('fake-ua');
+                score += 20;
             }
             
             // 3. PhantomJS detection
@@ -517,7 +560,8 @@ public static class Tier5Script
             }
             
             // 6. Puppeteer/Playwright detection
-            if (n.languages && n.languages.length === 0) {
+            var langs = safeGet(n, 'languages', null);
+            if (langs && langs.length === 0) {
                 signals.push('empty-languages');
                 score += 5;
             }
@@ -531,9 +575,11 @@ public static class Tier5Script
             }
             
             // 8. Permission inconsistencies (bots often have weird permission states)
+            // Use safeGet for permissions API
+            var permissions = safeGet(n, 'permissions', null);
             try {
-                if (n.permissions) {
-                    n.permissions.query({name: 'notifications'}).then(function(p) {
+                if (permissions) {
+                    permissions.query({name: 'notifications'}).then(function(p) {
                         if (p.state === 'denied' && Notification && Notification.permission === 'default') {
                             signals.push('perm-inconsistent');
                             data.botPermInconsistent = 1;
@@ -542,8 +588,8 @@ public static class Tier5Script
                 }
             } catch(e) {}
             
-            // 9. Plugin/mimeType inconsistencies
-            if (n.plugins && n.plugins.length === 0 && n.mimeTypes && n.mimeTypes.length > 0) {
+            // 9. Plugin/mimeType inconsistencies - use already-captured pluginsArray/mimeTypesArray
+            if (pluginsArray && pluginsArray.length === 0 && mimeTypesArray && mimeTypesArray.length > 0) {
                 signals.push('plugin-mime-mismatch');
                 score += 3;
             }
@@ -555,7 +601,8 @@ public static class Tier5Script
             }
             
             // 11. No browser plugins (very rare for real users)
-            if ((!n.plugins || n.plugins.length === 0) && !/Firefox/.test(n.userAgent)) {
+            // Use data.ua which was safely captured earlier
+            if ((!pluginsArray || pluginsArray.length === 0) && !/Firefox/.test(data.ua)) {
                 signals.push('no-plugins');
                 score += 2;
             }
@@ -582,10 +629,12 @@ public static class Tier5Script
             
             // 15. Function.toString tampering (bots often patch native functions)
             try {
-                var fnStr = Function.prototype.toString.call(n.permissions.query);
-                if (fnStr.indexOf('[native code]') === -1) {
-                    signals.push('fn-tampered');
-                    score += 5;
+                if (permissions) {
+                    var fnStr = Function.prototype.toString.call(permissions.query);
+                    if (fnStr.indexOf('[native code]') === -1) {
+                        signals.push('fn-tampered');
+                        score += 5;
+                    }
                 }
             } catch(e) {}
             
@@ -608,7 +657,7 @@ public static class Tier5Script
             }
             
             // 18. Headless detection via missing plugins in Chromium
-            if (/HeadlessChrome/.test(n.userAgent)) {
+            if (/HeadlessChrome/.test(data.ua)) {
                 signals.push('headless-ua');
                 score += 10;
             }
@@ -617,7 +666,7 @@ public static class Tier5Script
             // but Notification.permission might report 'default' - inconsistency
             try {
                 if (w.Notification && Notification.permission === 'denied' && 
-                    n.permissions) {
+                    permissions) {
                     // Already checked above, but Playwright specifically has this issue
                 }
             } catch(e) {}
@@ -635,7 +684,8 @@ public static class Tier5Script
             }
             
             // 22. Missing connection info (common in headless)
-            if (!n.connection && /Chrome/.test(n.userAgent)) {
+            // Use data.ua which was safely captured earlier
+            if (!c && /Chrome/.test(data.ua)) {
                 signals.push('no-connection-api');
                 score += 3;
             }
@@ -692,13 +742,15 @@ public static class Tier5Script
             if (s.width === 1000 && s.height === 1000) {
                 detected.push('tor-screen');
             }
-            if (n.platform === 'Win32' && s.colorDepth === 24 && !w.chrome) {
+            // Use data.plt captured earlier via safeGet
+            if (data.plt === 'Win32' && s.colorDepth === 24 && !w.chrome) {
                 // Tor on Windows has specific fingerprint
                 detected.push('tor-likely');
             }
             
             // 2. Brave Browser (randomizes fingerprints)
-            if (n.brave && typeof n.brave.isBrave === 'function') {
+            var braveNav = safeGet(n, 'brave', null);
+            if (braveNav && typeof braveNav.isBrave === 'function') {
                 detected.push('brave');
             }
             
@@ -710,9 +762,9 @@ public static class Tier5Script
             
             // 4. Canvas Blocker extensions (already in canvasEvasion)
             
-            // 5. User Agent spoofing detection
-            var platform = n.platform.toLowerCase();
-            var ua = n.userAgent.toLowerCase();
+            // 5. User Agent spoofing detection - use data.plt and data.ua captured earlier
+            var platform = (data.plt || '').toLowerCase();
+            var ua = (data.ua || '').toLowerCase();
             if ((platform.indexOf('win') > -1 && ua.indexOf('mac') > -1) ||
                 (platform.indexOf('mac') > -1 && ua.indexOf('windows') > -1) ||
                 (platform.indexOf('linux') > -1 && ua.indexOf('windows') > -1 && ua.indexOf('android') === -1)) {
@@ -720,18 +772,32 @@ public static class Tier5Script
             }
             
             // 6. Screen resolution vs. User Agent mismatch (mobile UA on desktop resolution)
-            if (/Mobile|Android|iPhone/.test(n.userAgent) && s.width > 1024) {
+            if (/Mobile|Android|iPhone/.test(data.ua) && s.width > 1024) {
                 detected.push('mobile-ua-desktop-screen');
             }
             
-            // 7. Touch capability mismatch
-            if (n.maxTouchPoints > 0 && !/Mobile|Android|iPhone|iPad|Touch/.test(n.userAgent) && s.width > 1024) {
+            // 7. Touch capability mismatch - use data.touch captured earlier
+            if (data.touch > 0 && !/Mobile|Android|iPhone|iPad|Touch/.test(data.ua) && s.width > 1024) {
                 detected.push('touch-mismatch');
             }
             
             // 8. NoScript detection - check if key APIs are undefined
             if (typeof w.Worker === 'undefined' && typeof w.fetch !== 'undefined') {
                 detected.push('partial-js-block');
+            }
+            
+            // 9. Client Hints vs Navigator.platform mismatch
+            // Bots often spoof one but not the other - use safeGet for userAgentData
+            var uaData = safeGet(n, 'userAgentData', null);
+            if (uaData && uaData.platform) {
+                var chPlatform = uaData.platform.toLowerCase();
+                var navPlatform = (data.plt || '').toLowerCase();
+                // Linux platform but Windows client hints (or vice versa)
+                if ((navPlatform.indexOf('linux') > -1 && chPlatform === 'windows') ||
+                    (navPlatform.indexOf('win') > -1 && chPlatform === 'linux') ||
+                    (navPlatform.indexOf('mac') > -1 && chPlatform !== 'macos' && chPlatform !== 'mac')) {
+                    detected.push('clienthints-platform-mismatch');
+                }
             }
             
             return detected.join(',');
@@ -782,27 +848,28 @@ public static class Tier5Script
         data.caches = !!w.caches ? 1 : 0;
         
         // ============================================
-        // FEATURE DETECTION
+        // FEATURE DETECTION (using safeGet for navigator properties)
         // ============================================
         data.ww = !!w.Worker ? 1 : 0;
-        data.swk = !!n.serviceWorker ? 1 : 0;
+        data.swk = !!safeGet(n, 'serviceWorker', null) ? 1 : 0;
         data.wasm = typeof WebAssembly === 'object' ? 1 : 0;
         data.webgl = (function() { try { return !!document.createElement('canvas').getContext('webgl'); } catch(e) { return 0; } })() ? 1 : 0;
         data.webgl2 = (function() { try { return !!document.createElement('canvas').getContext('webgl2'); } catch(e) { return 0; } })() ? 1 : 0;
         data.canvas = !!document.createElement('canvas').getContext ? 1 : 0;
         data.touchEvent = 'ontouchstart' in w ? 1 : 0;
         data.pointerEvent = !!w.PointerEvent ? 1 : 0;
-        data.mediaDevices = !!n.mediaDevices ? 1 : 0;
-        data.bluetooth = !!n.bluetooth ? 1 : 0;
-        data.usb = !!n.usb ? 1 : 0;
-        data.serial = !!n.serial ? 1 : 0;
-        data.hid = !!n.hid ? 1 : 0;
-        data.midi = !!n.requestMIDIAccess ? 1 : 0;
-        data.xr = !!n.xr ? 1 : 0;
-        data.share = !!n.share ? 1 : 0;
-        data.clipboard = !!(n.clipboard && n.clipboard.writeText) ? 1 : 0;
-        data.credentials = !!n.credentials ? 1 : 0;
-        data.geolocation = !!n.geolocation ? 1 : 0;
+        data.mediaDevices = !!safeGet(n, 'mediaDevices', null) ? 1 : 0;
+        data.bluetooth = !!safeGet(n, 'bluetooth', null) ? 1 : 0;
+        data.usb = !!safeGet(n, 'usb', null) ? 1 : 0;
+        data.serial = !!safeGet(n, 'serial', null) ? 1 : 0;
+        data.hid = !!safeGet(n, 'hid', null) ? 1 : 0;
+        data.midi = !!safeGet(n, 'requestMIDIAccess', null) ? 1 : 0;
+        data.xr = !!safeGet(n, 'xr', null) ? 1 : 0;
+        data.share = !!safeGet(n, 'share', null) ? 1 : 0;
+        var clipboardObj = safeGet(n, 'clipboard', null);
+        data.clipboard = !!(clipboardObj && clipboardObj.writeText) ? 1 : 0;
+        data.credentials = !!safeGet(n, 'credentials', null) ? 1 : 0;
+        data.geolocation = !!safeGet(n, 'geolocation', null) ? 1 : 0;
         data.notifications = !!w.Notification ? 1 : 0;
         data.push = !!(w.PushManager) ? 1 : 0;
         data.payment = !!w.PaymentRequest ? 1 : 0;

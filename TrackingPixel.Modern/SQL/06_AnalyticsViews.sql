@@ -866,12 +866,12 @@ SELECT
         ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
     ) AS DeviceFingerprint,
     
-    -- Device identification
-    CASE 
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
-        ELSE 'Desktop'
-    END AS DeviceType,
+    -- Device identification (uses GetDeviceType for correct classification)
+    dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT)
+    ) AS DeviceType,
     
     -- Browser
     CASE 
@@ -926,11 +926,11 @@ GROUP BY
         '-',
         ISNULL(dbo.GetQueryParam(QueryString, 'audioHash'), '')
     ),
-    CASE 
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT) = 1 THEN 'Mobile'
-        WHEN TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT) > 0 THEN 'Tablet'
-        ELSE 'Desktop'
-    END,
+    dbo.GetDeviceType(
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'sw') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'touch') AS INT),
+        TRY_CAST(dbo.GetQueryParam(QueryString, 'uaMobile') AS INT)
+    ),
     CASE 
         WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%OPR%' OR dbo.GetQueryParam(QueryString, 'ua') LIKE '%Opera%' THEN 'Opera'
         WHEN dbo.GetQueryParam(QueryString, 'ua') LIKE '%Edg%' THEN 'Edge'
