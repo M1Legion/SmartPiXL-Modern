@@ -44,10 +44,8 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/risk-buckets", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var dateFilter = GetSafeDateFilter(date);
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT * FROM vw_Dashboard_RiskBuckets WHERE DateBucket = {dateFilter} ORDER BY ScoreRange DESC", logger, "GetRiskBuckets");
@@ -80,10 +78,8 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/evasion-summary", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var dateFilter = GetSafeDateFilter(date);
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT * FROM vw_Dashboard_EvasionSummary WHERE DateBucket = {dateFilter}", logger, "GetEvasionSummary");
@@ -116,10 +112,8 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/timing", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var dateFilter = GetSafeDateFilter(date);
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT * FROM vw_Dashboard_TimingAnalysis WHERE DateBucket = {dateFilter}", logger, "GetTimingAnalysis");
@@ -191,10 +185,8 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/devices", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var dateFilter = GetSafeDateFilter(date);
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT * FROM vw_PiXL_DeviceBreakdown WHERE DateBucket = {dateFilter}", logger, "GetDeviceBreakdown");
@@ -273,7 +265,7 @@ public static class DashboardEndpoints
         catch (Exception ex)
         {
             logger.Error($"{endpointName}: Query failed", ex);
-            throw;
+            return new List<Dictionary<string, object?>>();
         }
     }
     
@@ -328,5 +320,26 @@ public static class DashboardEndpoints
             chars[i] = char.ToLowerInvariant(chars[i]);
         }
         return new string(chars);
+    }
+    
+    /// <summary>
+    /// Safely parses a date filter to prevent SQL injection.
+    /// Returns a SQL expression for the date filter.
+    /// </summary>
+    private static string GetSafeDateFilter(string? dateInput)
+    {
+        if (string.IsNullOrEmpty(dateInput) || dateInput.Equals("today", StringComparison.OrdinalIgnoreCase))
+        {
+            return "CAST(GETUTCDATE() AS DATE)";
+        }
+        
+        // Validate that the input is a valid date format (YYYY-MM-DD)
+        if (DateTime.TryParse(dateInput, out var parsedDate))
+        {
+            return $"'{parsedDate:yyyy-MM-dd}'";
+        }
+        
+        // Default to today if invalid
+        return "CAST(GETUTCDATE() AS DATE)";
     }
 }
