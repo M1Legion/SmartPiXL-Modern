@@ -11,11 +11,22 @@ builder.Services.AddRazorPages();
 builder.Services.AddScoped<MetricsService>();
 builder.Services.AddSingleton<HealthTracker>();
 
+// Add logging
+builder.Services.AddLogging(logging =>
+{
+    logging.AddConsole();
+    logging.AddDebug();
+});
+
 // SQL connection factory
 builder.Services.AddScoped(_ => 
     new SqlConnection(builder.Configuration.GetConnectionString("SmartPixl")));
 
 var app = builder.Build();
+
+// Get logger for startup messages
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+logger.LogInformation("SmartPiXL Diagnostics Dashboard starting...");
 
 // Optional: API key authentication for remote access
 var adminKey = builder.Configuration["AdminKey"];

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using TrackingPixel.Configuration;
+using TrackingPixel.Services;
 
 namespace TrackingPixel.Endpoints;
 
@@ -26,6 +27,7 @@ public static class DashboardEndpoints
     public static void MapDashboardEndpoints(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
+        var logger = app.Services.GetRequiredService<ITrackingLogger>();
         
         // ============================================================================
         // KPIs - Main summary cards
@@ -33,7 +35,7 @@ public static class DashboardEndpoints
         app.MapGet("/api/dashboard/kpis", async (HttpContext ctx) =>
         {
             var data = await QuerySingleRowAsync(settings.ConnectionString, 
-                "SELECT * FROM vw_Dashboard_KPIs");
+                "SELECT * FROM vw_Dashboard_KPIs", logger, "GetKPIs");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -48,7 +50,7 @@ public static class DashboardEndpoints
                 : $"'{date}'";
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_RiskBuckets WHERE DateBucket = {dateFilter} ORDER BY ScoreRange DESC");
+                $"SELECT * FROM vw_Dashboard_RiskBuckets WHERE DateBucket = {dateFilter} ORDER BY ScoreRange DESC", logger, "GetRiskBuckets");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -69,7 +71,7 @@ public static class DashboardEndpoints
             };
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_BotDetails {whereClause} ORDER BY ReceivedAt DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_BotDetails {whereClause} ORDER BY ReceivedAt DESC", logger, "GetBotDetails");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -84,7 +86,7 @@ public static class DashboardEndpoints
                 : $"'{date}'";
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_EvasionSummary WHERE DateBucket = {dateFilter}");
+                $"SELECT * FROM vw_Dashboard_EvasionSummary WHERE DateBucket = {dateFilter}", logger, "GetEvasionSummary");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -105,7 +107,7 @@ public static class DashboardEndpoints
             };
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_EvasionDetails {whereClause} ORDER BY ReceivedAt DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_EvasionDetails {whereClause} ORDER BY ReceivedAt DESC", logger, "GetEvasionDetails");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -120,7 +122,7 @@ public static class DashboardEndpoints
                 : $"'{date}'";
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_TimingAnalysis WHERE DateBucket = {dateFilter}");
+                $"SELECT * FROM vw_Dashboard_TimingAnalysis WHERE DateBucket = {dateFilter}", logger, "GetTimingAnalysis");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -132,7 +134,7 @@ public static class DashboardEndpoints
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 50;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_FingerprintDetails ORDER BY Hits DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_FingerprintDetails ORDER BY Hits DESC", logger, "GetFingerprintDetails");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -144,7 +146,7 @@ public static class DashboardEndpoints
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_GPUDistribution ORDER BY HitCount DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_GPUDistribution ORDER BY HitCount DESC", logger, "GetGPUDistribution");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -156,7 +158,7 @@ public static class DashboardEndpoints
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_ScreenDistribution ORDER BY HitCount DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_ScreenDistribution ORDER BY HitCount DESC", logger, "GetScreenDistribution");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -168,7 +170,7 @@ public static class DashboardEndpoints
             var days = int.TryParse(ctx.Request.Query["days"].FirstOrDefault(), out var d) ? d : 7;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {days} * FROM vw_Dashboard_Trends ORDER BY DateBucket DESC");
+                $"SELECT TOP {days} * FROM vw_Dashboard_Trends ORDER BY DateBucket DESC", logger, "GetTrends");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -180,7 +182,7 @@ public static class DashboardEndpoints
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 25;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_Dashboard_LiveFeed ORDER BY ReceivedAt DESC");
+                $"SELECT TOP {limit} * FROM vw_Dashboard_LiveFeed ORDER BY ReceivedAt DESC", logger, "GetLiveFeed");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -195,7 +197,7 @@ public static class DashboardEndpoints
                 : $"'{date}'";
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_PiXL_DeviceBreakdown WHERE DateBucket = {dateFilter}");
+                $"SELECT * FROM vw_PiXL_DeviceBreakdown WHERE DateBucket = {dateFilter}", logger, "GetDeviceBreakdown");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -207,7 +209,7 @@ public static class DashboardEndpoints
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT TOP {limit} * FROM vw_PiXL_DeviceIdentity WHERE UniqueIPAddresses > 1 ORDER BY UniqueIPAddresses DESC");
+                $"SELECT TOP {limit} * FROM vw_PiXL_DeviceIdentity WHERE UniqueIPAddresses > 1 ORDER BY UniqueIPAddresses DESC", logger, "GetCrossNetworkDevices");
             await WriteJsonAsync(ctx, data);
         });
         
@@ -242,34 +244,42 @@ public static class DashboardEndpoints
     // HELPER METHODS
     // ============================================================================
     
-    private static async Task<List<Dictionary<string, object?>>> QueryAsync(string connectionString, string sql)
+    private static async Task<List<Dictionary<string, object?>>> QueryAsync(string connectionString, string sql, ITrackingLogger logger, string endpointName)
     {
-        var results = new List<Dictionary<string, object?>>();
-        
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync();
-        
-        await using var cmd = new SqlCommand(sql, conn);
-        cmd.CommandTimeout = 30;
-        
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        try
         {
-            var row = new Dictionary<string, object?>();
-            for (int i = 0; i < reader.FieldCount; i++)
+            var results = new List<Dictionary<string, object?>>();
+            
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+            
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandTimeout = 30;
+            
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                var value = reader.GetValue(i);
-                row[reader.GetName(i)] = value == DBNull.Value ? null : value;
+                var row = new Dictionary<string, object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var value = reader.GetValue(i);
+                    row[reader.GetName(i)] = value == DBNull.Value ? null : value;
+                }
+                results.Add(row);
             }
-            results.Add(row);
+            
+            return results;
         }
-        
-        return results;
+        catch (Exception ex)
+        {
+            logger.Error($"{endpointName}: Query failed", ex);
+            throw;
+        }
     }
     
-    private static async Task<Dictionary<string, object?>> QuerySingleRowAsync(string connectionString, string sql)
+    private static async Task<Dictionary<string, object?>> QuerySingleRowAsync(string connectionString, string sql, ITrackingLogger logger, string endpointName)
     {
-        var results = await QueryAsync(connectionString, sql);
+        var results = await QueryAsync(connectionString, sql, logger, endpointName);
         return results.FirstOrDefault() ?? new Dictionary<string, object?>();
     }
     
