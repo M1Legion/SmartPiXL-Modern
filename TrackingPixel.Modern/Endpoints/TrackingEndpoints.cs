@@ -1,6 +1,4 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using TrackingPixel.Scripts;
 using TrackingPixel.Services;
 
@@ -77,13 +75,14 @@ public static class TrackingEndpoints
         app.MapGet("/images/{fileName}", async (HttpContext ctx, string fileName) =>
         {
             // Sanitize filename to prevent path traversal
-            if (fileName.Contains("..") || fileName.Contains("/") || fileName.Contains("\\"))
+            var sanitized = Path.GetFileName(fileName);
+            if (string.IsNullOrEmpty(sanitized) || sanitized != fileName)
             {
                 ctx.Response.StatusCode = 400;
                 return;
             }
             
-            var imagePath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "images", fileName) : null;
+            var imagePath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "images", sanitized) : null;
             if (imagePath != null && File.Exists(imagePath))
             {
                 var ext = Path.GetExtension(fileName).ToLowerInvariant();
@@ -148,7 +147,6 @@ public static class TrackingEndpoints
             var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
             var javascript = Tier5Script.Template.Replace("{{PIXEL_URL}}", pixelUrl);
             
-            ctx.Response.ContentType = "application/javascript; charset=utf-8";
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             
             return Results.Text(javascript, "application/javascript");

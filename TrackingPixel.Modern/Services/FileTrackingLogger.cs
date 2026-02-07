@@ -27,7 +27,7 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         "NONE   "  // 5
     ];
     
-    private record LogEntry(DateTime Timestamp, TrackingLogLevel Level, string Message);
+    private readonly record struct LogEntry(DateTime Timestamp, TrackingLogLevel Level, string Message);
     
     public FileTrackingLogger(TrackingLogSettings settings)
     {
@@ -118,11 +118,18 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         }
         
         // Final drain on shutdown
+        var drainSb = new StringBuilder(512);
         while (_logQueue.TryTake(out var remaining))
         {
+            drainSb.Append('[').Append(remaining.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] ");
+            drainSb.Append('[').Append(LogLevelStrings[(int)remaining.Level]).Append("] ");
+            drainSb.AppendLine(remaining.Message);
+        }
+        
+        if (drainSb.Length > 0)
+        {
             var logFile = GetLogFilePath();
-            var line = $"[{remaining.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{LogLevelStrings[(int)remaining.Level]}] {remaining.Message}\n";
-            try { File.AppendAllText(logFile, line); } catch { }
+            try { await File.AppendAllTextAsync(logFile, drainSb.ToString()); } catch { }
         }
     }
     

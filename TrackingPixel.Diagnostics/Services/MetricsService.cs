@@ -189,7 +189,7 @@ public class MetricsService(SqlConnection db)
         double collisionRate = 0;
         if (collisions?.UniqueFingerprints > 0 && collisions?.TotalHits > 0)
         {
-            collisionRate = (1.0 - ((double)collisions.UniqueFingerprints / (double)collisions.TotalHits)) * 100;
+            collisionRate = (1.0 - ((double)collisions!.UniqueFingerprints / (double)collisions.TotalHits)) * 100;
         }
 
         return new FingerprintMetrics

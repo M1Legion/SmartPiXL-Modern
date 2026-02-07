@@ -30,7 +30,8 @@ var logSettings = builder.Configuration
 // ============================================================================
 
 // Logging - async file logger with configurable verbosity
-builder.Services.AddSingleton<ITrackingLogger>(new FileTrackingLogger(logSettings));
+builder.Services.AddSingleton<FileTrackingLogger>(new FileTrackingLogger(logSettings));
+builder.Services.AddSingleton<ITrackingLogger>(sp => sp.GetRequiredService<FileTrackingLogger>());
 
 // Capture service - extracts data from HTTP requests (stateless, thread-safe)
 builder.Services.AddSingleton<TrackingCaptureService>();
@@ -54,8 +55,8 @@ builder.Host.UseWindowsService(options =>
 // KESTREL CONFIGURATION - Uses appsettings.json "Kestrel" section if present
 // Falls back to dev ports (6000/6001) if not configured
 // ============================================================================
-var kestrelSection = builder.Configuration.GetSection("Kestrel");
-if (!kestrelSection.Exists())
+var kestrelEndpoints = builder.Configuration.GetSection("Kestrel:Endpoints");
+if (!kestrelEndpoints.Exists())
 {
     // Development fallback - hardcoded ports
     builder.WebHost.ConfigureKestrel(options =>
@@ -85,8 +86,8 @@ var forwardedOptions = new ForwardedHeadersOptions
     // Trust all proxies - required when behind multiple proxies or unknown proxy IPs
     ForwardLimit = null
 };
-forwardedOptions.KnownNetworks.Clear(); // Trust any source network
-forwardedOptions.KnownProxies.Clear();  // Trust any proxy
+forwardedOptions.KnownIPNetworks.Clear(); // Trust any source network
+forwardedOptions.KnownProxies.Clear();   // Trust any proxy
 app.UseForwardedHeaders(forwardedOptions);
 
 // CORS - must be before endpoints
@@ -117,6 +118,15 @@ app.MapDashboardEndpoints();
 // STARTUP
 // ============================================================================
 var logger = app.Services.GetRequiredService<ITrackingLogger>();
+
+// Ensure FileTrackingLogger is properly disposed on shutdown (drains log queue)
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+{
+    var fileLogger = app.Services.GetRequiredService<FileTrackingLogger>();
+    fileLogger.DisposeAsync().AsTask().GetAwaiter().GetResult();
+});
+
 logger.Info("SmartPiXL Tracking Server starting...");
 logger.Info($"HTTP:  http://localhost:6000");
 logger.Info($"HTTPS: https://localhost:6001");

@@ -1,7 +1,4 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using TrackingPixel.Configuration;
@@ -17,6 +14,7 @@ public static class DashboardEndpoints
     private static readonly JsonSerializerOptions JsonOptions = new() 
     { 
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
 
@@ -42,13 +40,10 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/risk-buckets", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var (sql, param) = BuildDateFilter(date, "vw_Dashboard_RiskBuckets", "ORDER BY ScoreRange DESC");
             
-            var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_RiskBuckets WHERE DateBucket = {dateFilter} ORDER BY ScoreRange DESC");
+            var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
         });
         
@@ -78,13 +73,10 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/evasion-summary", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var (sql, param) = BuildDateFilter(date, "vw_Dashboard_EvasionSummary");
             
-            var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_EvasionSummary WHERE DateBucket = {dateFilter}");
+            var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
         });
         
@@ -114,13 +106,10 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/timing", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var (sql, param) = BuildDateFilter(date, "vw_Dashboard_TimingAnalysis");
             
-            var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_Dashboard_TimingAnalysis WHERE DateBucket = {dateFilter}");
+            var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
         });
         
@@ -189,13 +178,10 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/devices", async (HttpContext ctx) =>
         {
-            var date = ctx.Request.Query["date"].FirstOrDefault() ?? "today";
-            var dateFilter = date == "today" 
-                ? "CAST(GETUTCDATE() AS DATE)" 
-                : $"'{date}'";
+            var date = ctx.Request.Query["date"].FirstOrDefault();
+            var (sql, param) = BuildDateFilter(date, "vw_PiXL_DeviceBreakdown");
             
-            var data = await QueryAsync(settings.ConnectionString, 
-                $"SELECT * FROM vw_PiXL_DeviceBreakdown WHERE DateBucket = {dateFilter}");
+            var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
         });
         
@@ -242,7 +228,26 @@ public static class DashboardEndpoints
     // HELPER METHODS
     // ============================================================================
     
-    private static async Task<List<Dictionary<string, object?>>> QueryAsync(string connectionString, string sql)
+    /// <summary>
+    /// Builds a parameterized date filter for dashboard views.
+    /// Returns the SQL string and an optional SqlParameter.
+    /// </summary>
+    private static (string Sql, SqlParameter? Param) BuildDateFilter(
+        string? date, string viewName, string orderBy = "")
+    {
+        if (string.IsNullOrEmpty(date) || date == "today")
+        {
+            return ($"SELECT * FROM {viewName} WHERE DateBucket = CAST(GETUTCDATE() AS DATE) {orderBy}", null);
+        }
+        
+        return (
+            $"SELECT * FROM {viewName} WHERE DateBucket = @DateFilter {orderBy}",
+            new SqlParameter("@DateFilter", System.Data.SqlDbType.Date) { Value = DateTime.Parse(date) }
+        );
+    }
+    
+    private static async Task<List<Dictionary<string, object?>>> QueryAsync(
+        string connectionString, string sql, SqlParameter? param = null)
     {
         var results = new List<Dictionary<string, object?>>();
         
@@ -251,6 +256,9 @@ public static class DashboardEndpoints
         
         await using var cmd = new SqlCommand(sql, conn);
         cmd.CommandTimeout = 30;
+        
+        if (param is not null)
+            cmd.Parameters.Add(param);
         
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -277,46 +285,6 @@ public static class DashboardEndpoints
     {
         ctx.Response.ContentType = "application/json";
         ctx.Response.Headers.CacheControl = "no-cache";
-        
-        // Convert dictionary keys to camelCase for JavaScript consumption
-        var camelCased = ToCamelCase(data);
-        await ctx.Response.WriteAsync(JsonSerializer.Serialize(camelCased, JsonOptions));
-    }
-    
-    /// <summary>
-    /// Recursively converts dictionary keys from PascalCase to camelCase.
-    /// SQL views return PascalCase column names; JavaScript expects camelCase.
-    /// </summary>
-    private static object? ToCamelCase(object? data)
-    {
-        if (data is Dictionary<string, object?> dict)
-        {
-            return dict.ToDictionary(
-                kvp => ToCamelCaseString(kvp.Key),
-                kvp => ToCamelCase(kvp.Value)
-            );
-        }
-        
-        if (data is List<Dictionary<string, object?>> list)
-        {
-            return list.Select(d => ToCamelCase(d)).ToList();
-        }
-        
-        return data;
-    }
-    
-    private static string ToCamelCaseString(string s)
-    {
-        if (string.IsNullOrEmpty(s) || !char.IsUpper(s[0]))
-            return s;
-        
-        var chars = s.ToCharArray();
-        for (int i = 0; i < chars.Length; i++)
-        {
-            if (i > 0 && i + 1 < chars.Length && !char.IsUpper(chars[i + 1]))
-                break;
-            chars[i] = char.ToLowerInvariant(chars[i]);
-        }
-        return new string(chars);
+        await ctx.Response.WriteAsync(JsonSerializer.Serialize(data, JsonOptions));
     }
 }

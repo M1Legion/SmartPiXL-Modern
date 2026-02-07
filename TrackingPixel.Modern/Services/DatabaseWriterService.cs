@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using TrackingPixel.Configuration;
 using TrackingPixel.Models;

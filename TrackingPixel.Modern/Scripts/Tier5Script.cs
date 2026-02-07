@@ -620,12 +620,17 @@ public static class Tier5Script
             }
             
             // 14. Check for automation flags in navigator
-            for (var key in n) {
-                if (/webdriver|selenium|puppeteer|playwright/i.test(key)) {
-                    signals.push('nav-' + key);
-                    score += 10;
+            // Wrapped in try/catch: privacy extensions (JShelter, Trace) wrap navigator
+            // in a Proxy. Enumerating a Proxy can trigger invariant violations on
+            // non-configurable properties like javaEnabled, crashing the entire script.
+            try {
+                for (var key in n) {
+                    if (/webdriver|selenium|puppeteer|playwright/i.test(key)) {
+                        signals.push('nav-' + key);
+                        score += 10;
+                    }
                 }
-            }
+            } catch(e) { /* Proxy enumeration blocked - non-critical, other checks cover this */ }
             
             // 15. Function.toString tampering (bots often patch native functions)
             try {

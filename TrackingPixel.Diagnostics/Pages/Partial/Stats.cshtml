@@ -23,7 +23,7 @@
     <div class="value">@stats.LastHourHits</div>
     <div class="label">Last Hour</div>
 </div>
-<div class="stat-card @(stats.BotRate > 10 ? "warning" : stats.BotRate > 25 ? "danger" : "")">
+<div class="stat-card @(stats.BotRate > 25 ? "danger" : stats.BotRate > 10 ? "warning" : "")">
     <div class="value">@stats.BotRate%</div>
     <div class="label">Bot Rate</div>
 </div>
