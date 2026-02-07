@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackingPixel", "TrackingPi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackingPixel.Diagnostics", "TrackingPixel.Diagnostics\TrackingPixel.Diagnostics.csproj", "{ECBD0FC4-895C-44B0-BF63-414AB11267D0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackingPixel.Tests", "TrackingPixel.Tests\TrackingPixel.Tests.csproj", "{91F10975-B754-4B0D-AB25-27B00E9CD76E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{ECBD0FC4-895C-44B0-BF63-414AB11267D0}.Release|x64.Build.0 = Release|Any CPU
 		{ECBD0FC4-895C-44B0-BF63-414AB11267D0}.Release|x86.ActiveCfg = Release|Any CPU
 		{ECBD0FC4-895C-44B0-BF63-414AB11267D0}.Release|x86.Build.0 = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|x64.Build.0 = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Debug|x86.Build.0 = Debug|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|x64.ActiveCfg = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|x64.Build.0 = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|x86.ActiveCfg = Release|Any CPU
+		{91F10975-B754-4B0D-AB25-27B00E9CD76E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
