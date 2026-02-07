@@ -22,7 +22,13 @@ public sealed partial class TrackingCaptureService
         "X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "True-Client-IP",
         "Sec-CH-UA", "Sec-CH-UA-Platform", "Sec-CH-UA-Mobile", "Sec-CH-UA-Model",
         "Sec-CH-UA-Platform-Version", "Sec-CH-UA-Arch", "Sec-CH-UA-Bitness",
-        "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"
+        "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest",
+        // V-07: TLS fingerprint headers (populated by reverse proxy / Cloudflare)
+        "CF-JA3-Fingerprint",     // Cloudflare Bot Management
+        "X-JA3-Fingerprint",      // Custom nginx/haproxy module
+        "X-JA4-Fingerprint",      // JA4+ fingerprint (newer standard)
+        "X-TLS-Version",          // TLS protocol version
+        "X-TLS-Cipher"            // Negotiated cipher suite
     ];
     
     /// <summary>

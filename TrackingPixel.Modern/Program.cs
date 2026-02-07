@@ -40,6 +40,15 @@ builder.Services.AddSingleton<TrackingCaptureService>();
 builder.Services.AddSingleton<DatabaseWriterService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseWriterService>());
 
+// V-05: Fingerprint stability tracking (anti-detect browser detection)
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<FingerprintStabilityService>();
+
+// V-08: Datacenter IP detection (AWS, GCP, Azure, etc.)
+builder.Services.AddHttpClient("DatacenterIp");
+builder.Services.AddSingleton<DatacenterIpService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
+
 // CORS - allow any website to request the pixel
 builder.Services.AddCors();
 

@@ -61,7 +61,7 @@ That's it. The script handles everything automatically.
 | **Network** | WebRTC local IP, connection type/speed, RTT, data saver mode |
 | **Storage** | Storage quota/usage, battery level/charging, media devices count |
 | **Browser** | Cookies, DNT, PDF viewer, WebDriver (bot detection), plugins, MIME types |
-| **Features** | WebGL, WebAssembly, Service Workers, Bluetooth, USB, MIDI, WebXR, and 20+ more |
+| **Features** | WebGL, WebAssembly, Service Workers, Canvas, WebRTC, and more (hardware/permission APIs intentionally excluded) |
 | **Preferences** | Dark mode, reduced motion, high contrast, forced colors, hover/pointer type |
 | **Performance** | Page load time, DOM ready, DNS lookup, TCP connect, TTFB |
 | **Session** | URL, referrer, title, domain, path, history depth |

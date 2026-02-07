@@ -475,23 +475,15 @@
                     'Pointer Events': bool(!!w.PointerEvent),
                     'Canvas': bool(!!document.createElement('canvas').getContext)
                 },
-                '🔌 ADVANCED APIS': {
+                '🔌 PASSIVE ADVANCED APIS': {
                     'Media Devices': bool(!!n.mediaDevices),
-                    'Bluetooth': bool(!!n.bluetooth),
-                    'USB': bool(!!n.usb),
-                    'Serial': bool(!!n.serial),
-                    'HID (Gamepads)': bool(!!n.hid),
-                    'MIDI': bool(!!n.requestMIDIAccess),
-                    'WebXR (VR/AR)': bool(!!n.xr),
-                    'Share API': bool(!!n.share),
                     'Clipboard': bool(!!(n.clipboard && n.clipboard.writeText)),
-                    'Credentials': bool(!!n.credentials),
-                    'Geolocation': bool(!!n.geolocation),
-                    'Notifications': bool(!!w.Notification),
-                    'Push API': bool(!!w.PushManager),
-                    'Payment Request': bool(!!w.PaymentRequest),
-                    'Speech Recognition': bool(!!(w.SpeechRecognition || w.webkitSpeechRecognition)),
                     'Speech Synthesis': bool(!!w.speechSynthesis)
+                    // Hardware APIs (Bluetooth, USB, Serial, HID, MIDI, WebXR) intentionally excluded:
+                    // - Zero fingerprinting entropy (all modern Chrome has them, Firefox/Safari don't)
+                    // - Some trigger browser permission prompts that alarm end users
+                    // Permission APIs (Geolocation, Notifications, Push, Payment, Credentials, Share,
+                    //   Speech Recognition) also excluded for same reasons
                 },
                 '📄 DOCUMENT INFO': {
                     'Character Set': document.characterSet || 'N/A',
@@ -646,21 +638,9 @@
                 touchEvent: 'ontouchstart' in w ? 1 : 0,
                 pointerEvent: !!w.PointerEvent ? 1 : 0,
                 mediaDevices: !!n.mediaDevices ? 1 : 0,
-                bluetooth: !!n.bluetooth ? 1 : 0,
-                usb: !!n.usb ? 1 : 0,
-                serial: !!n.serial ? 1 : 0,
-                hid: !!n.hid ? 1 : 0,
-                midi: !!n.requestMIDIAccess ? 1 : 0,
-                xr: !!n.xr ? 1 : 0,
-                share: !!n.share ? 1 : 0,
                 clipboard: !!(n.clipboard && n.clipboard.writeText) ? 1 : 0,
-                credentials: !!n.credentials ? 1 : 0,
-                geolocation: !!n.geolocation ? 1 : 0,
-                notifications: !!w.Notification ? 1 : 0,
-                push: !!w.PushManager ? 1 : 0,
-                payment: !!w.PaymentRequest ? 1 : 0,
-                speechRecog: !!(w.SpeechRecognition || w.webkitSpeechRecognition) ? 1 : 0,
                 speechSynth: !!w.speechSynthesis ? 1 : 0,
+                // Hardware/permission APIs intentionally excluded (see ADVANCED APIS comment above)
                 
                 // Storage
                 ls: (function() { try { return !!w.localStorage; } catch(e) { return false; } })() ? 1 : 0,

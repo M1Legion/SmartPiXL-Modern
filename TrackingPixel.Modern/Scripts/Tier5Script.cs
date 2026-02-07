@@ -105,6 +105,30 @@ public static class Tier5Script
         data.canvasEvasion = canvasResult.evasion;
         
         // ============================================
+        // V-01: CANVAS NOISE INJECTION DETECTION
+        // Draws identical content on 2 canvases. Noise injection extensions
+        // (Canvas Blocker, JShelter, Trace) add random per-canvas noise,
+        // making identical draws produce different hashes.
+        // ============================================
+        data.canvasConsistency = (function() {
+            try {
+                var c1 = document.createElement('canvas');
+                var c2 = document.createElement('canvas');
+                c1.width = c2.width = 100; c1.height = c2.height = 50;
+                var x1 = c1.getContext('2d'), x2 = c2.getContext('2d');
+                x1.fillStyle = '#ff6600'; x1.fillRect(0, 0, 50, 50);
+                x1.fillStyle = '#000'; x1.font = '12px Arial'; x1.fillText('Test1', 5, 25);
+                x2.fillStyle = '#ff6600'; x2.fillRect(0, 0, 50, 50);
+                x2.fillStyle = '#000'; x2.font = '12px Arial'; x2.fillText('Test1', 5, 25);
+                var h1 = hashStr(c1.toDataURL()), h2 = hashStr(c2.toDataURL());
+                if (h1 !== h2) return 'noise-detected';
+                x2.fillText('X', 60, 25);
+                if (h1 === hashStr(c2.toDataURL())) return 'canvas-blocked';
+                return 'clean';
+            } catch(e) { return 'error'; }
+        })();
+        
+        // ============================================
         // WEBGL FINGERPRINT
         // ============================================
         var webglData = (function() {
@@ -167,76 +191,89 @@ public static class Tier5Script
         data.webglEvasion = webglData.evasion;
         
         // ============================================
-        // AUDIO FINGERPRINT (OfflineAudioContext) - FIXED: Now hashes actual buffer
+        // V-02: AUDIO FINGERPRINT WITH STABILITY CHECK
+        // Runs the audio fingerprint twice. Real audio hardware produces
+        // identical results; noise injection extensions differ each run.
         // ============================================
-        (function() {
+        var audioPromise = (function() {
             try {
-                var AudioContext = w.OfflineAudioContext || w.webkitOfflineAudioContext;
-                if (!AudioContext) return;
-                var ctx = new AudioContext(1, 44100, 44100);
-                var osc = ctx.createOscillator();
-                var comp = ctx.createDynamicsCompressor();
-                osc.type = 'triangle';
-                osc.frequency.value = 10000;
-                comp.threshold.value = -50;
-                comp.knee.value = 40;
-                comp.ratio.value = 12;
-                comp.attack.value = 0;
-                comp.release.value = 0.25;
-                osc.connect(comp);
-                comp.connect(ctx.destination);
-                osc.start(0);
-                ctx.startRendering().then(function(buffer) {
-                    var channelData = buffer.getChannelData(0);
-                    // Sum absolute values from samples 4500-5000 for unique fingerprint
-                    var sum = 0;
-                    for (var i = 4500; i < 5000; i++) {
-                        sum += Math.abs(channelData[i]);
-                    }
-                    data.audioFP = sum.toFixed(6);
-                    
-                    // Additional hash of full sample for extra entropy
-                    var sampleStr = '';
-                    for (var j = 0; j < channelData.length; j += 100) {
-                        sampleStr += channelData[j].toFixed(4);
-                    }
-                    data.audioHash = hashStr(sampleStr);
-                }).catch(function() {
-                    data.audioFP = 'blocked';
+                var AudioCtx = w.OfflineAudioContext || w.webkitOfflineAudioContext;
+                if (!AudioCtx) { data.audioFP = ''; return Promise.resolve(); }
+                var runAudioFP = function() {
+                    return new Promise(function(resolve) {
+                        try {
+                            var ctx = new AudioCtx(1, 44100, 44100);
+                            var osc = ctx.createOscillator();
+                            var comp = ctx.createDynamicsCompressor();
+                            osc.type = 'triangle'; osc.frequency.value = 10000;
+                            comp.threshold.value = -50; comp.knee.value = 40;
+                            comp.ratio.value = 12; comp.attack.value = 0; comp.release.value = 0.25;
+                            osc.connect(comp); comp.connect(ctx.destination); osc.start(0);
+                            ctx.startRendering().then(function(buffer) {
+                                var cd = buffer.getChannelData(0);
+                                var sum = 0;
+                                for (var i = 4500; i < 5000; i++) sum += Math.abs(cd[i]);
+                                // Also hash full sample for extra entropy
+                                var sampleStr = '';
+                                for (var j = 0; j < cd.length; j += 100) sampleStr += cd[j].toFixed(4);
+                                resolve({ fp: sum.toFixed(6), hash: hashStr(sampleStr) });
+                            }).catch(function() { resolve({ fp: 'blocked', hash: '' }); });
+                        } catch(e) { resolve({ fp: 'error', hash: '' }); }
+                    });
+                };
+                return Promise.all([runAudioFP(), runAudioFP()]).then(function(r) {
+                    data.audioFP = r[0].fp;
+                    data.audioHash = r[0].hash;
+                    data.audioStable = (r[0].fp === r[1].fp) ? 1 : 0;
+                    if (r[0].fp !== r[1].fp && r[0].fp !== 'blocked') data.audioNoiseDetected = 1;
                 });
-            } catch(e) { data.audioFP = ''; }
+            } catch(e) { data.audioFP = ''; return Promise.resolve(); }
         })();
         
         // ============================================
-        // FONT DETECTION
+        // V-09: FONT DETECTION (Dual-Method Anti-Spoof)
+        // Uses both offsetWidth AND getBoundingClientRect. If an extension
+        // spoofs one but not the other, we detect the mismatch.
         // ============================================
         data.fonts = (function() {
             try {
                 if (!document.body) return '';
                 var testFonts = [
-                    'Arial','Arial Black','Arial Narrow','Verdana','Times New Roman','Courier New',
-                    'Georgia','Comic Sans MS','Impact','Trebuchet MS','Lucida Console','Tahoma',
-                    'Palatino Linotype','Segoe UI','Calibri','Cambria','Consolas','Helvetica',
-                    'Monaco','Menlo','Ubuntu','Roboto','Open Sans','Lato','Montserrat',
-                    'Source Sans Pro','Droid Sans','Century Gothic','Futura','Gill Sans',
-                    'Lucida Grande','Optima','Book Antiqua','Garamond','Bookman Old Style',
-                    'MS Gothic','MS PGothic','MS Mincho','SimSun','SimHei','Microsoft YaHei',
-                    'Malgun Gothic','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji'
+                    'Arial','Arial Black','Verdana','Times New Roman','Courier New',
+                    'Georgia','Comic Sans MS','Impact','Trebuchet MS','Tahoma',
+                    'Segoe UI','Calibri','Consolas','Helvetica','Monaco',
+                    'Roboto','Open Sans','Lato','Montserrat','Source Sans Pro',
+                    'Century Gothic','Futura','Gill Sans','Lucida Grande',
+                    'Garamond','MS Gothic','SimSun','Microsoft YaHei',
+                    'Apple Color Emoji','Segoe UI Emoji'
                 ];
                 var detected = [];
                 var baseline = 'monospace';
-                var span = document.createElement('span');
-                span.style.cssText = 'position:absolute;left:-9999px;font-size:72px;';
-                span.innerHTML = 'mmmmmmmmmmlli';
-                document.body.appendChild(span);
-                span.style.fontFamily = baseline;
-                var baseWidth = span.offsetWidth;
-                var baseHeight = span.offsetHeight;
+                var testStr = 'mmmmmmmmmmlli';
+                var s1 = document.createElement('span');
+                s1.style.cssText = 'position:absolute;left:-9999px;font-size:72px;visibility:hidden;';
+                s1.innerHTML = testStr;
+                document.body.appendChild(s1);
+                s1.style.fontFamily = baseline;
+                var bw1 = s1.offsetWidth;
+                var s2 = document.createElement('span');
+                s2.style.cssText = 'position:absolute;left:-9999px;font-size:72px;visibility:hidden;';
+                s2.innerHTML = testStr;
+                document.body.appendChild(s2);
+                s2.style.fontFamily = baseline;
+                var bw2 = s2.getBoundingClientRect().width;
+                var mismatch = false;
                 for (var i = 0; i < testFonts.length; i++) {
-                    span.style.fontFamily = testFonts[i] + ',' + baseline;
-                    if (span.offsetWidth !== baseWidth || span.offsetHeight !== baseHeight) detected.push(testFonts[i]);
+                    s1.style.fontFamily = testFonts[i] + ',' + baseline;
+                    s2.style.fontFamily = testFonts[i] + ',' + baseline;
+                    var d1 = s1.offsetWidth !== bw1;
+                    var d2 = s2.getBoundingClientRect().width !== bw2;
+                    if (d1 !== d2) mismatch = true;
+                    if (d1 || d2) detected.push(testFonts[i]);
                 }
-                document.body.removeChild(span);
+                document.body.removeChild(s1);
+                document.body.removeChild(s2);
+                data.fontMethodMismatch = mismatch ? 1 : 0;
                 return detected.join(',');
             } catch(e) { return ''; }
         })();
@@ -864,21 +901,19 @@ public static class Tier5Script
         data.touchEvent = 'ontouchstart' in w ? 1 : 0;
         data.pointerEvent = !!w.PointerEvent ? 1 : 0;
         data.mediaDevices = !!safeGet(n, 'mediaDevices', null) ? 1 : 0;
-        data.bluetooth = !!safeGet(n, 'bluetooth', null) ? 1 : 0;
-        data.usb = !!safeGet(n, 'usb', null) ? 1 : 0;
-        data.serial = !!safeGet(n, 'serial', null) ? 1 : 0;
-        data.hid = !!safeGet(n, 'hid', null) ? 1 : 0;
-        data.midi = !!safeGet(n, 'requestMIDIAccess', null) ? 1 : 0;
-        data.xr = !!safeGet(n, 'xr', null) ? 1 : 0;
-        data.share = !!safeGet(n, 'share', null) ? 1 : 0;
+        // ============================================
+        // INTENTIONALLY EXCLUDED APIS
+        // ============================================
+        // The following APIs are NOT checked because:
+        // 1. They add near-zero fingerprinting entropy (all Chrome has them, Firefox/Safari don't)
+        // 2. Some trigger browser permission prompts (MIDI, Bluetooth, USB, Geolocation, Notifications)
+        // 3. The MIDI popup (control and reprogram your MIDI devices) looks alarming/black-hat
+        // 4. Privacy extensions flag access to these APIs
+        //
+        // Excluded: bluetooth, usb, serial, hid, midi, xr, share, credentials,
+        //           geolocation, notifications, push, payment, speechRecog
         var clipboardObj = safeGet(n, 'clipboard', null);
         data.clipboard = !!(clipboardObj && clipboardObj.writeText) ? 1 : 0;
-        data.credentials = !!safeGet(n, 'credentials', null) ? 1 : 0;
-        data.geolocation = !!safeGet(n, 'geolocation', null) ? 1 : 0;
-        data.notifications = !!w.Notification ? 1 : 0;
-        data.push = !!(w.PushManager) ? 1 : 0;
-        data.payment = !!w.PaymentRequest ? 1 : 0;
-        data.speechRecog = !!(w.SpeechRecognition || w.webkitSpeechRecognition) ? 1 : 0;
         data.speechSynth = !!w.speechSynthesis ? 1 : 0;
         
         // ============================================
@@ -966,9 +1001,107 @@ public static class Tier5Script
         data.tier = 5;
         
         // ============================================
-        // FIRE PIXEL (with delay for async data)
+        // V-04: STEALTH PLUGIN DETECTION
+        // Puppeteer-extra-plugin-stealth patches navigator properties via
+        // Object.defineProperty. Spoofed getters are measurably slower than
+        // native ones due to JS execution overhead.
         // ============================================
-        setTimeout(function() {
+        data.stealthSignals = (function() {
+            var signals = [];
+            try {
+                var timeProp = function(obj, prop, iters) {
+                    var start = performance.now();
+                    for (var i = 0; i < iters; i++) { var x = obj[prop]; }
+                    return (performance.now() - start) / iters;
+                };
+                var baseTime = timeProp(navigator, 'userAgent', 1000);
+                if (baseTime > 0) {
+                    var wdRatio = timeProp(navigator, 'webdriver', 1000) / baseTime;
+                    var plRatio = timeProp(navigator, 'platform', 1000) / baseTime;
+                    if (wdRatio > 5) signals.push('webdriver-slow');
+                    if (plRatio > 5) signals.push('platform-slow');
+                }
+            } catch(e) { signals.push('timing-error'); }
+            try {
+                var nts = Function.prototype.toString;
+                if (nts.call(nts).indexOf('[native code]') === -1) signals.push('toString-spoofed');
+            } catch(e) { signals.push('toString-blocked'); }
+            try {
+                if (typeof Navigator !== 'undefined' && Object.getPrototypeOf(navigator) !== Navigator.prototype)
+                    signals.push('nav-proto-modified');
+            } catch(e) {}
+            try {
+                if (w.Proxy && w.Proxy.toString().indexOf('[native code]') === -1) signals.push('proxy-modified');
+            } catch(e) {}
+            return signals.join(',');
+        })();
+        
+        // ============================================
+        // V-10: ENHANCED EVASION / TOR DETECTION
+        // Supplements the existing evasionDetected field with deeper checks.
+        // ============================================
+        data.evasionSignalsV2 = (function() {
+            var det = [];
+            // Tor Browser: viewport rounds to 200x100 increments
+            var iW = w.innerWidth, iH = w.innerHeight;
+            if (iW % 200 === 0 && iH % 100 === 0) det.push('tor-letterbox-viewport');
+            var sW = s.width, sH = s.height;
+            if (sW % 200 === 0 && sH % 100 === 0 && !(sW === 1920 && sH === 1080) && !(sW === 1600 && sH === 900))
+                det.push('tor-letterbox-screen');
+            if (data.fonts && data.fonts.split(',').length < 5) det.push('minimal-fonts');
+            if (data.canvasConsistency === 'noise-detected') det.push('canvas-noise');
+            if (data.canvasConsistency === 'canvas-blocked') det.push('canvas-blocked');
+            if (data.audioNoiseDetected) det.push('audio-noise');
+            if (data.fontMethodMismatch) det.push('font-spoof');
+            if (data.stealthSignals && data.stealthSignals.length > 0) det.push('stealth-detected');
+            return det.join(',');
+        })();
+        
+        // ============================================
+        // V-03: BEHAVIORAL ANALYSIS (Mouse/Scroll)
+        // Real users have curved, variable mouse movements.
+        // Bots have zero movement or perfectly linear paths.
+        // ============================================
+        var mouseData = { moves: [], startTime: Date.now(), scrolled: 0, scrollY: 0 };
+        var mouseHandler = function(e) {
+            if (mouseData.moves.length < 50)
+                mouseData.moves.push({ x: e.clientX, y: e.clientY, t: Date.now() - mouseData.startTime });
+        };
+        var scrollHandler = function() {
+            mouseData.scrolled = 1;
+            mouseData.scrollY = w.scrollY || w.pageYOffset || 0;
+        };
+        document.addEventListener('mousemove', mouseHandler);
+        document.addEventListener('scroll', scrollHandler);
+        
+        var calculateMouseEntropy = function() {
+            var moves = mouseData.moves;
+            data.mouseMoves = moves.length;
+            data.scrolled = mouseData.scrolled;
+            data.scrollY = mouseData.scrollY;
+            if (moves.length < 5) { data.mouseEntropy = 0; return; }
+            var angles = [];
+            for (var i = 1; i < moves.length; i++) {
+                var dx = moves[i].x - moves[i-1].x, dy = moves[i].y - moves[i-1].y;
+                var dt = moves[i].t - moves[i-1].t;
+                if (dt > 0) angles.push(Math.atan2(dy, dx));
+            }
+            if (angles.length > 1) {
+                var mean = angles.reduce(function(a,b) { return a+b; }, 0) / angles.length;
+                var variance = angles.reduce(function(s, a) { return s + (a - mean) * (a - mean); }, 0) / angles.length;
+                data.mouseEntropy = Math.round(variance * 1000);
+            } else { data.mouseEntropy = 0; }
+            document.removeEventListener('mousemove', mouseHandler);
+            document.removeEventListener('scroll', scrollHandler);
+        };
+        
+        // ============================================
+        // V-06: FIRE PIXEL (Promise-based async + behavioral data)
+        // Waits for async collectors (audio, battery, storage) and
+        // 500ms for behavioral mouse/scroll data before firing.
+        // ============================================
+        var sendPixel = function() {
+            calculateMouseEntropy();
             var params = [];
             for (var key in data) {
                 if (data[key] !== '' && data[key] !== null && data[key] !== undefined) {
@@ -976,7 +1109,18 @@ public static class Tier5Script
                 }
             }
             new Image().src = '{{PIXEL_URL}}?' + params.join('&');
-        }, 100);
+        };
+        
+        var asyncPromises = [];
+        if (typeof audioPromise !== 'undefined') asyncPromises.push(audioPromise);
+        
+        var timeoutPromise = new Promise(function(resolve) { setTimeout(resolve, 500); });
+        Promise.race([
+            Promise.allSettled ? Promise.allSettled(asyncPromises).then(function() {
+                return new Promise(function(r) { setTimeout(r, 300); });
+            }) : timeoutPromise,
+            timeoutPromise
+        ]).then(sendPixel);
         
     } catch (e) {
         new Image().src = '{{PIXEL_URL}}?error=1&msg=' + encodeURIComponent(e.message);
