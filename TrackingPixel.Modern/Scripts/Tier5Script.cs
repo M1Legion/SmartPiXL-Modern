@@ -848,6 +848,191 @@ public static class Tier5Script
         data.evasionDetected = evasionResult;
         
         // ============================================
+        // CROSS-SIGNAL CONSISTENCY ANALYSIS
+        // Detects sophisticated bots that pass individual checks but
+        // have contradictory signals across subsystems. Each check
+        // catches things that single-signal bot detection cannot.
+        // ============================================
+        var crossSignalResult = (function() {
+            var flags = [];
+            var anomalyScore = 0;
+            var platform = (data.plt || '').toLowerCase();
+            var ua = (data.ua || '').toLowerCase();
+            var gpu = (data.gpu || '').toLowerCase();
+            var vendor = (data.vnd || '');
+            var fonts = (data.fonts || '');
+            
+            // -----------------------------------------------
+            // CS-01: CROSS-PLATFORM FONT INCONSISTENCY
+            // Windows-exclusive fonts appearing on Mac/Linux
+            // Segoe UI ships only with Windows, Calibri with Office/Windows
+            // MS Gothic and Microsoft YaHei are Windows CJK fonts
+            // -----------------------------------------------
+            var winOnlyFonts = ['Segoe UI','Calibri','Consolas','MS Gothic','Microsoft YaHei','Segoe UI Emoji'];
+            var macOnlyFonts = ['Monaco','Lucida Grande','Apple Color Emoji'];
+            var hasWinFont = false, hasMacFont = false;
+            for (var fi = 0; fi < winOnlyFonts.length; fi++) {
+                if (fonts.indexOf(winOnlyFonts[fi]) > -1) hasWinFont = true;
+            }
+            for (var mi = 0; mi < macOnlyFonts.length; mi++) {
+                if (fonts.indexOf(macOnlyFonts[mi]) > -1) hasMacFont = true;
+            }
+            if (platform.indexOf('mac') > -1 && hasWinFont) {
+                flags.push('win-fonts-on-mac');
+                anomalyScore += 15;
+            }
+            if (platform.indexOf('linux') > -1 && hasWinFont) {
+                flags.push('win-fonts-on-linux');
+                anomalyScore += 15;
+            }
+            if (platform.indexOf('win') > -1 && hasMacFont && !hasWinFont) {
+                flags.push('mac-fonts-on-win');
+                anomalyScore += 10;
+            }
+            
+            // -----------------------------------------------
+            // CS-02: SAFARI-ON-CHROMIUM DETECTION
+            // Real Safari: vendor='Apple Computer, Inc.', no chrome obj,
+            // no Client Hints API, WebKit GPU renderer
+            // Fake Safari on Chromium: vendor='Google Inc.', has chrome obj,
+            // has userAgentData, ANGLE GPU renderer
+            // -----------------------------------------------
+            var isSafariUA = ua.indexOf('safari') > -1 && ua.indexOf('chrome') === -1 && ua.indexOf('chromium') === -1;
+            if (isSafariUA) {
+                if (vendor === 'Google Inc.') {
+                    flags.push('safari-google-vendor');
+                    anomalyScore += 20;
+                }
+                if (data.chromeObj) {
+                    flags.push('safari-has-chrome-obj');
+                    anomalyScore += 15;
+                }
+                if (userAgentData && userAgentData.brands) {
+                    flags.push('safari-has-client-hints');
+                    anomalyScore += 10;
+                }
+                if (gpu.indexOf('angle') > -1 || gpu.indexOf('swiftshader') > -1) {
+                    flags.push('safari-chromium-gpu');
+                    anomalyScore += 15;
+                }
+            }
+            
+            // -----------------------------------------------
+            // CS-03: GPU / PLATFORM CROSS-REFERENCE
+            // SwiftShader (Google's software rasterizer) is a headless
+            // Chromium signal. Real Macs use Apple GPU (M1/M2/Intel Iris),
+            // real Linux boxes use Mesa/NVIDIA/AMD.
+            // -----------------------------------------------
+            if (gpu.indexOf('swiftshader') > -1) {
+                flags.push('swiftshader-gpu');
+                anomalyScore += 5; // Minor on its own (CI environments use it)
+                if (platform.indexOf('mac') > -1) {
+                    flags.push('swiftshader-on-mac');
+                    anomalyScore += 20; // Macs NEVER use SwiftShader
+                }
+                if (platform.indexOf('linux') > -1) {
+                    flags.push('swiftshader-on-linux');
+                    anomalyScore += 10; // Possible but very rare on Linux desktop
+                }
+            }
+            // llvmpipe = Mesa software renderer (common in Docker/headless Linux)
+            if (gpu.indexOf('llvmpipe') > -1 && platform.indexOf('mac') > -1) {
+                flags.push('llvmpipe-on-mac');
+                anomalyScore += 20;
+            }
+            
+            // -----------------------------------------------
+            // CS-04: SCROLL DEPTH CONTRADICTION
+            // If userScrolled=1 but scrollY=0, the scroll events were
+            // dispatched synthetically (page too short to scroll, or
+            // events fired without actual viewport movement)
+            // -----------------------------------------------
+            // This is evaluated after behavioral collection in sendPixel
+            // We store the raw flag here, analysis happens post-collection
+            data._scrollCheckPending = 1;
+            
+            // -----------------------------------------------
+            // CS-05: HEAP SIZE FINGERPRINT
+            // Chrome's performance.memory values reveal the JS engine config.
+            // Headless Chromium has distinctive heap limits that differ from
+            // standard Chrome. Round values (exactly 10MB) are suspicious.
+            // -----------------------------------------------
+            if (perf.memory) {
+                var heapTotal = perf.memory.totalJSHeapSize || 0;
+                var heapUsed = perf.memory.usedJSHeapSize || 0;
+                // Exactly 10,000,000 bytes is suspiciously round (Playwright default)
+                if (heapTotal === 10000000 || heapUsed === 10000000) {
+                    flags.push('round-heap-size');
+                    anomalyScore += 8;
+                }
+                // Heap total equals used (no garbage = freshly launched, bot-like)
+                if (heapTotal > 0 && heapTotal === heapUsed) {
+                    flags.push('heap-total-equals-used');
+                    anomalyScore += 3;
+                }
+            }
+            
+            // -----------------------------------------------
+            // CS-06: NAVIGATION TIMING ANOMALY
+            // Headless browsers hitting localhost have impossibly fast
+            // page loads. Real internet users: 100-5000ms typical.
+            // Localhost bots: 5-50ms with 0ms DNS.
+            // -----------------------------------------------
+            if (perf.timing) {
+                var t = perf.timing;
+                var pageLoad = t.loadEventEnd - t.navigationStart;
+                var dns = t.domainLookupEnd - t.domainLookupStart;
+                var tcp = t.connectEnd - t.connectStart;
+                // Page fully loaded in under 50ms with zero DNS = probably local
+                if (pageLoad > 0 && pageLoad < 50 && dns <= 1) {
+                    flags.push('instant-page-load');
+                    anomalyScore += 5;
+                }
+                // TCP connect under 1ms + page load under 100ms
+                if (tcp <= 1 && pageLoad > 0 && pageLoad < 100) {
+                    flags.push('zero-latency-connection');
+                    anomalyScore += 3;
+                }
+            }
+            
+            // -----------------------------------------------
+            // CS-07: CONNECTION API REALISM CHECK
+            // Stealth bots inject navigator.connection with 4g/10Mbps,
+            // but real connections report RTT. Missing RTT with high
+            // downlink is suspicious. Also: rtt=0 is impossible on
+            // real networks.
+            // -----------------------------------------------
+            var connType = (c.effectiveType || '');
+            var connDl = c.downlink || 0;
+            var connRtt = c.rtt;
+            if (connType === '4g' && connDl > 5 && (connRtt === undefined || connRtt === null || connRtt === 0)) {
+                flags.push('connection-missing-rtt');
+                anomalyScore += 5;
+            }
+            
+            // -----------------------------------------------
+            // CS-08: WEBGL2 ON CLAIMED NON-CHROME
+            // Firefox and Safari have limited/different WebGL2 support.
+            // If UA claims Firefox < 51 or Safari and WebGL2 works
+            // perfectly, it's likely Chromium underneath.
+            // -----------------------------------------------
+            if (data.webgl2 && isSafariUA) {
+                // Safari didn't get WebGL2 until Safari 15+ (macOS 12+)
+                // If claimed Safari version is old but WebGL2 works, suspicious
+                var safariMatch = ua.match(/version\/(\d+)/);
+                if (safariMatch && parseInt(safariMatch[1]) < 15) {
+                    flags.push('webgl2-on-old-safari');
+                    anomalyScore += 10;
+                }
+            }
+            
+            return { flags: flags.join(','), anomalyScore: anomalyScore };
+        })();
+        
+        data.crossSignals = crossSignalResult.flags;
+        data.anomalyScore = crossSignalResult.anomalyScore;
+        
+        // ============================================
         // CONNECTION
         // ============================================
         data.conn = c.effectiveType || '';
@@ -1079,18 +1264,97 @@ public static class Tier5Script
             data.mouseMoves = moves.length;
             data.scrolled = mouseData.scrolled;
             data.scrollY = mouseData.scrollY;
-            if (moves.length < 5) { data.mouseEntropy = 0; return; }
+            
+            // -----------------------------------------------
+            // CS-04: SCROLL DEPTH CONTRADICTION (deferred from cross-signal)
+            // scroll event fired but viewport didn't actually move
+            // -----------------------------------------------
+            if (mouseData.scrolled && mouseData.scrollY === 0) {
+                data.scrollContradiction = 1;
+                // Append to cross-signal flags
+                var cs = data.crossSignals || '';
+                data.crossSignals = cs ? cs + ',scroll-no-depth' : 'scroll-no-depth';
+                data.anomalyScore = (data.anomalyScore || 0) + 8;
+            } else {
+                data.scrollContradiction = 0;
+            }
+            
+            if (moves.length < 5) { data.mouseEntropy = 0; data.behavioralFlags = ''; return; }
+            
+            // -----------------------------------------------
+            // ENHANCED BEHAVIORAL ANALYSIS
+            // -----------------------------------------------
             var angles = [];
+            var speeds = [];
+            var timings = [];
             for (var i = 1; i < moves.length; i++) {
                 var dx = moves[i].x - moves[i-1].x, dy = moves[i].y - moves[i-1].y;
                 var dt = moves[i].t - moves[i-1].t;
-                if (dt > 0) angles.push(Math.atan2(dy, dx));
+                if (dt > 0) {
+                    angles.push(Math.atan2(dy, dx));
+                    speeds.push(Math.sqrt(dx*dx + dy*dy) / dt);
+                    timings.push(dt);
+                }
             }
+            
+            var behavFlags = [];
+            
             if (angles.length > 1) {
                 var mean = angles.reduce(function(a,b) { return a+b; }, 0) / angles.length;
                 var variance = angles.reduce(function(s, a) { return s + (a - mean) * (a - mean); }, 0) / angles.length;
                 data.mouseEntropy = Math.round(variance * 1000);
+                
+                // CS-09: TIMING UNIFORMITY
+                // Real humans have highly variable inter-move timing (10-300ms).
+                // Bots using setInterval or Bezier curves have tight timing bands.
+                if (timings.length > 3) {
+                    var tMean = timings.reduce(function(a,b) { return a+b; }, 0) / timings.length;
+                    var tVar = timings.reduce(function(s, t) { return s + (t - tMean) * (t - tMean); }, 0) / timings.length;
+                    var tStdDev = Math.sqrt(tVar);
+                    var tCV = tMean > 0 ? tStdDev / tMean : 0; // Coefficient of variation
+                    data.moveTimingCV = Math.round(tCV * 1000); // Store as integer (x1000)
+                    // CV < 0.3 means very uniform timing (bot-like)
+                    // Real humans typically have CV > 0.5
+                    if (tCV < 0.3 && timings.length > 5) {
+                        behavFlags.push('uniform-timing');
+                        data.anomalyScore = (data.anomalyScore || 0) + 5;
+                    }
+                }
+                
+                // CS-10: SPEED UNIFORMITY
+                // Real mouse movements have variable speed (acceleration/deceleration).
+                // Bots with linear interpolation have very uniform speed.
+                if (speeds.length > 3) {
+                    var sMean = speeds.reduce(function(a,b) { return a+b; }, 0) / speeds.length;
+                    var sVar = speeds.reduce(function(s, v) { return s + (v - sMean) * (v - sMean); }, 0) / speeds.length;
+                    var sCV = sMean > 0 ? Math.sqrt(sVar) / sMean : 0;
+                    data.moveSpeedCV = Math.round(sCV * 1000);
+                    if (sCV < 0.2 && speeds.length > 5) {
+                        behavFlags.push('uniform-speed');
+                        data.anomalyScore = (data.anomalyScore || 0) + 5;
+                    }
+                }
+                
+                // CS-11: MOVE COUNT BANDING
+                // Bots generate exactly N moves per page. Real users have
+                // massive variance (0 on mobile, 200+ engaged desktop).
+                // A move count that's always 8-15 across sessions is suspicious.
+                // We can't check across sessions client-side, but we CAN flag
+                // the count for server-side clustering analysis.
+                data.moveCountBucket = moves.length < 5 ? 'low' : 
+                    moves.length < 20 ? 'mid' : 
+                    moves.length < 50 ? 'high' : 'very-high';
+                    
             } else { data.mouseEntropy = 0; }
+            
+            data.behavioralFlags = behavFlags.join(',');
+            
+            // Append behavioral flags to cross-signal if any
+            if (behavFlags.length > 0) {
+                var cs2 = data.crossSignals || '';
+                data.crossSignals = cs2 ? cs2 + ',' + behavFlags.join(',') : behavFlags.join(',');
+            }
+            
             document.removeEventListener('mousemove', mouseHandler);
             document.removeEventListener('scroll', scrollHandler);
         };
