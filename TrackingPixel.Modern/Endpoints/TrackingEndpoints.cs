@@ -145,7 +145,7 @@ public static class TrackingEndpoints
                 baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
             }
             var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
-            var javascript = Tier5Script.Template.Replace("{{PIXEL_URL}}", pixelUrl);
+            var javascript = Tier5Script.GetScript(pixelUrl);
             
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             

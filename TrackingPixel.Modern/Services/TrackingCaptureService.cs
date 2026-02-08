@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
@@ -106,12 +107,17 @@ public sealed partial class TrackingCaptureService
         return connection.RemoteIpAddress?.ToString();
     }
     
+    // SIMD-vectorized search for JSON escape chars (AVX2/SSE on .NET 8+)
+    // Scans 16-32 chars per cycle vs char-by-char switch
+    private static readonly SearchValues<char> JsonEscapeChars =
+        SearchValues.Create("\"\\\n\r\t");
+
     private static string BuildHeadersJson(IHeaderDictionary headers)
     {
         var sb = new StringBuilder(512);
         sb.Append('{');
         var first = true;
-        
+
         foreach (var key in HeaderKeysToCapture)
         {
             var value = headers[key].ToString();
@@ -120,25 +126,41 @@ public sealed partial class TrackingCaptureService
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('"').Append(key).Append("\":\"");
-                
-                // Escape JSON special chars
-                foreach (var c in value)
-                {
-                    switch (c)
-                    {
-                        case '"': sb.Append("\\\""); break;
-                        case '\\': sb.Append("\\\\"); break;
-                        case '\n': sb.Append("\\n"); break;
-                        case '\r': sb.Append("\\r"); break;
-                        case '\t': sb.Append("\\t"); break;
-                        default: sb.Append(c); break;
-                    }
-                }
+                AppendJsonEscaped(sb, value.AsSpan());
                 sb.Append('"');
             }
         }
         sb.Append('}');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends a string to StringBuilder with JSON-safe escaping.
+    /// Uses SearchValues + ReadOnlySpan for SIMD-accelerated scanning.
+    /// Typical header values contain zero special chars —
+    /// entire string appended in one batch with no per-char branching.
+    /// </summary>
+    private static void AppendJsonEscaped(StringBuilder sb, ReadOnlySpan<char> value)
+    {
+        while (value.Length > 0)
+        {
+            var idx = value.IndexOfAny(JsonEscapeChars);
+            if (idx < 0)
+            {
+                sb.Append(value);
+                break;
+            }
+            if (idx > 0) sb.Append(value[..idx]);
+            sb.Append(value[idx] switch
+            {
+                '"' => "\\\"",
+                '\\' => "\\\\",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                _ => "\\t"
+            });
+            value = value[(idx + 1)..];
+        }
     }
     
     private static string? Truncate(string? value, int maxLength) =>
