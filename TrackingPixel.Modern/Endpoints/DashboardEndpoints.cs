@@ -42,6 +42,7 @@ public static class DashboardEndpoints
         {
             var date = ctx.Request.Query["date"].FirstOrDefault();
             var (sql, param) = BuildDateFilter(date, "vw_Dashboard_RiskBuckets", "ORDER BY ScoreRange DESC");
+            if (sql == null) { ctx.Response.StatusCode = 400; return; }
             
             var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
@@ -53,7 +54,7 @@ public static class DashboardEndpoints
         app.MapGet("/api/dashboard/bot-details", async (HttpContext ctx) =>
         {
             var bucket = ctx.Request.Query["bucket"].FirstOrDefault();
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 50;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 500) : 50;
             
             var whereClause = bucket switch
             {
@@ -75,6 +76,7 @@ public static class DashboardEndpoints
         {
             var date = ctx.Request.Query["date"].FirstOrDefault();
             var (sql, param) = BuildDateFilter(date, "vw_Dashboard_EvasionSummary");
+            if (sql == null) { ctx.Response.StatusCode = 400; return; }
             
             var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
@@ -86,7 +88,7 @@ public static class DashboardEndpoints
         app.MapGet("/api/dashboard/evasion-details", async (HttpContext ctx) =>
         {
             var type = ctx.Request.Query["type"].FirstOrDefault();
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 50;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 500) : 50;
             
             var whereClause = type switch
             {
@@ -108,6 +110,7 @@ public static class DashboardEndpoints
         {
             var date = ctx.Request.Query["date"].FirstOrDefault();
             var (sql, param) = BuildDateFilter(date, "vw_Dashboard_TimingAnalysis");
+            if (sql == null) { ctx.Response.StatusCode = 400; return; }
             
             var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
@@ -118,7 +121,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/fingerprints", async (HttpContext ctx) =>
         {
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 50;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 500) : 50;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {limit} * FROM vw_Dashboard_FingerprintDetails ORDER BY Hits DESC");
@@ -130,7 +133,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/gpu-distribution", async (HttpContext ctx) =>
         {
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {limit} * FROM vw_Dashboard_GPUDistribution ORDER BY HitCount DESC");
@@ -142,7 +145,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/screen-distribution", async (HttpContext ctx) =>
         {
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {limit} * FROM vw_Dashboard_ScreenDistribution ORDER BY HitCount DESC");
@@ -154,7 +157,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/trends", async (HttpContext ctx) =>
         {
-            var days = int.TryParse(ctx.Request.Query["days"].FirstOrDefault(), out var d) ? d : 7;
+            var days = int.TryParse(ctx.Request.Query["days"].FirstOrDefault(), out var d) ? Math.Clamp(d, 1, 365) : 7;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {days} * FROM vw_Dashboard_Trends ORDER BY DateBucket DESC");
@@ -166,7 +169,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/live-feed", async (HttpContext ctx) =>
         {
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 25;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 25;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {limit} * FROM vw_Dashboard_LiveFeed ORDER BY ReceivedAt DESC");
@@ -180,6 +183,7 @@ public static class DashboardEndpoints
         {
             var date = ctx.Request.Query["date"].FirstOrDefault();
             var (sql, param) = BuildDateFilter(date, "vw_PiXL_DeviceBreakdown");
+            if (sql == null) { ctx.Response.StatusCode = 400; return; }
             
             var data = await QueryAsync(settings.ConnectionString, sql, param);
             await WriteJsonAsync(ctx, data);
@@ -190,7 +194,7 @@ public static class DashboardEndpoints
         // ============================================================================
         app.MapGet("/api/dashboard/cross-network", async (HttpContext ctx) =>
         {
-            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? l : 20;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 20;
             
             var data = await QueryAsync(settings.ConnectionString, 
                 $"SELECT TOP {limit} * FROM vw_PiXL_DeviceIdentity WHERE UniqueIPAddresses > 1 ORDER BY UniqueIPAddresses DESC");
@@ -232,7 +236,7 @@ public static class DashboardEndpoints
     /// Builds a parameterized date filter for dashboard views.
     /// Returns the SQL string and an optional SqlParameter.
     /// </summary>
-    private static (string Sql, SqlParameter? Param) BuildDateFilter(
+    private static (string? Sql, SqlParameter? Param) BuildDateFilter(
         string? date, string viewName, string orderBy = "")
     {
         if (string.IsNullOrEmpty(date) || date == "today")
@@ -240,9 +244,15 @@ public static class DashboardEndpoints
             return ($"SELECT * FROM {viewName} WHERE DateBucket = CAST(GETUTCDATE() AS DATE) {orderBy}", null);
         }
         
+        // Safe parse — rejects garbage input instead of throwing FormatException
+        if (!DateTime.TryParse(date, out var parsed))
+        {
+            return (null, null);
+        }
+        
         return (
             $"SELECT * FROM {viewName} WHERE DateBucket = @DateFilter {orderBy}",
-            new SqlParameter("@DateFilter", System.Data.SqlDbType.Date) { Value = DateTime.Parse(date) }
+            new SqlParameter("@DateFilter", System.Data.SqlDbType.Date) { Value = parsed }
         );
     }
     

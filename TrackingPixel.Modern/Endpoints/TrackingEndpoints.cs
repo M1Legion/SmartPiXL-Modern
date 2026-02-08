@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using TrackingPixel.Scripts;
 using TrackingPixel.Services;
 
@@ -16,6 +17,10 @@ public static class TrackingEndpoints
     
     // Pre-configured JSON options - avoid allocation per request
     private static readonly JsonSerializerOptions DebugJsonOptions = new() { WriteIndented = true };
+    
+    // Route parameter validation: alphanumeric, hyphens, underscores only (max 64 chars)
+    // Prevents JS injection via companyId/pixlId and bounds the script cache
+    private static readonly Regex SafeRouteParam = new(@"^[a-zA-Z0-9\-_]{1,64}$", RegexOptions.Compiled);
     
     // Cached static file paths - resolved once at startup
     private static string? _wwwrootPath;
@@ -111,10 +116,15 @@ public static class TrackingEndpoints
         // ============================================================================
         
         // ============================================================================
-        // DEBUG ENDPOINT - Shows all captured data (consider restricting in production)
+        // DEBUG ENDPOINT - Restricted to loopback in production
         // ============================================================================
         app.MapGet("/debug/headers", (HttpContext ctx) =>
         {
+            var remoteIp = ctx.Connection.RemoteIpAddress;
+            if (remoteIp != null && !System.Net.IPAddress.IsLoopback(remoteIp))
+            {
+                return Results.StatusCode(403);
+            }
             var data = captureService.CaptureFromRequest(ctx.Request);
             return Results.Json(data, DebugJsonOptions);
         });
@@ -139,6 +149,13 @@ public static class TrackingEndpoints
         // ============================================================================
         app.MapGet("/js/{companyId}/{pixlId}.js", (HttpContext ctx, string companyId, string pixlId, IConfiguration config) =>
         {
+            // Validate route params — prevents JS injection and unbounded cache growth
+            if (!SafeRouteParam.IsMatch(companyId) || !SafeRouteParam.IsMatch(pixlId))
+            {
+                ctx.Response.StatusCode = 400;
+                return Results.Text("// invalid parameters", "application/javascript");
+            }
+            
             var baseUrl = config["Tracking:BaseUrl"];
             if (string.IsNullOrEmpty(baseUrl))
             {
@@ -148,6 +165,7 @@ public static class TrackingEndpoints
             var javascript = Tier5Script.GetScript(pixelUrl);
             
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
             
             return Results.Text(javascript, "application/javascript");
         });
