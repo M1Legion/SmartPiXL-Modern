@@ -31,6 +31,7 @@ builder.Services.AddSingleton<DatabaseWriterService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseWriterService>());
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FingerprintStabilityService>();
+builder.Services.AddSingleton<IpBehaviorService>();
 builder.Services.AddHttpClient("DatacenterIp");
 builder.Services.AddSingleton<DatacenterIpService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());

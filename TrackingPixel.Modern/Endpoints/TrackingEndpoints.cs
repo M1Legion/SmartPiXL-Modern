@@ -41,6 +41,7 @@ public static partial class TrackingEndpoints
         var writerService = app.Services.GetRequiredService<DatabaseWriterService>();
         var logger = app.Services.GetRequiredService<ITrackingLogger>();
         var fpService = app.Services.GetRequiredService<FingerprintStabilityService>();
+        var ipBehaviorService = app.Services.GetRequiredService<IpBehaviorService>();
         
         // Resolve wwwroot path once at startup
         _wwwrootPath = ResolveWwwrootPath();
@@ -220,6 +221,23 @@ public static partial class TrackingEndpoints
                     };
                 }
                 
+                // Server-side IP behavior analysis: subnet velocity + rapid-fire timing
+                var ipResult = ipBehaviorService.RecordAndCheck(trackingData.IPAddress ?? "unknown");
+                if (ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate)
+                {
+                    trackingData = trackingData with
+                    {
+                        QueryString = trackingData.QueryString +
+                            $"&_srv_subnetIps={ipResult.SubnetUniqueIps}" +
+                            $"&_srv_subnetHits={ipResult.SubnetTotalHits}" +
+                            $"&_srv_hitsIn15s={ipResult.HitsIn15Seconds}" +
+                            $"&_srv_lastGapMs={ipResult.LastGapMs}" +
+                            (ipResult.SubSecondDuplicate ? "&_srv_subSecDupe=1" : "") +
+                            (ipResult.SubnetVelocityAlert ? "&_srv_subnetAlert=1" : "") +
+                            (ipResult.RapidFireAlert ? "&_srv_rapidFire=1" : "")
+                    };
+                }
+                
                 if (!writerService.TryQueue(trackingData))
                 {
                     logger.Warning("Queue full - dropped tracking request");
@@ -265,6 +283,23 @@ public static partial class TrackingEndpoints
                         QueryString = trackingData.QueryString +
                             $"&_srv_fpAlert=1&_srv_fpObs={fpResult.ObservationCount}" +
                             $"&_srv_fpUniq={fpResult.UniqueFingerprints}&_srv_fpRate5m={fpResult.RecentRate}"
+                    };
+                }
+                
+                // Server-side IP behavior analysis: subnet velocity + rapid-fire timing
+                var ipResult = ipBehaviorService.RecordAndCheck(trackingData.IPAddress ?? "unknown");
+                if (ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate)
+                {
+                    trackingData = trackingData with
+                    {
+                        QueryString = trackingData.QueryString +
+                            $"&_srv_subnetIps={ipResult.SubnetUniqueIps}" +
+                            $"&_srv_subnetHits={ipResult.SubnetTotalHits}" +
+                            $"&_srv_hitsIn15s={ipResult.HitsIn15Seconds}" +
+                            $"&_srv_lastGapMs={ipResult.LastGapMs}" +
+                            (ipResult.SubSecondDuplicate ? "&_srv_subSecDupe=1" : "") +
+                            (ipResult.SubnetVelocityAlert ? "&_srv_subnetAlert=1" : "") +
+                            (ipResult.RapidFireAlert ? "&_srv_rapidFire=1" : "")
                     };
                 }
                 

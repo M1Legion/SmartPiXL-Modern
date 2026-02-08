@@ -721,9 +721,12 @@ public static class Tier5Script
             } catch(e) {}
             
             // 20. Chrome runtime inconsistency (Playwright/Puppeteer headless)
+            // NOTE: chrome.runtime is only accessible in extension contexts,
+            // so this fires on ALL normal Chrome page visits. Weight reduced
+            // from 3→1 pending further research with real traffic data.
             if (w.chrome && !w.chrome.runtime) {
                 signals.push('chrome-no-runtime');
-                score += 3;
+                score += 1;
             }
             
             // 21. Automated browsers often have identical screen and viewport
@@ -838,6 +841,27 @@ public static class Tier5Script
                 }
             } catch(e) {}
             
+            // ============================================
+            // 29. Heap size spoofing detection (promoted from cross-signal)
+            // Real browsers report messy heap numbers like 8103568.
+            // Spoofed environments report perfectly round numbers like 10000000.
+            // Also: totalHeap === usedHeap is physically impossible in real V8.
+            // ============================================
+            if (perf.memory) {
+                var _ht = perf.memory.totalJSHeapSize | 0;
+                var _hu = perf.memory.usedJSHeapSize | 0;
+                if (_ht === 10000000 || _hu === 10000000 ||
+                    (_ht > 0 && _ht % 1000000 === 0) ||
+                    (_hu > 0 && _hu % 1000000 === 0)) {
+                    signals.push('heap-size-spoofed');
+                    score += 8;
+                }
+                if (_ht > 0 && _ht === _hu) {
+                    signals.push('heap-total-equals-used');
+                    score += 5;
+                }
+            }
+
             return { signals: signals.join(','), score: score };
         })();
         
@@ -975,15 +999,14 @@ public static class Tier5Script
             flags += (flags ? ',' : '') + 'llvmpipe-on-mac'; anomalyScore += 20;
         }
         
-        // CS-05: Heap size fingerprint (| 0 for int coercion)
+        // CS-05: Heap size fingerprint — PROMOTED to bot scoring (signal 29).
+        // Cross-signal still checks for heap limit anomaly (different check).
         if (perf.memory) {
-            var heapTotal = perf.memory.totalJSHeapSize | 0;
-            var heapUsed = perf.memory.usedJSHeapSize | 0;
-            if (heapTotal === 10000000 || heapUsed === 10000000) {
-                flags += (flags ? ',' : '') + 'round-heap-size'; anomalyScore += 8;
-            }
-            if (heapTotal > 0 && heapTotal === heapUsed) {
-                flags += (flags ? ',' : '') + 'heap-total-equals-used'; anomalyScore += 3;
+            var heapLimit = perf.memory.jsHeapSizeLimit | 0;
+            // Known fake heap limits used by bot frameworks
+            if (heapLimit === 3760000000 || heapLimit === 2330000000 ||
+                (heapLimit > 0 && heapLimit % 10000000 === 0)) {
+                flags += (flags ? ',' : '') + 'round-heap-limit'; anomalyScore += 5;
             }
         }
         
@@ -1011,6 +1034,23 @@ public static class Tier5Script
             var safariMatch = ua.match(/version\/(\d+)/);
             if (safariMatch && (safariMatch[1] | 0) < 15) {
                 flags += (flags ? ',' : '') + 'webgl2-on-old-safari'; anomalyScore += 10;
+            }
+        }
+        
+        // CS-09: GPU/Platform mismatch — macOS-only GPU strings on non-Mac platforms
+        // Intel Iris OpenGL Engine is exclusive to macOS. Finding it on Linux/Win = spoofed UA.
+        var isMacGPU = gpu.indexOf('intel iris') > -1 || gpu.indexOf('apple m') > -1 ||
+                       gpu.indexOf('apple gpu') > -1;
+        var isMacPlatform = platform.indexOf('mac') > -1;
+        if (isMacGPU && !isMacPlatform && gpu) {
+            flags += (flags ? ',' : '') + 'gpu-platform-mismatch'; anomalyScore += 15;
+        }
+        // Reverse: non-Mac GPU on Mac platform (less common but still suspicious)
+        if (isMacPlatform && gpu && (gpu.indexOf('swiftshader') > -1 ||
+            gpu.indexOf('llvmpipe') > -1 || gpu.indexOf('mesa') > -1)) {
+            // Already caught by CS-03, but flag the specific mismatch
+            if (flags.indexOf('swiftshader-on-mac') < 0 && flags.indexOf('llvmpipe-on-mac') < 0) {
+                flags += (flags ? ',' : '') + 'software-gpu-on-mac'; anomalyScore += 10;
             }
         }
         
@@ -1138,33 +1178,41 @@ public static class Tier5Script
         // ============================================
         // CSS FONT-VARIANT FINGERPRINT
         // ============================================
+        // CSS Font-Variant Fingerprint (V2 — fixed: original only produced 'f' chars)
+        // Now measures computed default values of font properties, which vary by
+        // browser engine and OS font rendering stack.
         data.cssFontVariant = (function() {
             try {
                 var el = document.createElement('span');
-                el.style.cssText = 'position:absolute;left:-9999px;';
-                el.innerHTML = 'Test';
+                el.style.cssText = 'position:absolute;left:-9999px;font-size:16px;';
+                el.innerHTML = 'AaBbCcDdEeFfGg0123456789';
                 document.body.appendChild(el);
                 
-                var variants = [];
-                var testProps = [
-                    'font-variant-ligatures',
-                    'font-variant-caps', 
-                    'font-variant-numeric',
-                    'font-variant-east-asian',
-                    'font-feature-settings',
-                    'font-kerning'
+                var cs = w.getComputedStyle(el);
+                var parts = [];
+                // Collect computed values — these vary by engine/OS
+                var props = [
+                    'fontVariantLigatures',
+                    'fontVariantCaps',
+                    'fontVariantNumeric',
+                    'fontVariantEastAsian',
+                    'fontFeatureSettings',
+                    'fontKerning',
+                    'fontStretch',
+                    'fontSizeAdjust',
+                    'fontOpticalSizing',
+                    'fontSynthesis'
                 ];
-                
-                for (var i = 0; i < testProps.length; i++) {
-                    var prop = testProps[i];
-                    var camelProp = prop.replace(/-([a-z])/g, function(m, c) { return c.toUpperCase(); });
-                    if (el.style[camelProp] !== undefined) {
-                        variants.push(prop.charAt(0));
-                    }
+                for (var i = 0; i < props.length; i++) {
+                    var val = cs[props[i]];
+                    // Encode: 1 char for support + first 3 chars of value
+                    parts.push(val !== undefined && val !== '' ? val.slice(0,4) : '_');
                 }
+                // Also measure rendered width — varies by font rendering engine
+                parts.push(el.offsetWidth);
                 
                 document.body.removeChild(el);
-                return variants.join('');
+                return parts.join('|');
             } catch(e) { return ''; }
         })();
         

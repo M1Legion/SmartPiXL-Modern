@@ -1,9 +1,11 @@
 # SmartPiXL Field Reference
 
-Complete reference for all 169 fields exposed by `vw_PiXL_Complete`.
+Complete reference for all 176 fields exposed by `vw_PiXL_Complete`.
 Every field here is **verified against the live Tier 5 JavaScript and SQL view** as of 2026-02-08.
 
 > **Data flow:** Browser JS (`data.paramName`) → pixel GET request → `PiXL_Test.QueryString` → `vw_PiXL_Complete` SQL view
+> 
+> Server-side signals (`_srv_*`) are appended by `IpBehaviorService` before storage.
 
 ---
 
@@ -11,14 +13,16 @@ Every field here is **verified against the live Tier 5 JavaScript and SQL view**
 
 | Metric | Count |
 |--------|-------|
-| Total SQL view columns | 169 |
+| Total SQL view columns | 176 |
 | JS query string params | 158 (+ 2 error-only) |
 | Server-side columns (no JS) | 9 (`Id`, `CompanyID`, `PiXLID`, `IPAddress`, `ReceivedAt`, `RequestPath`, `ServerUserAgent`, `ServerReferer`, `RawQueryString`/`RawHeadersJson`) |
+| Server-side computed signals | 7 (`Srv_SubnetIps`, `Srv_SubnetHits`, `Srv_HitsIn15s`, `Srv_LastGapMs`, `Srv_SubSecDupe`, `Srv_SubnetAlert`, `Srv_RapidFire`) |
 | Computed columns | 1 (`IsSynthetic`) |
 | Fingerprint hash signals | 7 (canvas, webgl, audio hash, audio sum, math, error, css font) |
 | Bot detection fields | 7 |
 | Behavioral biometric fields | 8 |
 | Cross-signal analysis fields | 3 |
+| IP behavior fields | 7 |
 | Evasion/stealth fields | 7 |
 | Client Hints fields | 10 |
 
@@ -45,7 +49,8 @@ Every field here is **verified against the live Tier 5 JavaScript and SQL view**
 - [Evasion Detection](#17-evasion-detection)
 - [Behavioral Biometrics](#18-behavioral-biometrics)
 - [Cross-Signal Analysis](#19-cross-signal-analysis)
-- [Raw Data](#20-raw-data)
+- [IP Behavior Analysis (Server-Side)](#20-ip-behavior-analysis-server-side)
+- [Raw Data](#21-raw-data)
 
 ---
 
@@ -254,7 +259,7 @@ These are the core device fingerprinting hashes. Each captures a different hardw
 | SQL Column | JS Param | SQL Type | Description |
 |------------|----------|----------|-------------|
 | `DetectedFonts` | `fonts` | nvarchar | Comma-separated list of detected installed fonts |
-| `CSSFontVariantHash` | `cssFontVariant` | nvarchar | CSS font variant feature flags (e.g., "flncek") |
+| `CSSFontVariantHash` | `cssFontVariant` | nvarchar | CSS font variant computed values (V2: computed property values + rendered width) |
 | `FontMethodMismatch` | `fontMethodMismatch` | bit | `offsetWidth` and `getBoundingClientRect` disagree — spoofing indicator |
 
 **How font detection works:** Renders test strings in each target font + monospace fallback. If the rendered width differs from the pure monospace baseline, the font is installed. Tests ~42 fonts.
@@ -265,11 +270,16 @@ These are the core device fingerprinting hashes. Each captures a different hardw
 
 | SQL Column | JS Param | SQL Type | Description | Entropy |
 |------------|----------|----------|-------------|---------|
-| `MathFingerprint` | `mathFP` | nvarchar | Hash of Math function precision (tan, sin, acos, atan, exp, log, sqrt, pow) | ~3-5 bits |
+| `MathFingerprint` | `mathFP` | nvarchar | Hash of Math function precision (tan, sin, acos, atan, exp, log, sqrt, pow) | ~0 bits (see note) |
 | `ErrorFingerprint` | `errorFP` | nvarchar | `e.message.length + e.stack.length` from `null[0]()` | ~3-5 bits |
 | `SpeechVoices` | `voices` | nvarchar | Speech synthesis voices: `name/lang` pipe-separated (up to 20) | ~5-8 bits |
 
 **MathFingerprint:** Different CPUs and JS engines produce slightly different floating-point results for transcendental functions. V8 on x86 differs from V8 on ARM.
+
+> **Note (Migration 17):** In practice, MathFingerprint has shown **zero entropy** — all visitors
+> produce the same value across our real traffic. This is likely because all current visitors use
+> V8 on x86_64. The field is retained for future cross-platform analysis but is excluded from
+> FingerprintStrength calculations.
 
 **ErrorFingerprint:** Chrome says "TypeError: Cannot read properties of null" while Firefox says "null has no properties". The message length + stack length creates a browser engine signature.
 
@@ -471,13 +481,15 @@ All possible values in `BotSignalsList`:
 | `default-viewport` | +2 | Common headless viewport (1280x720, 800x600) |
 | `headless-ua` | +10 | "HeadlessChrome" in User-Agent |
 | `perm-inconsistent` | +5 | Permission API inconsistency |
-| `chrome-no-runtime` | +3 | Chrome object but no runtime |
+| `chrome-no-runtime` | +1 | Chrome object but no runtime (reduced from +3 — fires on all normal Chrome page visits since `chrome.runtime` is extension-only) |
 | `fullscreen-match` | +2 | Screen equals window equals available |
 | `no-connection-api` | +3 | Chrome but no Connection API |
 | `eval-tampered` | +5 | `eval` function overridden |
 | `cross-realm-toString` | +12 | `Function.prototype.toString.call()` cross-realm check fails |
 | `getter-name-*` | +6 each | Property descriptor getter `.name` validation fails |
 | `getter-proto-*` | +8 each | Property descriptor getter `.prototype` validation fails |
+| `heap-size-spoofed` | +8 | Heap size is a perfectly round number (e.g., 10000000) — real V8 heaps are always messy |
+| `heap-total-equals-used` | +5 | `totalJSHeapSize === usedJSHeapSize` — physically impossible in real V8 (promoted from cross-signal) |
 
 ---
 
@@ -589,6 +601,9 @@ Cross-referencing multiple signals to detect inconsistencies that indicate spoof
 | `screen-mismatch` | Screen dimensions don't match claimed platform |
 | `heap-mismatch` | JS heap size inconsistent with claimed device memory |
 | `ua-brand-mismatch` | User-Agent brands don't match Client Hints |
+| `gpu-platform-mismatch` | macOS-only GPU string (e.g., "Intel Iris OpenGL Engine") found on non-Mac platform — spoofed UA |
+| `software-gpu-on-mac` | Software GPU (SwiftShader/llvmpipe/Mesa) found on macOS platform — VM or misconfigured |
+| `round-heap-limit` | `jsHeapSizeLimit` is a round multiple of 10M — known fake heap limit values |
 
 **CombinedThreatScore formula:**
 ```
@@ -598,7 +613,48 @@ The anomaly contribution is capped at 25 — anomalies alone shouldn't push a hu
 
 ---
 
-## 20. Raw Data
+## 20. IP Behavior Analysis (Server-Side)
+
+These fields are computed **server-side** by `IpBehaviorService` — they require cross-request correlation that JavaScript running in a single page cannot perform. They are appended as `_srv_*` query parameters before the hit is stored.
+
+| SQL Column | Source Param | SQL Type | Description |
+|------------|-------------|----------|-------------|
+| `Srv_SubnetIps` | `_srv_subnetIps` | int | Unique IPs from same /24 subnet in 5-minute window |
+| `Srv_SubnetHits` | `_srv_subnetHits` | int | Total hits from same /24 subnet in 5-minute window |
+| `Srv_HitsIn15s` | `_srv_hitsIn15s` | int | Hits from same IP in 15-second window |
+| `Srv_LastGapMs` | `_srv_lastGapMs` | bigint | Milliseconds since last hit from same IP (-1 if first hit) |
+| `Srv_SubSecDupe` | `_srv_subSecDupe` | bit | Sub-second duplicate from same IP (< 1000ms gap) |
+| `Srv_SubnetAlert` | `_srv_subnetAlert` | bit | Subnet /24 velocity alert: 3+ unique IPs in same /24 in 5min |
+| `Srv_RapidFire` | `_srv_rapidFire` | bit | Rapid-fire alert: 3+ hits from same IP in 15 seconds |
+
+**Note:** These fields are only populated when an alert fires. Null values mean no alert — not that the analysis wasn't performed. The server analyzes every hit but only appends params when thresholds are exceeded, to keep querystrings lean.
+
+### Subnet Velocity Detection
+
+Bot farms deploy multiple instances across cloud VMs in the same data center, which typically share a /24 subnet (e.g., `205.169.39.x`). When 3+ unique IPs from the same /24 hit within 5 minutes, this signals coordinated infrastructure.
+
+| `SubnetUniqueIps` | `SubnetTotalHits` | Interpretation |
+|--------------------|--------------------|----------------|
+| 1 | Any | Normal — single IP |
+| 2 | < 5 | Possible NAT / shared office |
+| 3+ | Any | **Alert** — likely coordinated infrastructure |
+| 3+ | > 10 | **Strong signal** — bot farm cluster |
+
+### Rapid-Fire Timing Detection
+
+Same IP hitting multiple times within 15 seconds indicates automation. Human revisits are hours or days apart.
+
+| `HitsIn15s` | `LastGapMs` | Interpretation |
+|-------------|-------------|----------------|
+| 1 | -1 | First hit — no history |
+| 1 | > 15000 | Normal organic revisit |
+| 2 | 1000-15000 | Possible automation |
+| 3+ | Any | **Alert** — rapid-fire automation |
+| Any | < 1000 | **Sub-second duplicate** — definite automation |
+
+---
+
+## 21. Raw Data
 
 | SQL Column | Source | SQL Type | Description |
 |------------|--------|----------|-------------|
@@ -622,7 +678,8 @@ SELECT *,
     (CASE WHEN WebGLFingerprint IS NOT NULL AND WebGLFingerprint != '' THEN 15 ELSE 0 END) +
     (CASE WHEN AudioFingerprintHash IS NOT NULL AND AudioFingerprintHash != '' THEN 10 ELSE 0 END) +
     (CASE WHEN DetectedFonts IS NOT NULL AND DetectedFonts != '' THEN 15 ELSE 0 END) +
-    (CASE WHEN MathFingerprint IS NOT NULL AND MathFingerprint != '' THEN 10 ELSE 0 END) +
+    -- MathFingerprint excluded: zero entropy in practice (all V8/x86_64 produce identical values)
+    -- (CASE WHEN MathFingerprint IS NOT NULL AND MathFingerprint != '' THEN 10 ELSE 0 END) +
     (CASE WHEN ErrorFingerprint IS NOT NULL AND ErrorFingerprint != '' THEN 5 ELSE 0 END) +
     (CASE WHEN SpeechVoices IS NOT NULL AND SpeechVoices != '' THEN 10 ELSE 0 END) +
     (CASE WHEN CSSFontVariantHash IS NOT NULL AND CSSFontVariantHash != '' THEN 5 ELSE 0 END) +
@@ -814,7 +871,15 @@ For developers adding new fields. Sorted alphabetically by JS param name.
 | `webglFP` | `WebGLFingerprint` |
 | `webglParams` | `WebGLParameters` |
 | `ww` | `WebWorkersSupported` |
+| **Server-Side Params** | *(appended by IpBehaviorService)* |
+| `_srv_subnetIps` | `Srv_SubnetIps` |
+| `_srv_subnetHits` | `Srv_SubnetHits` |
+| `_srv_hitsIn15s` | `Srv_HitsIn15s` |
+| `_srv_lastGapMs` | `Srv_LastGapMs` |
+| `_srv_subSecDupe` | `Srv_SubSecDupe` |
+| `_srv_subnetAlert` | `Srv_SubnetAlert` |
+| `_srv_rapidFire` | `Srv_RapidFire` |
 
 ---
 
-*Last verified: 2026-02-08 against Tier5Script.cs (160 params), vw_PiXL_Complete (169 columns), SQL Migration 15.*
+*Last verified: 2025-06-22 against Tier5Script.cs (160+ params), vw_PiXL_Complete (176 columns), SQL Migration 17.*
