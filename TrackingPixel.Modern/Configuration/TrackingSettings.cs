@@ -37,6 +37,18 @@ public sealed class TrackingSettings
     /// SQL bulk copy timeout in seconds.
     /// </summary>
     public int BulkCopyTimeoutSeconds { get; set; } = 60;
+    
+    /// <summary>
+    /// Seconds between ETL cycles (materialization of PiXL_Parsed).
+    /// Default: 60 seconds.
+    /// </summary>
+    public int EtlIntervalSeconds { get; set; } = 60;
+    
+    /// <summary>
+    /// Max rows per ETL cycle passed to usp_ParseNewHits.
+    /// Default: 50,000.
+    /// </summary>
+    public int EtlBatchSize { get; set; } = 50000;
 }
 
 /// <summary>

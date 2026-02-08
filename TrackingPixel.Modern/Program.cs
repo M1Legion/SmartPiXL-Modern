@@ -34,6 +34,7 @@ builder.Services.AddSingleton<FingerprintStabilityService>();
 builder.Services.AddHttpClient("DatacenterIp");
 builder.Services.AddSingleton<DatacenterIpService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
+builder.Services.AddHostedService<EtlBackgroundService>();
 builder.Services.AddCors();
 
 // --- Windows Service ---
@@ -48,8 +49,8 @@ if (!builder.Configuration.GetSection("Kestrel:Endpoints").Exists())
         options.Limits.MaxConcurrentUpgradedConnections = 1000;
         options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
         options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
-        options.ListenAnyIP(6000);
-        options.ListenAnyIP(6001, lo => lo.UseHttps());
+        options.ListenAnyIP(7000);
+        options.ListenAnyIP(7001, lo => lo.UseHttps());
     });
 }
 
@@ -104,8 +105,8 @@ app.Services.GetRequiredService<IHostApplicationLifetime>()
     });
 
 logger.Info("SmartPiXL Tracking Server starting...");
-logger.Info("HTTP:  http://localhost:6000");
-logger.Info("HTTPS: https://localhost:6001");
+logger.Info("HTTP:  http://localhost:7000");
+logger.Info("HTTPS: https://localhost:7001");
 
 Console.WriteLine("SmartPiXL Tracking Server running — Ctrl+C to stop");
 
