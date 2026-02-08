@@ -89,11 +89,14 @@ public static class Tier5Script
                 // Evasion detection: Check if canvas returns suspiciously uniform data
                 var imgData = ctx.getImageData(0, 0, 280, 60).data;
                 var variance = 0, sum = 0, samples = 100;
-                for (var i = 0; i < samples * 4; i += 4) {
+                // BUG FIX: Sample from y=25 (center of drawn content: rect, text, arc)
+                // Previously sampled y=0 (blank top row) → variance=0 for ALL visitors
+                var sampleOffset = 25 * 280 * 4;
+                for (var i = sampleOffset; i < sampleOffset + samples * 4; i += 4) {
                     sum += imgData[i] + imgData[i+1] + imgData[i+2];
                 }
                 var mean = sum / (samples * 3);
-                for (var j = 0; j < samples * 4; j += 4) {
+                for (var j = sampleOffset; j < sampleOffset + samples * 4; j += 4) {
                     var diff = ((imgData[j] + imgData[j+1] + imgData[j+2]) / 3) - mean;
                     variance += diff * diff;
                 }
@@ -772,6 +775,69 @@ public static class Tier5Script
                 }
             } catch(e) {}
             
+            // ============================================
+            // 26. Cross-realm Function.prototype.toString validation
+            // Stealth tools replace toString with a WeakMap-backed version.
+            // Each frame gets its own WeakMap, so an iframe's pristine
+            // toString reveals the main frame's fake via cross-realm call.
+            // ============================================
+            try {
+                var _ifr = document.createElement('iframe');
+                _ifr.style.display = 'none';
+                if (document.body) {
+                    document.body.appendChild(_ifr);
+                    var _pTS = _ifr.contentWindow.Function.prototype.toString;
+                    var _curTS = Function.prototype.toString;
+                    // Pristine toString on current toString: reveals true source
+                    if (_pTS.call(_curTS).indexOf('[native code]') === -1) {
+                        signals.push('cross-realm-toString');
+                        score += 12;
+                    }
+                    document.body.removeChild(_ifr);
+                }
+            } catch(e) {}
+            
+            // ============================================
+            // 27. Navigator getter .name validation
+            // Native V8 getters have .name === 'get propertyName'.
+            // JS function replacements have .name === '' or wrong name.
+            // ============================================
+            try {
+                var _gnChecks = ['webdriver','hardwareConcurrency','platform','languages','deviceMemory','vendor'];
+                var _badNames = [];
+                for (var gi = 0; gi < _gnChecks.length; gi++) {
+                    var gd = Object.getOwnPropertyDescriptor(Navigator.prototype, _gnChecks[gi]);
+                    if (gd && gd.get && gd.get.name !== 'get ' + _gnChecks[gi]) {
+                        _badNames.push(_gnChecks[gi]);
+                    }
+                }
+                if (_badNames.length > 0) {
+                    signals.push('getter-name-mismatch:' + _badNames.join('+'));
+                    score += 6 * _badNames.length;
+                }
+            } catch(e) {}
+            
+            // ============================================
+            // 28. Native getter .prototype absence check
+            // Native V8 interface getters do NOT have a .prototype property.
+            // JS functions created via function(){} DO have .prototype.
+            // (Arrow functions don't — but are caught by check #27.)
+            // ============================================
+            try {
+                var _gpChecks = ['webdriver','platform','vendor','hardwareConcurrency','deviceMemory','pdfViewerEnabled'];
+                var _hasProto = [];
+                for (var pi2 = 0; pi2 < _gpChecks.length; pi2++) {
+                    var pd2 = Object.getOwnPropertyDescriptor(Navigator.prototype, _gpChecks[pi2]);
+                    if (pd2 && pd2.get && pd2.get.hasOwnProperty('prototype')) {
+                        _hasProto.push(_gpChecks[pi2]);
+                    }
+                }
+                if (_hasProto.length > 0) {
+                    signals.push('getter-has-prototype:' + _hasProto.join('+'));
+                    score += 8 * _hasProto.length;
+                }
+            } catch(e) {}
+            
             return { signals: signals.join(','), score: score };
         })();
         
@@ -950,6 +1016,15 @@ public static class Tier5Script
         
         data.crossSignals = flags;
         data.anomalyScore = anomalyScore;
+        
+        // ============================================
+        // COMBINED THREAT SCORE
+        // botScore catches automation signals (webdriver, headless, etc.)
+        // anomalyScore catches cross-signal inconsistencies (instant-page-load, etc.)
+        // Pass 3 red team had botScore=0 + anomalyScore=5 → classified as clean.
+        // This bridges the two: cap anomaly contribution at 25 to limit false positives.
+        // ============================================
+        data.combinedThreatScore = (data.botScore || 0) + Math.min(anomalyScore, 25);
         
         // ============================================
         // CONNECTION
@@ -1294,25 +1369,13 @@ public static class Tier5Script
 })();
 ";
 
-    // Pre-split template at placeholder — avoids 68KB string scan per request
-    private static readonly int _placeholderIdx = Template.IndexOf("{{PIXEL_URL}}", StringComparison.Ordinal);
-    private static readonly string _prefix = Template[.._placeholderIdx];
-    private static readonly string _suffix = Template[(_placeholderIdx + 14)..]; // "{{PIXEL_URL}}".Length == 14
-
     // Cache per pixel URL — zero allocation after first hit per companyId/pixlId combo
     private static readonly ConcurrentDictionary<string, string> _cache = new();
 
     /// <summary>
     /// Returns script with pixel URL injected. Cached per URL.
-    /// First call: single string.Create via Span (no intermediate allocs).
-    /// Subsequent calls: dictionary lookup, zero allocation.
+    /// Uses simple Replace for correctness — cached so only runs once per URL.
     /// </summary>
     public static string GetScript(string pixelUrl) =>
-        _cache.GetOrAdd(pixelUrl, static url =>
-            string.Create(_prefix.Length + url.Length + _suffix.Length, url, static (span, u) =>
-            {
-                _prefix.AsSpan().CopyTo(span);
-                u.AsSpan().CopyTo(span[_prefix.Length..]);
-                _suffix.AsSpan().CopyTo(span[(_prefix.Length + u.Length)..]);
-            }));
+        _cache.GetOrAdd(pixelUrl, url => Template.Replace("{{PIXEL_URL}}", url));
 }

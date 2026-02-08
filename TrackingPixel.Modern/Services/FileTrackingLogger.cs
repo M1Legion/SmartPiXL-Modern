@@ -1,22 +1,23 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Channels;
 using TrackingPixel.Configuration;
 
 namespace TrackingPixel.Services;
 
 /// <summary>
-/// High-performance file logger with async buffering.
-/// Uses a background writer to avoid blocking the hot path.
+/// High-performance file logger with Channel&lt;T&gt; async buffering.
+/// Channel is lock-free and natively async — no thread burn while waiting for entries.
 /// </summary>
 public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
 {
     private readonly TrackingLogSettings _settings;
     private readonly string _logDirectory;
-    private readonly BlockingCollection<LogEntry> _logQueue;
+    private readonly Channel<LogEntry> _channel;
     private readonly Task _writerTask;
     private readonly CancellationTokenSource _cts;
     
-    // Pre-cached uppercase padded level strings - avoids allocations in hot path
+    // Pre-cached uppercase padded level strings — indexed by enum ordinal
     private static readonly string[] LogLevelStrings =
     [
         "TRACE  ", // 0
@@ -27,7 +28,8 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         "NONE   "  // 5
     ];
     
-    private readonly record struct LogEntry(DateTime Timestamp, TrackingLogLevel Level, string Message);
+    // 16 bytes on stack, no GC pressure — readonly prevents accidental mutation
+    private readonly record struct LogEntry(long TimestampTicks, TrackingLogLevel Level, string Message);
     
     public FileTrackingLogger(TrackingLogSettings settings)
     {
@@ -38,11 +40,17 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         
         Directory.CreateDirectory(_logDirectory);
         
-        _logQueue = new BlockingCollection<LogEntry>(boundedCapacity: 10000);
+        _channel = Channel.CreateBounded<LogEntry>(
+            new BoundedChannelOptions(10000)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest, // Never block the hot path
+                SingleReader = true
+            });
         _cts = new CancellationTokenSource();
         _writerTask = Task.Run(WriteLoopAsync);
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsEnabled(TrackingLogLevel level) => level >= _settings.MinimumLevel;
     
     public void Trace(string message) => Log(TrackingLogLevel.Trace, message);
@@ -52,16 +60,17 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
     
     public void Error(string message, Exception? ex = null)
     {
-        var fullMessage = ex != null ? $"{message}: {ex.Message}" : message;
+        var fullMessage = ex is not null ? $"{message}: {ex.Message}" : message;
         Log(TrackingLogLevel.Error, fullMessage);
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Log(TrackingLogLevel level, string message)
     {
         if (!IsEnabled(level)) return;
         
-        // Fire and forget - don't block caller
-        _logQueue.TryAdd(new LogEntry(DateTime.UtcNow, level, message));
+        // Fire and forget — Channel.TryWrite is lock-free CAS
+        _channel.Writer.TryWrite(new LogEntry(DateTime.UtcNow.Ticks, level, message));
         
         if (_settings.WriteToConsole)
         {
@@ -73,75 +82,68 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
     {
         var buffer = new List<LogEntry>(100);
         var sb = new StringBuilder(4096);
+        var reader = _channel.Reader;
         
-        while (!_cts.Token.IsCancellationRequested || _logQueue.Count > 0)
+        while (!_cts.Token.IsCancellationRequested)
         {
             buffer.Clear();
             
             try
             {
-                // Block until we get an entry or timeout
-                if (_logQueue.TryTake(out var first, 500, _cts.Token))
+                if (await reader.WaitToReadAsync(_cts.Token))
                 {
-                    buffer.Add(first);
-                    
-                    // Grab more if available (non-blocking)
-                    while (buffer.Count < 100 && _logQueue.TryTake(out var item))
+                    while (buffer.Count < 100 && reader.TryRead(out var item))
                     {
                         buffer.Add(item);
                     }
                     
-                    // Build log content
                     sb.Clear();
                     foreach (var entry in buffer)
                     {
-                        sb.Append('[').Append(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] ");
+                        var ts = new DateTime(entry.TimestampTicks, DateTimeKind.Utc);
+                        sb.Append('[').Append(ts.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] ");
                         sb.Append('[').Append(LogLevelStrings[(int)entry.Level]).Append("] ");
                         sb.AppendLine(entry.Message);
                     }
                     
-                    // Write to file
                     var logFile = GetLogFilePath();
                     await File.AppendAllTextAsync(logFile, sb.ToString(), _cts.Token);
                 }
             }
             catch (OperationCanceledException)
             {
-                // Shutting down - drain remaining
                 break;
             }
             catch (Exception ex)
             {
-                // Last resort - write to console if file fails
                 Console.WriteLine($"[LOGGER ERROR] {ex.Message}");
             }
         }
         
         // Final drain on shutdown
         var drainSb = new StringBuilder(512);
-        while (_logQueue.TryTake(out var remaining))
+        while (reader.TryRead(out var remaining))
         {
-            drainSb.Append('[').Append(remaining.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] ");
+            var ts = new DateTime(remaining.TimestampTicks, DateTimeKind.Utc);
+            drainSb.Append('[').Append(ts.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] ");
             drainSb.Append('[').Append(LogLevelStrings[(int)remaining.Level]).Append("] ");
             drainSb.AppendLine(remaining.Message);
         }
         
         if (drainSb.Length > 0)
         {
-            var logFile = GetLogFilePath();
-            try { await File.AppendAllTextAsync(logFile, drainSb.ToString()); } catch { }
+            try { await File.AppendAllTextAsync(GetLogFilePath(), drainSb.ToString()); } catch { }
         }
     }
     
-    private string GetLogFilePath()
-    {
-        return Path.Combine(_logDirectory, $"{DateTime.UtcNow:yyyy_MM_dd}.log");
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private string GetLogFilePath() =>
+        Path.Combine(_logDirectory, $"{DateTime.UtcNow:yyyy_MM_dd}.log");
     
     public async ValueTask DisposeAsync()
     {
-        _logQueue.CompleteAdding();
-        _cts.Cancel();
+        _channel.Writer.TryComplete();
+        await _cts.CancelAsync();
         
         try
         {
@@ -153,6 +155,5 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         }
         
         _cts.Dispose();
-        _logQueue.Dispose();
     }
 }

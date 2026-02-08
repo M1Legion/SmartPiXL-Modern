@@ -1,38 +1,27 @@
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace TrackingPixel.Services;
 
 /// <summary>
 /// V-08: Detects if an IP belongs to a known cloud/datacenter provider.
-/// Bot and scraper traffic typically originates from AWS, GCP, Azure, etc.
-/// Downloads and caches official IP range lists on startup and refreshes weekly.
-/// 
-/// Registration: builder.Services.AddSingleton&lt;DatacenterIpService&gt;();
-///               builder.Services.AddHostedService(sp => sp.GetRequiredService&lt;DatacenterIpService&gt;());
+/// Downloads official IP range lists on startup, refreshes weekly.
+/// Uses lock-free volatile reference swap — readers never block.
 /// </summary>
 public sealed class DatacenterIpService : IHostedService, IDisposable
 {
     private readonly ILogger<DatacenterIpService> _logger;
     private readonly HttpClient _httpClient;
-    private readonly ReaderWriterLockSlim _rangeLock = new();
-    private List<(string Cidr, string Provider)> _ranges = new();
     private Timer? _refreshTimer;
+    
+    // Lock-free: readers see a consistent snapshot via volatile read.
+    // Writers atomically swap the entire reference — no ReaderWriterLockSlim needed.
+    private volatile (string Cidr, string Provider)[] _ranges = [];
 
-    // Official IP range endpoints
-    private static readonly Dictionary<string, string> ProviderUrls = new()
-    {
-        ["AWS"] = "https://ip-ranges.amazonaws.com/ip-ranges.json",
-        ["GCP"] = "https://www.gstatic.com/ipranges/cloud.json",
-        // Azure ranges require periodic manual URL updates
-        ["DigitalOcean"] = "https://digitalocean.com/geo/google.csv",
-    };
-
-    // Well-known datacenter ASN prefixes for quick heuristic checks
-    private static readonly string[] DatacenterIndicators = [
-        "Amazon", "Google Cloud", "Microsoft Azure", "DigitalOcean",
-        "Linode", "Vultr", "OVH", "Hetzner", "Scaleway", "Contabo"
-    ];
+    // Official IP range endpoints (cold path — only used on refresh)
+    private const string AwsUrl = "https://ip-ranges.amazonaws.com/ip-ranges.json";
+    private const string GcpUrl = "https://www.gstatic.com/ipranges/cloud.json";
 
     public DatacenterIpService(ILogger<DatacenterIpService> logger, IHttpClientFactory httpClientFactory)
     {
@@ -44,7 +33,6 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await RefreshRangesAsync(cancellationToken);
-        // Refresh weekly
         _refreshTimer = new Timer(_ => _ = RefreshRangesAsync(CancellationToken.None),
             null, TimeSpan.FromDays(7), TimeSpan.FromDays(7));
     }
@@ -56,51 +44,44 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Checks if an IP address belongs to a known datacenter/cloud provider.
-    /// Uses CIDR range matching loaded from provider IP lists.
+    /// Zero-lock CIDR check. Volatile read gets a stable snapshot.
+    /// Returns a stack-allocated readonly record struct — no GC pressure.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public DatacenterCheckResult Check(string? ipAddress)
     {
-        if (string.IsNullOrEmpty(ipAddress) || !IPAddress.TryParse(ipAddress, out var ip))
-            return new DatacenterCheckResult(false, null);
+        if (ipAddress is null || ipAddress.Length == 0 || !IPAddress.TryParse(ipAddress, out var ip))
+            return default; // IsDatacenter=false, Provider=null
 
-        _rangeLock.EnterReadLock();
-        try
+        var snapshot = _ranges; // Single volatile read — snapshot is immutable
+        foreach (var (cidr, provider) in snapshot)
         {
-            foreach (var (cidr, provider) in _ranges)
-            {
-                if (IsInCidr(ip, cidr))
-                    return new DatacenterCheckResult(true, provider);
-            }
-        }
-        finally
-        {
-            _rangeLock.ExitReadLock();
+            if (IsInCidr(ip, cidr))
+                return new DatacenterCheckResult(true, provider);
         }
 
-        return new DatacenterCheckResult(false, null);
+        return default;
     }
 
     private async Task RefreshRangesAsync(CancellationToken ct)
     {
         _logger.LogInformation("Refreshing datacenter IP ranges...");
-        var newRanges = new List<(string Cidr, string Provider)>();
+        var newRanges = new List<(string Cidr, string Provider)>(8000);
 
         // AWS
         try
         {
-            var json = await _httpClient.GetStringAsync(ProviderUrls["AWS"], ct);
+            var json = await _httpClient.GetStringAsync(AwsUrl, ct);
             using var doc = JsonDocument.Parse(json);
             foreach (var prefix in doc.RootElement.GetProperty("prefixes").EnumerateArray())
             {
                 var cidr = prefix.GetProperty("ip_prefix").GetString();
-                if (cidr != null) newRanges.Add((cidr, "AWS"));
+                if (cidr is not null) newRanges.Add((cidr, "AWS"));
             }
-            // IPv6
             foreach (var prefix in doc.RootElement.GetProperty("ipv6_prefixes").EnumerateArray())
             {
                 var cidr = prefix.GetProperty("ipv6_prefix").GetString();
-                if (cidr != null) newRanges.Add((cidr, "AWS"));
+                if (cidr is not null) newRanges.Add((cidr, "AWS"));
             }
             _logger.LogInformation("Loaded {Count} AWS IP ranges", newRanges.Count(r => r.Provider == "AWS"));
         }
@@ -112,7 +93,7 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
         // GCP
         try
         {
-            var json = await _httpClient.GetStringAsync(ProviderUrls["GCP"], ct);
+            var json = await _httpClient.GetStringAsync(GcpUrl, ct);
             using var doc = JsonDocument.Parse(json);
             foreach (var prefix in doc.RootElement.GetProperty("prefixes").EnumerateArray())
             {
@@ -130,63 +111,55 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
 
         if (newRanges.Count > 0)
         {
-            _rangeLock.EnterWriteLock();
-            try
-            {
-                _ranges = newRanges;
-            }
-            finally
-            {
-                _rangeLock.ExitWriteLock();
-            }
+            // Atomic swap — readers see old array until this completes, then new array
+            _ranges = [.. newRanges]; // Collection expression → immutable array snapshot
             _logger.LogInformation("Total datacenter IP ranges loaded: {Count}", newRanges.Count);
         }
     }
 
     /// <summary>
-    /// Simple CIDR matching without external dependencies.
-    /// Parses CIDR notation and checks if the IP falls within the range.
+    /// CIDR match using Span-based slash parsing — avoids string.Split allocation.
+    /// Byte-level prefix comparison with bitwise mask on remaining bits.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsInCidr(IPAddress ip, string cidr)
     {
-        try
+        var span = cidr.AsSpan();
+        var slashIdx = span.IndexOf('/');
+        if (slashIdx < 0) return false;
+
+        if (!IPAddress.TryParse(span[..slashIdx], out var network)) return false;
+        if (!int.TryParse(span[(slashIdx + 1)..], out var prefixLen)) return false;
+
+        var ipBytes = ip.GetAddressBytes();
+        var netBytes = network.GetAddressBytes();
+        if (ipBytes.Length != netBytes.Length) return false;
+
+        var fullBytes = prefixLen >> 3;  // div 8
+        var remainBits = prefixLen & 7;  // mod 8
+
+        for (var i = 0; i < fullBytes & i < ipBytes.Length; i++)
         {
-            var parts = cidr.Split('/');
-            if (parts.Length != 2) return false;
-            if (!IPAddress.TryParse(parts[0], out var network)) return false;
-            if (!int.TryParse(parts[1], out var prefixLen)) return false;
-
-            var ipBytes = ip.GetAddressBytes();
-            var netBytes = network.GetAddressBytes();
-            if (ipBytes.Length != netBytes.Length) return false;
-
-            var fullBytes = prefixLen / 8;
-            var remainBits = prefixLen % 8;
-
-            for (int i = 0; i < fullBytes && i < ipBytes.Length; i++)
-            {
-                if (ipBytes[i] != netBytes[i]) return false;
-            }
-
-            if (remainBits > 0 && fullBytes < ipBytes.Length)
-            {
-                var mask = (byte)(0xFF << (8 - remainBits));
-                if ((ipBytes[fullBytes] & mask) != (netBytes[fullBytes] & mask)) return false;
-            }
-
-            return true;
+            if (ipBytes[i] != netBytes[i]) return false;
         }
-        catch
+
+        if (remainBits > 0 & fullBytes < ipBytes.Length)
         {
-            return false;
+            var mask = (byte)(0xFF << (8 - remainBits));
+            if ((ipBytes[fullBytes] & mask) != (netBytes[fullBytes] & mask)) return false;
         }
+
+        return true;
     }
 
     public void Dispose()
     {
         _refreshTimer?.Dispose();
-        _rangeLock.Dispose();
     }
 }
 
-public record DatacenterCheckResult(bool IsDatacenter, string? Provider);
+/// <summary>
+/// Stack-allocated result — no GC pressure on every Check() call.
+/// default value = (false, null) which is the "not datacenter" case.
+/// </summary>
+public readonly record struct DatacenterCheckResult(bool IsDatacenter, string? Provider);

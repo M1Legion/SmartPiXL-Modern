@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
@@ -74,32 +75,35 @@ public sealed partial class TrackingCaptureService
     /// <summary>
     /// Extracts the real client IP from reverse proxy headers.
     /// Priority: Cloudflare > True-Client-IP > X-Real-IP > X-Forwarded-For > Connection
+    /// Uses Span-based comma search for X-Forwarded-For to avoid substring allocation.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string? ExtractClientIp(IHeaderDictionary headers, ConnectionInfo connection)
     {
         // Cloudflare-specific header (most reliable when using CF)
         var cfConnectingIp = headers["CF-Connecting-IP"].ToString();
-        if (!string.IsNullOrEmpty(cfConnectingIp))
+        if (cfConnectingIp.Length > 0)
             return cfConnectingIp.Trim();
         
         // Akamai / some CDNs use True-Client-IP
         var trueClientIp = headers["True-Client-IP"].ToString();
-        if (!string.IsNullOrEmpty(trueClientIp))
+        if (trueClientIp.Length > 0)
             return trueClientIp.Trim();
         
         // nginx/HAProxy typically use X-Real-IP
         var realIp = headers["X-Real-IP"].ToString();
-        if (!string.IsNullOrEmpty(realIp))
+        if (realIp.Length > 0)
             return realIp.Trim();
         
         // Standard proxy header - may contain chain: "client, proxy1, proxy2"
+        // Span-based first-IP extraction: no substring alloc when no comma
         var forwardedFor = headers["X-Forwarded-For"].ToString();
-        if (!string.IsNullOrEmpty(forwardedFor))
+        if (forwardedFor.Length > 0)
         {
-            // Take the first (leftmost) IP - that's the original client
-            var firstComma = forwardedFor.IndexOf(',');
+            var span = forwardedFor.AsSpan();
+            var firstComma = span.IndexOf(',');
             return firstComma > 0 
-                ? forwardedFor[..firstComma].Trim() 
+                ? span[..firstComma].Trim().ToString()
                 : forwardedFor.Trim();
         }
         
@@ -114,14 +118,16 @@ public sealed partial class TrackingCaptureService
 
     private static string BuildHeadersJson(IHeaderDictionary headers)
     {
-        var sb = new StringBuilder(512);
+        // Thread-local StringBuilder: zero alloc after first request per thread
+        var sb = t_sb ??= new StringBuilder(512);
+        sb.Clear();
         sb.Append('{');
         var first = true;
 
         foreach (var key in HeaderKeysToCapture)
         {
             var value = headers[key].ToString();
-            if (!string.IsNullOrEmpty(value))
+            if (value.Length > 0)
             {
                 if (!first) sb.Append(',');
                 first = false;
@@ -133,6 +139,9 @@ public sealed partial class TrackingCaptureService
         sb.Append('}');
         return sb.ToString();
     }
+    
+    [ThreadStatic]
+    private static StringBuilder? t_sb;
 
     /// <summary>
     /// Appends a string to StringBuilder with JSON-safe escaping.
@@ -140,6 +149,7 @@ public sealed partial class TrackingCaptureService
     /// Typical header values contain zero special chars —
     /// entire string appended in one batch with no per-char branching.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AppendJsonEscaped(StringBuilder sb, ReadOnlySpan<char> value)
     {
         while (value.Length > 0)
@@ -163,6 +173,9 @@ public sealed partial class TrackingCaptureService
         }
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string? Truncate(string? value, int maxLength) =>
-        string.IsNullOrEmpty(value) ? value : (value.Length <= maxLength ? value : value[..maxLength]);
+        value is null || value.Length == 0 ? value
+        : value.Length <= maxLength ? value
+        : value[..maxLength];
 }

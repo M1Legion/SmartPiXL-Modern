@@ -1,787 +1,820 @@
 # SmartPiXL Field Reference
 
-Complete reference for all fingerprinting fields collected by SmartPiXL.
-Used by SQL views, diagnostics dashboard, and client reporting.
+Complete reference for all 169 fields exposed by `vw_PiXL_Complete`.
+Every field here is **verified against the live Tier 5 JavaScript and SQL view** as of 2026-02-08.
+
+> **Data flow:** Browser JS (`data.paramName`) → pixel GET request → `PiXL_Test.QueryString` → `vw_PiXL_Complete` SQL view
+
+---
+
+## At a Glance
+
+| Metric | Count |
+|--------|-------|
+| Total SQL view columns | 169 |
+| JS query string params | 158 (+ 2 error-only) |
+| Server-side columns (no JS) | 9 (`Id`, `CompanyID`, `PiXLID`, `IPAddress`, `ReceivedAt`, `RequestPath`, `ServerUserAgent`, `ServerReferer`, `RawQueryString`/`RawHeadersJson`) |
+| Computed columns | 1 (`IsSynthetic`) |
+| Fingerprint hash signals | 7 (canvas, webgl, audio hash, audio sum, math, error, css font) |
+| Bot detection fields | 7 |
+| Behavioral biometric fields | 8 |
+| Cross-signal analysis fields | 3 |
+| Evasion/stealth fields | 7 |
+| Client Hints fields | 10 |
 
 ---
 
 ## Quick Navigation
 
-- [Identity & Context](#identity--context)
-- [Fingerprint Signals](#fingerprint-signals)
-- [Bot Detection](#bot-detection)
-- [Evasion Detection](#evasion-detection)
-- [Device & Hardware](#device--hardware)
-- [Screen & Display](#screen--display)
-- [Browser & Navigator](#browser--navigator)
-- [Client Hints](#client-hints)
-- [Network & Connection](#network--connection)
-- [Performance Timing](#performance-timing)
-- [API Capabilities](#api-capabilities)
-- [Accessibility & Preferences](#accessibility--preferences)
-- [Locale & Internationalization](#locale--internationalization)
-- [Page Context](#page-context)
-- [Raw Data](#raw-data)
+- [Identity & Server Context](#1-identity--server-context)
+- [Screen & Display](#2-screen--display)
+- [Locale & Internationalization](#3-locale--internationalization)
+- [Browser & Navigator](#4-browser--navigator)
+- [Client Hints](#5-client-hints-chromium-only)
+- [Browser-Specific Fields](#6-browser-specific-fields)
+- [Fingerprint Signals](#7-fingerprint-signals)
+- [Device & Hardware](#8-device--hardware)
+- [Network & Connection](#9-network--connection)
+- [Storage & Media Devices](#10-storage--media-devices)
+- [API Capabilities](#11-api-capabilities)
+- [Accessibility & Preferences](#12-accessibility--preferences)
+- [Page Context](#13-page-context)
+- [Document State](#14-document-state)
+- [Performance Timing](#15-performance-timing)
+- [Bot Detection](#16-bot-detection)
+- [Evasion Detection](#17-evasion-detection)
+- [Behavioral Biometrics](#18-behavioral-biometrics)
+- [Cross-Signal Analysis](#19-cross-signal-analysis)
+- [Raw Data](#20-raw-data)
 
 ---
 
-## Identity & Context
+## 1. Identity & Server Context
 
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `Id` | int | Auto-increment primary key | Unique record identifier |
-| `CompanyID` | string | Client company identifier | Which client's pixel triggered this |
-| `PiXLID` | string | Specific pixel identifier | Which campaign/page is being tracked |
-| `IPAddress` | string | Visitor's external IP | Geographic location, ISP, potential household grouping |
-| `ReceivedAt` | datetime | Server timestamp when request was received | Session timing, time-of-day patterns |
-| `Tier` | int | Script complexity tier (always 5) | Data collection level |
+These fields come from the HTTP request itself, not from JavaScript.
 
----
-
-## Fingerprint Signals
-
-### Canvas Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `CanvasFingerprint` | string | Hash of canvas rendering output | GPU + driver + OS + fonts unique combination | ~10-15 bits |
-| `CanvasSupported` | bool | Whether canvas is available | Browser capability | 1 bit |
-| `CanvasEvasionDetected` | bool | Whether canvas appears blocked/spoofed | Privacy tools in use (Brave, Canvas Blocker, Tor) | High risk signal |
-
-**UI Drill-Down:** When clicking CanvasFingerprint, show:
-- Distribution of unique hashes
-- Most common hashes (potential bot signatures)
-- Evasion rate (% with CanvasEvasionDetected = true)
-
-### WebGL Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `WebGLFingerprint` | string | Hash of WebGL parameters | GPU capabilities unique signature | ~10-15 bits |
-| `WebGLSupported` | bool | Whether WebGL is available | Browser capability | 1 bit |
-| `WebGL2Supported` | bool | Whether WebGL 2.0 is available | Modern browser indicator | 1 bit |
-| `WebGLEvasionDetected` | bool | Whether WebGL appears blocked/spoofed | Privacy tools or headless browser | High risk signal |
-| `WebGLExtensionCount` | int | Number of supported WebGL extensions | GPU capability level | ~3-5 bits |
-| `WebGLParameters` | string | Raw WebGL parameter values | Detailed GPU capability debugging | N/A |
-| `GPURenderer` | string | GPU model string (e.g., "NVIDIA GeForce RTX 4090") | Exact hardware, desktop vs laptop | ~8-10 bits |
-| `GPUVendor` | string | GPU vendor (NVIDIA, AMD, Intel, Apple) | Hardware brand, potential segmentation | ~3 bits |
-
-**UI Drill-Down:** When clicking WebGLFingerprint, show:
-- Top GPU models (GPURenderer breakdown)
-- Vendor distribution (GPUVendor pie chart)
-- Extension count histogram
-- Blocked/spoofed rate
-
-### Audio Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `AudioFingerprintHash` | string | Hash of audio processing output | Audio stack uniqueness | ~5-8 bits |
-| `AudioFingerprintSum` | float | Raw sum of audio frequency bins | Audio processing precision | Debugging |
-| `AudioInputDevices` | int | Count of audio input devices (microphones) | Desktop vs laptop vs headset user | ~2-3 bits |
-
-**UI Drill-Down:** When clicking AudioFingerprint, show:
-- Unique hash distribution
-- Input device count histogram
-- Cross-reference with VideoInputDevices
-
-### Font Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `DetectedFonts` | string | Comma-separated list of detected fonts | OS, installed software (Office, Adobe, etc.) | ~10-15 bits |
-| `CSSFontVariantHash` | string | Hash of CSS font rendering properties | Font rendering engine differences | ~3-5 bits |
-
-**UI Drill-Down:** When clicking DetectedFonts, show:
-- Most common font sets (Windows vs Mac vs Linux)
-- "Office installed" indicator (Calibri, Cambria present)
-- Font count distribution
-
-### Math Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `MathFingerprint` | string | Hash of Math function precision | JavaScript engine + CPU architecture | ~3-5 bits |
-
-**What it captures:** Results of `Math.tan(-1e300)`, `Math.sinh(1)`, etc. Different CPUs and JS engines produce slightly different floating-point results.
-
-### Error Fingerprint
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `ErrorFingerprint` | string | Hash of error message formats | Browser engine (V8, SpiderMonkey, JavaScriptCore) | ~3-5 bits |
-
-**What it captures:** How different browsers format error stack traces and messages. Chrome says "TypeError: x is not a function" while Firefox says "x is not a function".
-
-### Speech Synthesis Voices
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `InstalledVoices` | string | List of speech synthesis voices | OS, language packs installed | ~5-8 bits |
-
-**What it captures:** `speechSynthesis.getVoices()` returns the installed text-to-speech voices. Format: `name/lang|name/lang` (up to 20 voices). 
-
-**Why it matters:**
-- Windows has different default voices than macOS
-- Additional language packs reveal user's language interests
-- Some VMs have no voices installed (bot indicator)
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `Id` | — | int | Auto-increment PK |
+| `CompanyID` | — | nvarchar(100) | Client company identifier (from URL route) |
+| `PiXLID` | — | nvarchar(100) | Campaign/pixel identifier (from URL route) |
+| `IPAddress` | — | nvarchar(50) | Visitor IP (from X-Forwarded-For or RemoteIpAddress) |
+| `ReceivedAt` | — | datetime2 | Server UTC timestamp |
+| `RequestPath` | — | nvarchar(500) | HTTP request path |
+| `ServerUserAgent` | — | nvarchar(2000) | User-Agent from HTTP header |
+| `ServerReferer` | — | nvarchar(2000) | Referer from HTTP header |
+| `IsSynthetic` | `synthetic` | int | 1 if test/synthetic traffic, 0 if real. Computed from param. |
+| `Tier` | `tier` | int | Script complexity tier (always 5 for current script) |
 
 ---
 
-## Bot Detection
+## 2. Screen & Display
 
-| Field | Type | Description | Indicates | Risk Weight |
-|-------|------|-------------|-----------|-------------|
-| `BotScore` | int | Composite bot likelihood score (0-100) | Overall automation probability | PRIMARY |
-| `BotSignalsList` | string | Comma-separated list of triggered signals | Which specific bot indicators fired | DIAGNOSTIC |
-| `ScriptExecTimeMs` | int | Milliseconds from page load to script execution | Bot timing signature | KEY SIGNAL |
-| `WebDriverDetected` | bool | `navigator.webdriver` is true | Selenium, Puppeteer, Playwright | +10 risk |
-| `Chrome_ObjectPresent` | bool | `window.chrome` object exists | Real Chrome vs headless | +8 if false in Chrome UA |
-| `Chrome_RuntimePresent` | bool | `window.chrome.runtime` exists | Extension context available | +3 if false in Chrome UA |
-| `BotPermInconsistent` | bool | Permission API returns inconsistent state | Headless browser quirk | +5 risk |
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `ScreenWidth` | `sw` | int | `screen.width` in pixels | ~5-6 bits |
+| `ScreenHeight` | `sh` | int | `screen.height` in pixels | ~5-6 bits |
+| `ScreenAvailWidth` | `saw` | int | Available width (minus taskbar/dock) | ~2 bits |
+| `ScreenAvailHeight` | `sah` | int | Available height (minus taskbar/dock) | ~2 bits |
+| `ViewportWidth` | `vw` | int | `window.innerWidth` (CSS viewport) | ~4 bits |
+| `ViewportHeight` | `vh` | int | `window.innerHeight` (CSS viewport) | ~4 bits |
+| `OuterWidth` | `ow` | int | `window.outerWidth` (including chrome) | ~3 bits |
+| `OuterHeight` | `oh` | int | `window.outerHeight` (including chrome) | ~3 bits |
+| `ScreenX` | `sx` | int | Window X position (`screenX`/`screenLeft`) | ~2 bits |
+| `ScreenY` | `sy` | int | Window Y position (`screenY`/`screenTop`) | ~2 bits |
+| `ColorDepth` | `cd` | int | `screen.colorDepth` (bits per pixel) | ~2 bits |
+| `PixelRatio` | `pd` | decimal(5,2) | `devicePixelRatio` (1.0, 1.5, 2.0, 3.0) | ~2 bits |
+| `ScreenOrientation` | `ori` | nvarchar | `screen.orientation.type` (e.g., "landscape-primary") | ~1 bit |
 
-### Script Execution Time (KEY BOT INDICATOR)
+### Key Patterns
 
-| ScriptExecTime | Likelihood | Explanation |
-|----------------|------------|-------------|
-| < 10ms | 🔴 Almost certainly bot | Instant DOM, no network stack, pre-rendered |
-| 10-50ms | 🟡 Suspicious | Could be fast cache + SSD, but rare |
-| 50-200ms | 🟢 Normal human | Real browser with network, parsing, execution |
-| > 200ms | 🟢 Definitely human | Slow connection or device |
+| Resolution | Typical Device | Notes |
+|------------|---------------|-------|
+| 1920x1080 | Desktop (most common) | |
+| 2560x1440 | Gaming/Pro desktop | |
+| 3840x2160 | 4K monitor | |
+| 1366x768 | Laptop | |
+| 390x844 | iPhone 12/13/14/15 | |
+| 360x800 | Android common | |
+| 1000x1000 | **Tor Browser** | Signature — see Evasion Detection |
+
+### ColorDepth Analysis
+
+| Depth | Platform | Normal? | Implication |
+|-------|----------|---------|-------------|
+| 24 | Windows | Yes | Standard |
+| 24 | macOS | **Suspicious** | Real Macs report 30-bit color |
+| 30 | macOS | Yes | Normal P3 display |
+| 32 | Linux | Yes | Standard with alpha |
+| 8 or 16 | Any | **Suspicious** | VM or very old device |
+
+---
+
+## 3. Locale & Internationalization
+
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `Language` | `lang` | nvarchar | Primary language (`navigator.language`, e.g., "en-US") | ~4-6 bits |
+| `LanguageList` | `langs` | nvarchar | All accepted languages, comma-separated | ~5-8 bits |
+| `Timezone` | `tz` | nvarchar | IANA timezone (e.g., "America/New_York") | ~5-7 bits |
+| `TimezoneOffsetMins` | `tzo` | int | UTC offset in minutes (`getTimezoneOffset()`) | ~4 bits |
+| `ClientTimestampMs` | `ts` | bigint | Client epoch ms (`new Date().getTime()`) | Timing |
+| `TimezoneLocale` | `tzLocale` | nvarchar | `locale\|calendar\|numberingSystem\|hourCycle` | ~3-5 bits |
+| `DateFormatSample` | `dateFormat` | nvarchar | `Intl.DateTimeFormat` output for 2024-01-15 | ~3 bits |
+| `NumberFormatSample` | `numberFormat` | nvarchar | `Intl.NumberFormat().format(1234567.89)` | ~3 bits |
+| `RelativeTimeSample` | `relativeTime` | nvarchar | `Intl.RelativeTimeFormat().format(-1, 'day')` | ~3 bits |
+
+**Why this matters:** Locale formatting reveals the user's OS language configuration at a deeper level than `navigator.language`. A US English user on Windows vs macOS will produce different `DateFormatSample` strings. Combined with timezone, this cross-validates IP geolocation.
+
+---
+
+## 4. Browser & Navigator
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `ClientUserAgent` | `ua` | nvarchar | Full `navigator.userAgent` string |
+| `Platform` | `plt` | nvarchar | `navigator.platform` ("Win32", "MacIntel", "Linux x86_64") |
+| `Vendor` | `vnd` | nvarchar | `navigator.vendor` ("Google Inc.", "Apple Computer, Inc.") |
+| `AppName` | `appName` | nvarchar | `navigator.appName` (usually "Netscape") |
+| `AppVersion` | `appVersion` | nvarchar | `navigator.appVersion` |
+| `AppCodeName` | `appCodeName` | nvarchar | `navigator.appCodeName` (usually "Mozilla") |
+| `NavigatorProduct` | `product` | nvarchar | `navigator.product` ("Gecko") |
+| `NavigatorProductSub` | `productSub` | nvarchar | `navigator.productSub` |
+| `NavigatorVendorSub` | `vendorSub` | nvarchar | `navigator.vendorSub` (usually empty) |
+| `PluginCount` | `plugins` | int | Count of `navigator.plugins` |
+| `PluginListDetailed` | `pluginList` | nvarchar | `name::filename::description` pipe-separated (up to 20) |
+| `MimeTypeCount` | `mimeTypes` | int | Count of `navigator.mimeTypes` |
+| `MimeTypeList` | `mimeList` | nvarchar | Comma-separated MIME types (up to 30) |
+| `HistoryLength` | `hist` | int | `history.length` — browsing session depth |
+
+---
+
+## 5. Client Hints (Chromium Only)
+
+High-entropy UA signals requested via `Accept-CH` response header. Only available in Chromium-based browsers.
+
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `UA_Platform` | `uaPlatform` | nvarchar | OS name ("Windows", "macOS", "Android", "Linux") | ~3 bits |
+| `UA_PlatformVersion` | `uaPlatformVersion` | nvarchar | OS version (e.g., "15.0.0", "10.0.0") | ~4-6 bits |
+| `UA_Architecture` | `uaArch` | nvarchar | CPU arch ("x86", "arm") | ~2 bits |
+| `UA_Bitness` | `uaBitness` | nvarchar | "32" or "64" | ~1 bit |
+| `UA_IsMobile` | `uaMobile` | bit | Mobile device flag | ~1 bit |
+| `UA_IsWow64` | `uaWow64` | bit | 32-bit app on 64-bit OS (WoW64) | ~1 bit |
+| `UA_Model` | `uaModel` | nvarchar | Device model, mobile only ("Pixel 7", "SM-S918B") | ~5-8 bits |
+| `UA_Brands` | `uaBrands` | nvarchar | Low-entropy brand list ("Chromium/120\|Google Chrome/120") | ~3 bits |
+| `UA_FullVersionList` | `uaFullVersion` | nvarchar | Full version list with patch numbers | ~5 bits |
+| `UA_FormFactor` | `uaFormFactor` | nvarchar | Form factor(s): "Desktop", "Mobile", "Tablet" | ~2 bits |
+
+**Cross-validation:** `UA_Platform` vs `Platform` (navigator.platform) should agree. A mismatch is a strong evasion signal — bots often spoof one but forget the other.
+
+---
+
+## 6. Browser-Specific Fields
+
+### Firefox Only
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `Firefox_OSCPU` | `oscpu` | nvarchar | `navigator.oscpu` — OS/CPU string (e.g., "Windows NT 10.0; Win64; x64") |
+| `Firefox_BuildID` | `buildID` | nvarchar | Firefox build timestamp (may be frozen for privacy) |
+
+### Chrome/Chromium Only
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `Chrome_ObjectPresent` | `chromeObj` | bit | `window.chrome` exists |
+| `Chrome_RuntimePresent` | `chromeRuntime` | bit | `window.chrome.runtime` exists |
+| `Chrome_JSHeapSizeLimit` | `jsHeapLimit` | bigint | `performance.memory.jsHeapSizeLimit` |
+| `Chrome_TotalJSHeapSize` | `jsHeapTotal` | bigint | `performance.memory.totalJSHeapSize` |
+| `Chrome_UsedJSHeapSize` | `jsHeapUsed` | bigint | `performance.memory.usedJSHeapSize` |
+
+**Chrome Object Matrix:**
+
+| Browser | `chrome` obj | `chrome.runtime` |
+|---------|-------------|-------------------|
+| Chrome | Yes | Yes (extensions only) |
+| Edge | Yes | Yes (extensions only) |
+| Brave | Yes | Yes |
+| Firefox | No | No |
+| Safari | No | No |
+| HeadlessChrome | Often missing | No |
+
+---
+
+## 7. Fingerprint Signals
+
+These are the core device fingerprinting hashes. Each captures a different hardware/software dimension.
+
+### Canvas Fingerprint (~10-15 bits)
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `CanvasFingerprint` | `canvasFP` | nvarchar | Hex hash of canvas rendering output |
+| `CanvasSupported` | `canvas` | bit | Canvas 2D context available |
+| `CanvasEvasionDetected` | `canvasEvasion` | bit | Pixel data variance suspiciously low or dataURL too short |
+| `CanvasConsistency` | `canvasConsistency` | nvarchar | Noise injection detection result |
+
+**CanvasConsistency values:**
+- `clean` — two renders match exactly (normal)
+- `noise-detected` — two renders differ (Canvas Blocker or Brave injecting random noise)
+- `canvas-blocked` — canvas API blocked entirely
+- `error` — exception during rendering
+
+**How canvas fingerprinting works:** Draws shapes, gradients, text with specific fonts onto a hidden canvas. The resulting pixel data is deterministic per GPU+driver+OS+font-rasterizer combination but varies across devices. Samples at y=25 (center of drawn region) to defeat top-row-only evasion techniques.
+
+### WebGL Fingerprint (~10-15 bits)
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `WebGLFingerprint` | `webglFP` | nvarchar | Hex hash of 23 WebGL parameters |
+| `WebGLSupported` | `webgl` | bit | WebGL 1.0 context available |
+| `WebGL2Supported` | `webgl2` | bit | WebGL 2.0 context available |
+| `WebGLEvasionDetected` | `webglEvasion` | bit | GPU is software renderer (SwiftShader/llvmpipe/Mesa) |
+| `WebGLExtensionCount` | `webglExt` | int | Number of supported WebGL extensions |
+| `WebGLParameters` | `webglParams` | nvarchar | First 5 WebGL params: VERSION\|SHADING_LANGUAGE\|VENDOR\|RENDERER\|MAX_VERTEX_ATTRIBS |
+| `GPURenderer` | `gpu` | nvarchar | Unmasked GPU model (e.g., "NVIDIA GeForce RTX 4090") |
+| `GPUVendor` | `gpuVendor` | nvarchar | Unmasked GPU vendor ("NVIDIA Corporation", "Google Inc.") |
+
+**Software renderer = bot signal:** SwiftShader, llvmpipe, and Mesa OffScreen are software GPU emulators used in headless environments (Docker, CI, cloud VMs).
+
+### Audio Fingerprint (~5-8 bits)
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `AudioFingerprintSum` | `audioFP` | nvarchar | Sum of OfflineAudioContext frequency bin samples (6 decimal places) |
+| `AudioFingerprintHash` | `audioHash` | nvarchar | Hash of full audio sample data |
+| `AudioIsStable` | `audioStable` | bit | Two audio fingerprint runs match (1=stable, 0=varies) |
+| `AudioNoiseInjectionDetected` | `audioNoiseDetected` | bit | Two audio runs differ — noise injection extension detected |
+
+**How it works:** Creates an `OfflineAudioContext`, generates a triangle wave through a `DynamicsCompressor`, and reads back the processed frequency data. Different audio stacks (OS + browser + audio driver) produce slightly different results.
+
+### Font Detection (~10-15 bits)
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `DetectedFonts` | `fonts` | nvarchar | Comma-separated list of detected installed fonts |
+| `CSSFontVariantHash` | `cssFontVariant` | nvarchar | CSS font variant feature flags (e.g., "flncek") |
+| `FontMethodMismatch` | `fontMethodMismatch` | bit | `offsetWidth` and `getBoundingClientRect` disagree — spoofing indicator |
+
+**How font detection works:** Renders test strings in each target font + monospace fallback. If the rendered width differs from the pure monospace baseline, the font is installed. Tests ~42 fonts.
+
+**FontMethodMismatch:** Privacy extensions that fake font widths typically only intercept `offsetWidth` but not `getBoundingClientRect`, or vice versa. Detecting a difference between the two methods reveals the spoofing.
+
+### Other Fingerprint Hashes
+
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `MathFingerprint` | `mathFP` | nvarchar | Hash of Math function precision (tan, sin, acos, atan, exp, log, sqrt, pow) | ~3-5 bits |
+| `ErrorFingerprint` | `errorFP` | nvarchar | `e.message.length + e.stack.length` from `null[0]()` | ~3-5 bits |
+| `SpeechVoices` | `voices` | nvarchar | Speech synthesis voices: `name/lang` pipe-separated (up to 20) | ~5-8 bits |
+
+**MathFingerprint:** Different CPUs and JS engines produce slightly different floating-point results for transcendental functions. V8 on x86 differs from V8 on ARM.
+
+**ErrorFingerprint:** Chrome says "TypeError: Cannot read properties of null" while Firefox says "null has no properties". The message length + stack length creates a browser engine signature.
+
+**SpeechVoices:** `speechSynthesis.getVoices()`. Windows, macOS, Linux, and mobile each have different default voice sets. Additional language packs add voices. VMs with no voices are a bot indicator.
+
+---
+
+## 8. Device & Hardware
+
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `HardwareConcurrency` | `cores` | int | CPU logical core count (`navigator.hardwareConcurrency`) | ~3-5 bits |
+| `DeviceMemoryGB` | `mem` | decimal(5,2) | Approximate RAM in GB (`navigator.deviceMemory`) | ~3 bits |
+| `MaxTouchPoints` | `touch` | int | Touch capability (`navigator.maxTouchPoints`) | ~2 bits |
+| `ConnectedGamepads` | `gamepads` | nvarchar | Pipe-separated gamepad IDs from `navigator.getGamepads()` | ~1 bit |
+| `BatteryCharging` | `batteryCharging` | bit | Device is plugged in | ~1 bit |
+| `BatteryLevelPct` | `batteryLevel` | int | Battery percentage (0-100) | Low |
+
+**Device Classification:**
+```
+IF UA_IsMobile = 1 THEN 'Mobile'
+ELSE IF MaxTouchPoints > 0 AND ScreenWidth < 1200 THEN 'Tablet'
+ELSE 'Desktop'
+```
+
+---
+
+## 9. Network & Connection
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `ConnectionType` | `conn` | nvarchar | `connection.effectiveType` ("4g", "3g", "2g", "slow-2g") |
+| `NetworkType` | `connType` | nvarchar | `connection.type` ("wifi", "cellular", "ethernet") |
+| `DownlinkMbps` | `dl` | decimal(10,2) | Estimated bandwidth in Mbps |
+| `DownlinkMax` | `dlMax` | nvarchar | Maximum downlink speed |
+| `RTTMs` | `rtt` | int | Round-trip time estimate in ms |
+| `DataSaverEnabled` | `save` | bit | `connection.saveData` active |
+| `IsOnline` | `online` | bit | `navigator.onLine` |
+| `WebRTCLocalIP` | `localIp` | nvarchar | Local network IP from WebRTC ICE candidate (e.g., "192.168.1.5") |
+
+**WebRTCLocalIP:** Reveals internal network topology — corporate VLAN assignment, VPN usage, Carrier-grade NAT. Only available if WebRTC is not blocked by the browser.
+
+---
+
+## 10. Storage & Media Devices
+
+| SQL Column | JS Param | SQL Type | Description | Entropy |
+|------------|----------|----------|-------------|---------|
+| `StorageQuotaGB` | `storageQuota` | int | `navigator.storage.estimate()` quota in GB | ~3-4 bits |
+| `StorageUsedMB` | `storageUsed` | int | Storage used in MB | ~2-3 bits |
+| `AudioInputDevices` | `audioInputs` | int | Microphone count from `enumerateDevices()` | ~2 bits |
+| `VideoInputDevices` | `videoInputs` | int | Camera count from `enumerateDevices()` | ~1-2 bits |
+
+**Storage Quota Analysis:**
+- Desktop: Typically 50-300+ GB quota
+- Mobile: Typically 1-10 GB quota
+- Incognito/Private: Drastically reduced quota
+- No quota or 0: Headless/bot environment
+
+---
+
+## 11. API Capabilities
+
+Boolean flags for browser API support. Each contributes 1 bit of entropy. The combination creates a browser "capability signature."
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `CookiesEnabled` | `ck` | bit | Cookies allowed |
+| `DoNotTrack` | `dnt` | nvarchar | DNT header value ("1", "0", null) |
+| `PDFViewerEnabled` | `pdf` | bit | Built-in PDF viewer active |
+| `WebDriverDetected` | `webdr` | bit | `navigator.webdriver` is true |
+| `JavaEnabled` | `java` | bit | `navigator.javaEnabled()` |
+| `CanvasSupported` | `canvas` | bit | Canvas 2D API available |
+| `WebAssemblySupported` | `wasm` | bit | WebAssembly available |
+| `WebWorkersSupported` | `ww` | bit | Web Workers available |
+| `ServiceWorkerSupported` | `swk` | bit | Service Workers available |
+| `LocalStorageSupported` | `ls` | bit | localStorage available |
+| `SessionStorageSupported` | `ss` | bit | sessionStorage available |
+| `IndexedDBSupported` | `idb` | bit | IndexedDB available |
+| `CacheAPISupported` | `caches` | bit | CacheStorage API available |
+| `MediaDevicesAPISupported` | `mediaDevices` | bit | `navigator.mediaDevices` exists |
+| `ClipboardAPISupported` | `clipboard` | bit | Clipboard `writeText` available |
+| `SpeechSynthesisSupported` | `speechSynth` | bit | `window.speechSynthesis` available |
+| `TouchEventsSupported` | `touchEvent` | bit | `ontouchstart` in window |
+| `PointerEventsSupported` | `pointerEvent` | bit | PointerEvent API available |
+
+> **Note on removed phantom fields:** The previous version of this document listed 13 additional API capability fields (Geolocation, Notifications, Push, Bluetooth, USB, Serial, HID, MIDI, SpeechRecognition, Share, Credentials, PaymentRequest, WebXR) that were never collected by the Tier 5 script and had no SQL view columns. They have been removed. If these are needed for future fingerprinting, they must be added to Tier5Script.cs first, then to the SQL view.
+
+---
+
+## 12. Accessibility & Preferences
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `PrefersColorSchemeDark` | `darkMode` | bit | `prefers-color-scheme: dark` |
+| `PrefersColorSchemeLight` | `lightMode` | bit | `prefers-color-scheme: light` |
+| `PrefersReducedMotion` | `reducedMotion` | bit | `prefers-reduced-motion: reduce` |
+| `PrefersReducedData` | `reducedData` | bit | `prefers-reduced-data: reduce` |
+| `PrefersHighContrast` | `contrast` | bit | `prefers-contrast: more` |
+| `ForcedColorsActive` | `forcedColors` | bit | `forced-colors: active` (Windows High Contrast) |
+| `InvertedColorsActive` | `invertedColors` | bit | `inverted-colors: inverted` |
+| `HoverCapable` | `hover` | bit | `(hover: hover)` media query |
+| `PointerType` | `pointer` | nvarchar | Primary pointer: "fine" (mouse), "coarse" (touch), "" (none) |
+| `StandaloneDisplayMode` | `standalone` | bit | `(display-mode: standalone)` — PWA mode |
+
+---
+
+## 13. Page Context
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `PageURL` | `url` | nvarchar | `location.href` (full URL) |
+| `PageDomain` | `domain` | nvarchar | `location.hostname` |
+| `PagePath` | `path` | nvarchar | `location.pathname` |
+| `PageProtocol` | `protocol` | nvarchar | "http:" or "https:" |
+| `PageHash` | `hash` | nvarchar | URL fragment |
+| `PageTitle` | `title` | nvarchar | `document.title` |
+| `PageReferrer` | `ref` | nvarchar | `document.referrer` (client-side) |
+
+---
+
+## 14. Document State
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `DocumentCharset` | `docCharset` | nvarchar | `document.characterSet` (e.g., "UTF-8") |
+| `DocumentCompatMode` | `docCompat` | nvarchar | "CSS1Compat" (standards) or "BackCompat" (quirks) |
+| `DocumentReadyState` | `docReady` | nvarchar | "loading", "interactive", "complete" |
+| `DocumentHidden` | `docHidden` | bit | `document.hidden` — tab is backgrounded |
+| `DocumentVisibility` | `docVisibility` | nvarchar | "visible", "hidden", "prerender" |
+
+---
+
+## 15. Performance Timing
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `ScriptExecutionTimeMs` | `scriptExecTime` | int | Time from page load to script execution point |
+| `PageLoadTimeMs` | `loadTime` | int | `loadEventEnd - navigationStart` |
+| `DOMReadyTimeMs` | `domTime` | int | `domContentLoadedEventEnd - navigationStart` |
+| `DNSLookupMs` | `dnsTime` | int | `domainLookupEnd - domainLookupStart` |
+| `TCPConnectMs` | `tcpTime` | int | `connectEnd - connectStart` |
+| `TimeToFirstByteMs` | `ttfb` | int | `responseStart - requestStart` |
+
+### Script Execution Time (Key Bot Indicator)
+
+| Time | Assessment | Explanation |
+|------|------------|-------------|
+| < 10ms | **Almost certainly bot** | Instant DOM, no network stack, pre-rendered |
+| 10-50ms | Suspicious | Could be fast cache + SSD, but rare |
+| 50-200ms | Normal human | Real browser with network, parsing, execution |
+| > 200ms | Definitely human | Slow connection or device |
+
+---
+
+## 16. Bot Detection
+
+### Scores
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `BotScore` | `botScore` | int | Composite bot likelihood (0-100). Sum of triggered signal weights, capped at 100. |
+| `CombinedThreatScore` | `combinedThreatScore` | int | `botScore + min(anomalyScore, 25)`. Bridges automation detection with cross-signal anomaly detection. |
+| `BotSignalsList` | `botSignals` | nvarchar | Comma-separated list of triggered signal names |
+| `BotPermissionInconsistent` | `botPermInconsistent` | bit | Permission API returns inconsistent state |
+
+**Risk Buckets:**
+
+| Bucket | Score Range | Interpretation |
+|--------|-------------|----------------|
+| High Risk | 80-100 | Almost certainly automated |
+| Medium Risk | 50-79 | Suspicious, needs review |
+| Low Risk | 20-49 | Minor anomalies detected |
+| Likely Human | 0-19 | Normal behavior |
 
 ### Bot Signal Reference
 
 All possible values in `BotSignalsList`:
 
-| Signal | Score | Description |
-|--------|-------|-------------|
+| Signal | Weight | Trigger |
+|--------|--------|---------|
 | `webdriver` | +10 | `navigator.webdriver` is true |
-| `headless-no-chrome-obj` | +8 | Chrome UA but no `window.chrome` object |
-| `minimal-ua` | +15 | User-Agent < 30 characters (bots often use short UA) |
-| `fake-ua` | +20 | UA matches known fake pattern (e.g., "desktop", "mobile") |
-| `phantom` | +8 | PhantomJS artifacts detected |
-| `nightmare` | +8 | Nightmare.js artifacts detected |
-| `selenium` | +10 | Selenium artifacts detected (`__selenium_*`) |
-| `cdp` | +10 | Chrome DevTools Protocol variables detected |
-| `playwright-global` | +10 | `__playwright` or `__pw_manual` detected |
-| `empty-languages` | +5 | `navigator.languages` is empty array |
+| `headless-no-chrome-obj` | +8 | Chrome UA but no `window.chrome` |
+| `minimal-ua` | +15 | User-Agent < 30 characters |
+| `fake-ua` | +20 | UA matches known fake pattern |
+| `phantom` | +8 | PhantomJS artifacts |
+| `nightmare` | +8 | Nightmare.js artifacts |
+| `selenium` | +10 | `__selenium_*` globals |
+| `cdp` | +10 | Chrome DevTools Protocol variables |
+| `playwright-global` | +10 | `__playwright` or `__pw_manual` |
+| `empty-languages` | +5 | `navigator.languages` is empty |
 | `plugin-mime-mismatch` | +3 | Plugins empty but mimeTypes present |
 | `zero-screen` | +8 | Screen dimensions are 0 |
-| `no-plugins` | +2 | No browser plugins (rare for real users) |
-| `dom-automation` | +10 | `domAutomation` or `domAutomationController` present |
+| `no-plugins` | +2 | No browser plugins |
+| `dom-automation` | +10 | `domAutomation` / `domAutomationController` |
 | `outer-zero` | +5 | `outerWidth` is 0 but `innerWidth` > 0 |
-| `nav-*` | +10 | Automation property in navigator object |
+| `nav-*` | +10 | Automation property on navigator |
 | `fn-tampered` | +5 | Native functions appear tampered |
 | `default-viewport` | +2 | Common headless viewport (1280x720, 800x600) |
 | `headless-ua` | +10 | "HeadlessChrome" in User-Agent |
-| `perm-inconsistent` | +5 | Permission API returns inconsistent state |
-| `chrome-no-runtime` | +3 | Chrome object but no runtime (headless) |
-| `fullscreen-match` | +2 | Screen equals window equals available (VM/headless) |
-| `no-connection-api` | +3 | Chrome browser but no Connection API |
-| `eval-tampered` | +5 | `eval` function has been overridden |
-
-**Bot Score Calculation:**
-```
-BotScore = sum of all triggered signal scores (capped at 100)
-```
-
-**UI Drill-Down:** When clicking BotScore summary:
-1. Show risk bucket distribution (High/Medium/Low/Human)
-2. Click bucket → Show which signals are most common in that bucket
-3. Click signal → Show devices with that signal, time patterns
-
-**Risk Buckets for Display:**
-| Bucket | Score Range | Color | Description |
-|--------|-------------|-------|-------------|
-| High Risk | 80-100 | Red | Almost certainly automated |
-| Medium Risk | 50-79 | Orange | Suspicious, needs review |
-| Low Risk | 20-49 | Yellow | Minor anomalies |
-| Likely Human | 0-19 | Green | Normal behavior |
+| `perm-inconsistent` | +5 | Permission API inconsistency |
+| `chrome-no-runtime` | +3 | Chrome object but no runtime |
+| `fullscreen-match` | +2 | Screen equals window equals available |
+| `no-connection-api` | +3 | Chrome but no Connection API |
+| `eval-tampered` | +5 | `eval` function overridden |
+| `cross-realm-toString` | +12 | `Function.prototype.toString.call()` cross-realm check fails |
+| `getter-name-*` | +6 each | Property descriptor getter `.name` validation fails |
+| `getter-proto-*` | +8 each | Property descriptor getter `.prototype` validation fails |
 
 ---
 
-## Evasion Detection
+## 17. Evasion Detection
 
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `CanvasEvasionDetected` | bool | Canvas returns blank/noise | Canvas Blocker, Brave Shields, Tor Browser |
-| `WebGLEvasionDetected` | bool | WebGL returns generic values | WebGL blocking, Tor Browser |
-| `EvasionToolsDetected` | string | Detected privacy tools | Specific tool identification |
-| `ProxyBlockedProperties` | string | Navigator properties blocked by Proxy | Privacy extension (JShelter, Trace, Privacy Badger) |
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `CanvasEvasionDetected` | `canvasEvasion` | bit | Canvas data variance is 0 or dataURL suspiciously short |
+| `WebGLEvasionDetected` | `webglEvasion` | bit | GPU is software renderer (SwiftShader, llvmpipe, Mesa) |
+| `EvasionToolsDetected` | `evasionDetected` | nvarchar | Comma-separated evasion tool names |
+| `EvasionSignalsV2` | `evasionSignalsV2` | nvarchar | Enhanced evasion/Tor/stealth signals |
+| `StealthPluginSignals` | `stealthSignals` | nvarchar | Stealth plugin detection signals |
+| `ProxyBlockedProperties` | `_proxyBlocked` | nvarchar | Navigator properties blocked by JS Proxy extension |
+| `FontMethodMismatch` | `fontMethodMismatch` | bit | `offsetWidth` vs `getBoundingClientRect` disagree |
 
-**Detection Methods:**
-- **Canvas noise:** Variance in pixel data is 0 or data URL is too short
-- **WebGL blocking:** Renderer is "Unknown" or generic ANGLE
-- **Tor Browser:** Screen is exactly 1000x900, WebGL disabled
-- **Proxy blocking:** Privacy extensions wrap `navigator` in JavaScript Proxy that throws on property access
-
-### Privacy Extension Detection (ProxyBlockedProperties)
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `ProxyBlockedProperties` | string | Comma-separated list of blocked navigator properties | Which APIs the extension blocks |
-| `ProxyBlockedCount` | int | Count of blocked properties (computed) | Extension aggressiveness level |
-
-**How it works:**
-Privacy extensions like JShelter, Trace, and Privacy Badger wrap `navigator` in a JavaScript Proxy. When the script tries to access properties like `navigator.javaEnabled` or `navigator.platform`, the Proxy throws a TypeError:
-```
-TypeError: 'get' on proxy: property 'javaEnabled' is a read-only and non-configurable data property...
-```
-
-Our `safeGet()` helper catches these errors and records which properties were blocked:
-```javascript
-var safeGet = function(obj, prop, fallback) {
-    try {
-        return obj[prop];
-    } catch(e) {
-        data._proxyBlocked = (data._proxyBlocked || '') + prop + ',';
-        return fallback;
-    }
-};
-```
-
-**Example values:**
-- `"javaEnabled,"` - Only javaEnabled blocked
-- `"javaEnabled,platform,languages,userAgent,"` - Aggressive blocking
-- Empty/null - No privacy extension detected
-
-**Paradox:** The presence of `ProxyBlockedProperties` is itself a fingerprint signal! Users with privacy extensions are rare (~1-2% of traffic), making them more identifiable.
-
-### Evasion Signals Reference
-
-All possible values in `EvasionDetected`:
+### EvasionToolsDetected Values
 
 | Signal | Description |
 |--------|-------------|
-| `tor-screen` | Screen is exactly 1000x1000 (Tor Browser default) |
-| `tor-likely` | Win32 platform + 24-bit color + no chrome object |
-| `brave` | Brave browser detected via `navigator.brave` |
-| `webrtc-blocked` | WebRTC API is undefined (privacy extension) |
+| `tor-screen` | Screen is 1000x1000 (Tor Browser letterbox) |
+| `tor-likely` | Win32 + 24-bit color + no chrome object |
+| `brave` | `navigator.brave` API detected |
+| `webrtc-blocked` | WebRTC API undefined |
 | `ua-platform-mismatch` | User-Agent OS doesn't match `navigator.platform` |
 | `mobile-ua-desktop-screen` | Mobile UA but screen > 1024px |
 | `touch-mismatch` | Touch capability but no mobile UA on large screen |
 | `partial-js-block` | Some JS APIs blocked (NoScript pattern) |
-| `clienthints-platform-mismatch` | Client Hints platform differs from navigator.platform |
+| `clienthints-platform-mismatch` | Client Hints platform differs from `navigator.platform` |
 
-**Client Hints Platform Mismatch (KEY SIGNAL):**
-Sophisticated bots may spoof `navigator.platform` but forget to spoof Client Hints, or vice versa:
-```javascript
-// Bot sets navigator.platform to "Linux"
-// But Client Hints returns "Windows" 
-// = clienthints-platform-mismatch
+### EvasionSignalsV2 Values
+
+| Signal | Description |
+|--------|-------------|
+| `tor-letterbox-viewport` | Viewport matches Tor Browser letterboxing patterns |
+| `canvas-noise` | Canvas noise injection detected (Brave Shields, Canvas Blocker) |
+| `stealth-detected` | Stealth plugin patterns found |
+
+### StealthPluginSignals Values
+
+| Signal | Description |
+|--------|-------------|
+| `webdriver-slow` | `navigator.webdriver` exists but returns false (stealth override) |
+| `toString-spoofed` | Native function `toString()` has been replaced |
+| `nav-proto-modified` | Navigator prototype chain has been tampered with |
+
+### ProxyBlockedProperties
+
+Privacy extensions (JShelter, Trace, Privacy Badger) wrap `navigator` in a JS Proxy. When the script accesses blocked properties, it catches the TypeError and records which properties were blocked.
+
+**Example values:**
+- `"javaEnabled,"` — minimal blocking
+- `"javaEnabled,platform,languages,userAgent,"` — aggressive blocking
+- Empty — no privacy extension
+
+**Paradox:** The presence of Proxy blocking is itself a fingerprint signal. Users with privacy extensions are ~1-2% of traffic — rarer makes them more identifiable, not less.
+
+---
+
+## 18. Behavioral Biometrics
+
+Real-time input behavior captured during the ~500ms window before pixel fires. Bots typically have zero or perfectly uniform input patterns.
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `MouseMoveCount` | `mouseMoves` | int | Number of mouse movements captured |
+| `MouseEntropy` | `mouseEntropy` | int | Mouse movement angle variance x 1000 (0 if < 5 moves) |
+| `MoveTimingCV` | `moveTimingCV` | int | Coefficient of variation of time between moves x 1000 |
+| `MoveSpeedCV` | `moveSpeedCV` | int | Coefficient of variation of movement speed x 1000 |
+| `MoveCountBucket` | `moveCountBucket` | nvarchar | "low" / "mid" / "high" / "very-high" |
+| `UserScrolled` | `scrolled` | bit | User scrolled within capture window |
+| `ScrollDepthPx` | `scrollY` | int | Scroll Y position at pixel fire time |
+| `ScrollContradiction` | `scrollContradiction` | bit | Scroll event fired but `scrollY` = 0 (bot indicator) |
+| `BehavioralFlags` | `behavioralFlags` | nvarchar | Behavioral analysis flags |
+
+### Behavioral Interpretation
+
+| `MouseMoveCount` | `MouseEntropy` | Assessment |
+|-------------------|----------------|------------|
+| 0 | 0 | No mouse activity — could be mobile or bot |
+| > 0 | 0 | Movement but no angle variance — bot-like straight lines |
+| > 5 | > 100 | Normal human — varied movement angles |
+| > 50 | < 50 | High count but low variance — suspicious automation |
+
+### BehavioralFlags Values
+
+| Flag | Description |
+|------|-------------|
+| `uniform-timing` | Time between mouse moves has very low variance (robotic) |
+| `uniform-speed` | Movement speed has very low variance (robotic) |
+
+---
+
+## 19. Cross-Signal Analysis
+
+Cross-referencing multiple signals to detect inconsistencies that indicate spoofing.
+
+| SQL Column | JS Param | SQL Type | Description |
+|------------|----------|----------|-------------|
+| `CrossSignalFlags` | `crossSignals` | nvarchar | Comma-separated cross-signal inconsistency flags |
+| `AnomalyScore` | `anomalyScore` | int | Cumulative cross-signal anomaly score |
+
+### CrossSignalFlags Values
+
+| Flag | Description |
+|------|-------------|
+| `win-fonts-on-mac` | Windows-only fonts detected but platform claims macOS |
+| `mac-fonts-on-win` | macOS-only fonts detected but platform claims Windows |
+| `swiftshader-gpu` | Software GPU renderer (headless/VM indicator) |
+| `screen-mismatch` | Screen dimensions don't match claimed platform |
+| `heap-mismatch` | JS heap size inconsistent with claimed device memory |
+| `ua-brand-mismatch` | User-Agent brands don't match Client Hints |
+
+**CombinedThreatScore formula:**
 ```
-
-**UI Drill-Down:** When clicking Privacy Extension summary:
-1. Show percentage of traffic with privacy extensions
-2. Show which properties are most commonly blocked
-3. Correlate with BotScore (privacy users are rarely bots)
-
-**UI Drill-Down:** When clicking Evasion summary:
-1. Show evasion type breakdown (Canvas/WebGL/Both/None)
-2. Click type → Show fingerprints with that evasion type
-3. Show correlation with BotScore
-
----
-
-## Device & Hardware
-
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `HardwareConcurrency` | int | CPU thread count | Desktop power, VM detection | ~3-5 bits |
-| `DeviceMemoryGB` | int | Approximate RAM in GB | Device class (low/mid/high end) | ~3 bits |
-| `MaxTouchPoints` | int | Touch capability | Mobile vs desktop, touchscreen monitor | ~2 bits |
-| `ConnectedGamepads` | int | Game controllers connected | Gaming user profile | ~1 bit |
-| `BatteryCharging` | bool | Device is plugged in | Laptop vs desktop behavior | ~1 bit |
-| `BatteryLevelPct` | int | Battery percentage | Mobile device state | Low entropy |
-| `StorageQuotaGB` | int | Available storage quota in GB | Device storage capacity | ~3-4 bits |
-| `StorageUsedMB` | int | Used storage in MB | Browser data usage | ~2-3 bits |
-| `VideoInputDevices` | int | Count of video input devices (cameras) | Webcam presence | ~1-2 bits |
-
-**Storage Quota Analysis:**
-Storage quota from `navigator.storage.estimate()` reveals:
-- Device storage class (8GB mobile vs 500GB+ desktop)
-- Incognito/private browsing (reduced quota)
-- Storage pressure (near-full devices)
-
-**Device Classification Logic:**
+CombinedThreatScore = BotScore + min(AnomalyScore, 25)
 ```
-DeviceType = 
-    IF UA_IsMobile = 1 THEN 'Mobile'
-    ELSE IF ScreenWidth >= 1200 THEN 'Desktop'  -- Even with touch (touchscreen monitors)
-    ELSE IF MaxTouchPoints > 0 AND ScreenWidth < 768 THEN 'Mobile'
-    ELSE IF MaxTouchPoints > 0 THEN 'Tablet'
-    ELSE 'Desktop'
-```
-
-**UI Drill-Down:** When clicking Device summary:
-1. Show device type distribution (Desktop/Mobile/Tablet)
-2. Click type → Show hardware specs for that type
-3. Show CPU cores histogram, memory distribution
+The anomaly contribution is capped at 25 — anomalies alone shouldn't push a human to "High Risk," but they significantly amplify an already suspicious bot score.
 
 ---
 
-## Screen & Display
+## 20. Raw Data
 
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `ScreenWidth` | int | Screen width in pixels | Device type, monitor setup | ~5-6 bits |
-| `ScreenHeight` | int | Screen height in pixels | Device type, monitor setup | ~5-6 bits |
-| `ScreenAvailWidth` | int | Available width (minus taskbar) | OS, taskbar position | ~2 bits |
-| `ScreenAvailHeight` | int | Available height (minus taskbar) | OS, taskbar position | ~2 bits |
-| `ScreenX` | int | Browser window X position | Multi-monitor setup | ~2 bits |
-| `ScreenY` | int | Browser window Y position | Multi-monitor setup | ~2 bits |
-| `ScreenOrientation` | string | Portrait/landscape | Mobile device orientation | ~1 bit |
-| `ViewportWidth` | int | Browser viewport width | Window size, responsive breakpoint | ~4 bits |
-| `ViewportHeight` | int | Browser viewport height | Window size | ~4 bits |
-| `OuterWidth` | int | Browser window outer width | Includes chrome/toolbar | ~3 bits |
-| `OuterHeight` | int | Browser window outer height | Includes chrome/toolbar | ~3 bits |
-| `PixelRatio` | float | Device pixel ratio (1x, 2x, 3x) | Retina/HiDPI display | ~2 bits |
-| `ColorDepth` | int | Color depth in bits | Display capability | ~2 bits |
-| `ColorDepthAnomaly` | bool | ColorDepth is unexpected for platform | Spoofing/VM indicator | BOT SIGNAL |
+| SQL Column | Source | SQL Type | Description |
+|------------|--------|----------|-------------|
+| `RawQueryString` | `PiXL_Test.QueryString` | nvarchar(max) | Full query string — all 158 params URL-encoded |
+| `RawHeadersJson` | `PiXL_Test.HeadersJson` | nvarchar(max) | All HTTP request headers as JSON |
 
-### ColorDepth Anomaly Detection
-
-ColorDepth can reveal spoofing or headless browsers:
-
-| ColorDepth | Platform | Expected? | Indicates |
-|------------|----------|-----------|-----------|
-| 24 | Windows | ✅ Yes | Normal |
-| 24 | macOS | ⚠️ Suspicious | Real Macs use 30-bit color |
-| 30 | macOS | ✅ Yes | Normal for Mac |
-| 32 | Linux | ✅ Yes | Normal |
-| 8 or 16 | Any | ⚠️ Suspicious | Very old device or VM |
-
-**Why macOS + 24-bit is suspicious:**
-Real macOS systems report 30-bit color depth. Bots/VMs spoofing macOS often forget this detail:
-```sql
--- Flag records with macOS platform but 24-bit color
-WHERE Platform LIKE '%Mac%' AND ColorDepth = 24
-```
-
-**Common Screen Patterns:**
-| Resolution | Device Type | Notes |
-|------------|-------------|-------|
-| 1920x1080 | Desktop | Most common desktop |
-| 2560x1440 | Desktop | Gaming/professional |
-| 3840x2160 | Desktop | 4K monitor |
-| 1366x768 | Laptop | Common laptop |
-| 390x844 | Mobile | iPhone 12/13/14 |
-| 360x800 | Mobile | Android common |
-| 1000x900 | Unknown | **Tor Browser signature** |
-
-**UI Drill-Down:** When clicking Screen summary:
-1. Show resolution distribution
-2. Highlight anomalies (Tor pattern, unusual sizes)
-3. Show pixel ratio distribution
-4. Flag ColorDepthAnomaly records
+These are the source of truth. The view parses them via `dbo.GetQueryParam()`. If a new JS param is added, the raw data already contains it — only the view needs updating.
 
 ---
 
-## Browser & Navigator
+## Composite Scores (Computed at Query Time)
 
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `ClientUserAgent` | string | Full User-Agent string | Browser, OS, version |
-| `ServerUserAgent` | string | User-Agent from HTTP header | Should match client |
-| `AppCodeName` | string | Browser code name (usually "Mozilla") | Legacy compatibility |
-| `AppName` | string | Browser name (usually "Netscape") | Legacy, always same |
-| `AppVersion` | string | Browser version string | Browser age |
-| `NavigatorProduct` | string | Product name ("Gecko") | Engine type |
-| `NavigatorProductSub` | string | Product sub-version | Engine version |
-| `Vendor` | string | Browser vendor (Google, Apple, Mozilla) | Browser identification |
-| `NavigatorVendorSub` | string | Vendor sub-version | Usually empty |
-| `Platform` | string | Platform string ("Win32", "MacIntel") | OS identification |
-| `PluginCount` | int | Number of browser plugins | Extension/plugin usage |
-| `PluginListDetailed` | string | Detailed plugin list | Specific plugins installed |
-| `MimeTypeCount` | int | Supported MIME types | Browser capability |
-| `MimeTypeList` | string | List of MIME types | File handling capability |
-| `HistoryLength` | int | Session history depth | Browsing depth |
-| `OSCpu` | string | Firefox-only CPU identifier | OS/CPU details (Firefox) |
-| `BuildID` | string | Firefox build identifier | Exact Firefox version |
-| `ChromeObjPresent` | bool | `window.chrome` object exists | Chromium-based browser |
-| `ChromeRuntimePresent` | bool | `chrome.runtime` API exists | Extension context |
-| `JSHeapSizeLimit` | int | Max JS heap size | Browser memory config |
-| `JSHeapTotalSize` | int | Total allocated heap | Memory usage pattern |
-| `JSHeapUsedSize` | int | Currently used heap | Active memory usage |
-
-### Firefox-Only Fields
-Firefox exposes additional navigator properties not available in other browsers:
-- `oscpu`: Returns the operating system/CPU info (e.g., "Windows NT 10.0; Win64; x64")
-- `buildID`: Returns Firefox's build timestamp (can be frozen for privacy)
-
-### Chrome Object Detection
-The presence of `window.chrome` helps identify browser family:
-| Browser | `chrome` | `chrome.runtime` |
-|---------|----------|-------------------|
-| Chrome | ✅ | ✅ (extensions only) |
-| Edge | ✅ | ✅ (extensions only) |
-| Brave | ✅ | ✅ |
-| Firefox | ❌ | ❌ |
-| Safari | ❌ | ❌ |
-
-### JS Heap Memory (Chrome DevTools API)
-Chrome exposes `performance.memory` for debugging:
-- `jsHeapSizeLimit`: Maximum available heap
-- `totalJSHeapSize`: Allocated heap size
-- `usedJSHeapSize`: Currently used heap
-
-**Bot Detection:** Unusual heap patterns can indicate:
-- Very small heap = headless browser with limited memory
-- Identical heap values = VM snapshots
-
----
-
-## Client Hints
-
-High-entropy signals from modern browsers (Chromium-based).
-
-| Field | Type | Description | Indicates | Entropy |
-|-------|------|-------------|-----------|---------|
-| `UA_Platform` | string | OS name (Windows, macOS, Android) | Operating system | ~3 bits |
-| `UA_PlatformVersion` | string | OS version (e.g., "10.0.0", "14.0.0") | OS age, update status | ~4-6 bits |
-| `UA_Architecture` | string | CPU architecture (x86, arm) | Device type | ~2 bits |
-| `UA_Bitness` | string | 32-bit or 64-bit | OS/browser architecture | ~1 bit |
-| `UA_IsMobile` | bool | Mobile device flag | Device type | ~1 bit |
-| `UA_IsWow64` | bool | 32-bit app on 64-bit OS | Compatibility mode | ~1 bit |
-| `UA_Model` | string | Device model (mobile only) | Specific device | ~5-8 bits (mobile) |
-| `UA_Brands` | string | Browser brand list | Browser identification | ~3 bits |
-| `UA_FullVersionList` | string | Full browser versions | Precise browser version | ~5 bits |
-| `UA_FormFactor` | string | Form factor (desktop, mobile, tablet) | Device category | ~2 bits |
-
-**UI Drill-Down:** When clicking Client Hints:
-1. Show platform distribution
-2. Show platform version age distribution
-3. Highlight outdated versions (security concern)
-
----
-
-## Network & Connection
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `ConnectionType` | string | Network type (4g, wifi, ethernet) | Mobile vs desktop context |
-| `DownlinkMbps` | float | Estimated bandwidth | Network speed class |
-| `DownlinkMax` | float | Maximum downlink speed | Hardware capability |
-| `RTTMs` | int | Round-trip time estimate | Network latency |
-| `NetworkType` | string | Effective connection type | Network quality |
-| `DataSaverEnabled` | bool | Data saver mode active | Mobile/bandwidth-constrained |
-| `IsOnline` | bool | Online status | Connectivity |
-| `WebRTCLocalIP` | string | Local IP from WebRTC | Internal network structure |
-
-**UI Drill-Down:** When clicking Network summary:
-1. Show connection type distribution
-2. Show bandwidth histogram
-3. Show geographic distribution (from IP)
-
----
-
-## Performance Timing
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `ScriptExecutionTimeMs` | int | Time from page load to script execution | **Bot detection signal** |
-| `PageLoadTimeMs` | int | Total page load time | Page performance |
-| `DOMReadyTimeMs` | int | DOMContentLoaded timing | Page complexity |
-| `DNSLookupMs` | int | DNS resolution time | Network path |
-| `TCPConnectMs` | int | TCP connection time | Network latency |
-| `TimeToFirstByteMs` | int | TTFB timing | Server response time |
-| `ClientTimestampMs` | long | Client-side timestamp | Time zone verification |
-
-**Bot Detection via Timing:**
-| ScriptExecTime | Likelihood |
-|----------------|------------|
-| < 10ms | 🔴 Very likely bot (too fast) |
-| 10-50ms | 🟡 Suspicious |
-| 50-500ms | 🟢 Normal human |
-| > 500ms | 🟢 Normal (slow network) |
-
-**UI Drill-Down:** When clicking Performance:
-1. Show execution time histogram
-2. Highlight fast executions (bot indicator)
-3. Show load time by device type
-
----
-
-## API Capabilities
-
-Boolean flags for browser API support. Used for browser fingerprinting and capability detection.
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `CookiesEnabled` | bool | Cookies allowed | Privacy settings |
-| `DoNotTrack` | string | DNT header value (1/0/unset) | Privacy preference |
-| `LocalStorageSupported` | bool | localStorage available | Storage capability |
-| `SessionStorageSupported` | bool | sessionStorage available | Storage capability |
-| `IndexedDBSupported` | bool | IndexedDB available | Storage capability |
-| `ServiceWorkerSupported` | bool | Service workers available | PWA capability |
-| `WebWorkersSupported` | bool | Web workers available | Threading capability |
-| `WebAssemblySupported` | bool | WebAssembly available | Performance capability |
-| `JavaEnabled` | bool | Java plugin active | Legacy (usually false) |
-| `PDFViewerEnabled` | bool | Built-in PDF viewer | Browser capability |
-| `GeolocationAPISupported` | bool | Geolocation available | Location capability |
-| `NotificationsAPISupported` | bool | Notifications available | Engagement capability |
-| `PushAPISupported` | bool | Push API available | Engagement capability |
-| `BluetoothAPISupported` | bool | Bluetooth API available | Hardware access |
-| `USBAPISupported` | bool | USB API available | Hardware access |
-| `SerialAPISupported` | bool | Serial API available | Hardware access |
-| `HIDAPISupported` | bool | HID API available | Hardware access |
-| `MIDIAPISupported` | bool | MIDI API available | Audio hardware |
-| `MediaDevicesAPISupported` | bool | MediaDevices available | Camera/mic access |
-| `SpeechRecognitionSupported` | bool | Speech recognition available | Voice input |
-| `SpeechSynthesisSupported` | bool | Speech synthesis available | Voice output |
-| `ShareAPISupported` | bool | Web Share API available | Mobile sharing |
-| `ClipboardAPISupported` | bool | Clipboard API available | Copy/paste access |
-| `CredentialsAPISupported` | bool | Credentials API available | Password manager |
-| `PaymentRequestSupported` | bool | Payment Request API | E-commerce capability |
-| `CacheAPISupported` | bool | Cache API available | Offline capability |
-| `WebXRSupported` | bool | WebXR available | VR/AR capability |
-| `PointerEventsSupported` | bool | Pointer events available | Input handling |
-| `TouchEventsSupported` | bool | Touch events available | Touch capability |
-
-**Capability Score:** Sum of supported APIs indicates browser modernity and potential fingerprint uniqueness.
-
----
-
-## Accessibility & Preferences
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `PrefersColorSchemeDark` | bool | Prefers dark mode | User preference |
-| `PrefersColorSchemeLight` | bool | Prefers light mode | User preference |
-| `PrefersReducedMotion` | bool | Reduce animations | Accessibility need |
-| `PrefersReducedData` | bool | Reduce data usage | Bandwidth constraint |
-| `PrefersHighContrast` | bool | High contrast mode | Visual accessibility |
-| `ForcedColorsActive` | bool | Forced colors mode | Accessibility override |
-| `InvertedColorsActive` | bool | Colors inverted | Accessibility setting |
-| `HoverCapable` | bool | Device can hover | Mouse vs touch |
-| `PointerType` | string | Primary pointer type | Input method |
-
----
-
-## Locale & Internationalization
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `Language` | string | Primary language (e.g., "en-US") | User locale |
-| `LanguageList` | string | All accepted languages | User language preferences |
-| `Timezone` | string | IANA timezone (e.g., "America/New_York") | Geographic location |
-| `TimezoneLocale` | string | Locale from timezone | Regional setting |
-| `TimezoneOffsetMins` | int | UTC offset in minutes | Time zone verification |
-| `DateFormatSample` | string | Formatted date sample | Locale formatting |
-| `NumberFormatSample` | string | Formatted number sample | Locale formatting |
-| `RelativeTimeSample` | string | Relative time format | Locale formatting |
-| `DocumentCharset` | string | Document character encoding | Internationalization |
-
-**UI Drill-Down:** When clicking Locale:
-1. Show timezone distribution map
-2. Show language breakdown
-3. Cross-reference with IP geolocation
-
----
-
-## Page Context
-
-| Field | Type | Description | Indicates |
-|-------|------|-------------|-----------|
-| `PageURL` | string | Full page URL | Source page |
-| `PageDomain` | string | Domain only | Site identification |
-| `PagePath` | string | Path portion | Page identification |
-| `PageProtocol` | string | HTTP/HTTPS | Security status |
-| `PageTitle` | string | Document title | Page content hint |
-| `PageReferrer` | string | Referrer URL | Traffic source |
-| `PageHash` | string | URL hash fragment | In-page navigation |
-| `ServerReferer` | string | Referer from HTTP header | Traffic source (server-side) |
-| `RequestPath` | string | Server request path | Endpoint hit |
-| `DocumentReadyState` | string | Document state at capture | Load timing |
-| `DocumentHidden` | bool | Tab is hidden | Active vs background |
-| `DocumentVisibility` | string | Visibility state | Tab state |
-| `DocumentCompatMode` | string | Quirks/standards mode | Page rendering |
-| `StandaloneDisplayMode` | bool | PWA standalone mode | App context |
-
----
-
-## Raw Data
-
-| Field | Type | Description | Use |
-|-------|------|-------------|-----|
-| `RawQueryString` | string | Full query string from request | Debugging |
-| `RawHeadersJson` | string | All HTTP headers as JSON | Server-side fingerprinting |
-
----
-
-## Composite Scores
+These are not stored columns but useful SQL expressions for dashboards and reporting.
 
 ### Fingerprint Strength (0-100)
-How unique is this device based on available signals?
+How unique is this device based on available high-entropy signals?
 
 ```sql
-FingerprintStrength = 
-    (CanvasFingerprint != '' ? 15 : 0) +
-    (WebGLFingerprint != '' ? 15 : 0) +
-    (AudioFingerprintHash != '' ? 15 : 0) +
-    (FontCount >= 20 ? 20 : FontCount >= 10 ? 15 : 10) +
-    (UA_FullVersionList != '' ? 15 : 0) +  -- High-entropy client hints
-    (Timezone != '' ? 10 : 0) +
-    (PluginCount > 0 ? 10 : 0)
-```
-
-### Hardware Score (0-100)
-Device capability level.
-
-```sql
-HardwareScore = 
-    (HardwareConcurrency >= 24 ? 40 : HardwareConcurrency * 2) +
-    (DeviceMemoryGB >= 8 ? 40 : DeviceMemoryGB >= 4 ? 30 : 20) +
-    (GPURenderer != '' ? 20 : 0)
+SELECT *,
+    (CASE WHEN CanvasFingerprint IS NOT NULL AND CanvasFingerprint != '' THEN 15 ELSE 0 END) +
+    (CASE WHEN WebGLFingerprint IS NOT NULL AND WebGLFingerprint != '' THEN 15 ELSE 0 END) +
+    (CASE WHEN AudioFingerprintHash IS NOT NULL AND AudioFingerprintHash != '' THEN 10 ELSE 0 END) +
+    (CASE WHEN DetectedFonts IS NOT NULL AND DetectedFonts != '' THEN 15 ELSE 0 END) +
+    (CASE WHEN MathFingerprint IS NOT NULL AND MathFingerprint != '' THEN 10 ELSE 0 END) +
+    (CASE WHEN ErrorFingerprint IS NOT NULL AND ErrorFingerprint != '' THEN 5 ELSE 0 END) +
+    (CASE WHEN SpeechVoices IS NOT NULL AND SpeechVoices != '' THEN 10 ELSE 0 END) +
+    (CASE WHEN CSSFontVariantHash IS NOT NULL AND CSSFontVariantHash != '' THEN 5 ELSE 0 END) +
+    (CASE WHEN GPURenderer IS NOT NULL AND GPURenderer != '' THEN 10 ELSE 0 END) +
+    (CASE WHEN PluginCount > 0 THEN 5 ELSE 0 END)
+    AS FingerprintStrength
+FROM vw_PiXL_Complete
 ```
 
 ### Privacy Score (0-100)
-How privacy-conscious is this user?
+How privacy-conscious is this visitor?
 
 ```sql
-PrivacyScore = 
-    (DoNotTrack ? 15 : 0) +
-    (CookiesEnabled = 0 ? 20 : 0) +
-    (CanvasEvasionDetected ? 25 : 0) +
-    (WebGLEvasionDetected ? 25 : 0) +
-    (PluginCount = 0 ? 15 : 0)
+SELECT *,
+    (CASE WHEN DoNotTrack = '1' THEN 15 ELSE 0 END) +
+    (CASE WHEN CanvasEvasionDetected = 1 THEN 20 ELSE 0 END) +
+    (CASE WHEN WebGLEvasionDetected = 1 THEN 15 ELSE 0 END) +
+    (CASE WHEN ProxyBlockedProperties IS NOT NULL AND ProxyBlockedProperties != '' THEN 20 ELSE 0 END) +
+    (CASE WHEN WebRTCLocalIP IS NULL OR WebRTCLocalIP = '' THEN 10 ELSE 0 END) +
+    (CASE WHEN PluginCount = 0 THEN 10 ELSE 0 END) +
+    (CASE WHEN CookiesEnabled = 0 THEN 10 ELSE 0 END)
+    AS PrivacyScore
+FROM vw_PiXL_Complete
 ```
 
 ---
 
-## UI Hierarchy for Drill-Down
+## JS → SQL Column Quick Lookup
 
-```
-Dashboard (vw_Dashboard_KPIs)
-│
-├── 📊 Bot Rate Card
-│   ├── Click → vw_Dashboard_RiskBuckets (pie chart: High/Med/Low/Human)
-│   │   └── Click bucket → vw_Dashboard_BotDetails (individual records)
-│   │       └── Columns: BotScore, WebDriverDetected, ScriptExecMs, EvasionTools
-│   └── Related → vw_Dashboard_TimingAnalysis (script timing histogram)
-│
-├── 🛡️ Evasion Rate Card  
-│   ├── Click → vw_Dashboard_EvasionSummary (pie: Canvas/WebGL/Both/None)
-│   │   └── Click type → vw_Dashboard_EvasionDetails (individual records)
-│   │       └── Columns: EvasionType, TorSignatureDetected, BotScore
-│   └── Tor detection: ScreenWidth=1000, ScreenHeight=900
-│
-├── 🔐 Fingerprint Card
-│   ├── Click → vw_Dashboard_FingerprintDetails (fingerprint breakdown)
-│   │   └── Columns: Canvas/WebGL/Audio hashes, FontCount, FingerprintStrength
-│   ├── Click Canvas → vw_Dashboard_GPUDistribution (GPU breakdown)
-│   └── Click Screen → vw_Dashboard_ScreenDistribution (resolution chart)
-│
-├── 📱 Device Card
-│   ├── Click → vw_PiXL_DeviceBreakdown (device/OS/browser breakdown)
-│   └── Hardware → HardwareConcurrency, DeviceMemoryGB from vw_PiXL_Complete
-│
-├── 🌐 Network Card
-│   ├── Click → vw_PiXL_NetworkHouseholds (devices per IP)
-│   │   └── Click IP → vw_PiXL_NetworkDevices (device list for that IP)
-│   └── Cross-network → vw_PiXL_DeviceIdentity (same device, different IPs)
-│
-├── 📈 Trends
-│   └── Day-over-day → vw_Dashboard_Trends
-│       └── Columns: TotalHits, UniqueDevices, HighRiskCount, EvasionCount
-│
-└── 🔴 Live Feed
-    └── vw_Dashboard_LiveFeed (last 100 hits, real-time)
-```
+For developers adding new fields. Sorted alphabetically by JS param name.
+
+| JS Param | SQL Column |
+|----------|------------|
+| `_proxyBlocked` | `ProxyBlockedProperties` |
+| `anomalyScore` | `AnomalyScore` |
+| `appCodeName` | `AppCodeName` |
+| `appName` | `AppName` |
+| `appVersion` | `AppVersion` |
+| `audioFP` | `AudioFingerprintSum` |
+| `audioHash` | `AudioFingerprintHash` |
+| `audioInputs` | `AudioInputDevices` |
+| `audioNoiseDetected` | `AudioNoiseInjectionDetected` |
+| `audioStable` | `AudioIsStable` |
+| `batteryCharging` | `BatteryCharging` |
+| `batteryLevel` | `BatteryLevelPct` |
+| `behavioralFlags` | `BehavioralFlags` |
+| `botPermInconsistent` | `BotPermissionInconsistent` |
+| `botScore` | `BotScore` |
+| `botSignals` | `BotSignalsList` |
+| `buildID` | `Firefox_BuildID` |
+| `caches` | `CacheAPISupported` |
+| `canvas` | `CanvasSupported` |
+| `canvasConsistency` | `CanvasConsistency` |
+| `canvasEvasion` | `CanvasEvasionDetected` |
+| `canvasFP` | `CanvasFingerprint` |
+| `cd` | `ColorDepth` |
+| `chromeObj` | `Chrome_ObjectPresent` |
+| `chromeRuntime` | `Chrome_RuntimePresent` |
+| `ck` | `CookiesEnabled` |
+| `clipboard` | `ClipboardAPISupported` |
+| `combinedThreatScore` | `CombinedThreatScore` |
+| `conn` | `ConnectionType` |
+| `connType` | `NetworkType` |
+| `contrast` | `PrefersHighContrast` |
+| `cores` | `HardwareConcurrency` |
+| `crossSignals` | `CrossSignalFlags` |
+| `cssFontVariant` | `CSSFontVariantHash` |
+| `darkMode` | `PrefersColorSchemeDark` |
+| `dateFormat` | `DateFormatSample` |
+| `dl` | `DownlinkMbps` |
+| `dlMax` | `DownlinkMax` |
+| `dnsTime` | `DNSLookupMs` |
+| `dnt` | `DoNotTrack` |
+| `docCharset` | `DocumentCharset` |
+| `docCompat` | `DocumentCompatMode` |
+| `docHidden` | `DocumentHidden` |
+| `docReady` | `DocumentReadyState` |
+| `docVisibility` | `DocumentVisibility` |
+| `domain` | `PageDomain` |
+| `domTime` | `DOMReadyTimeMs` |
+| `errorFP` | `ErrorFingerprint` |
+| `evasionDetected` | `EvasionToolsDetected` |
+| `evasionSignalsV2` | `EvasionSignalsV2` |
+| `fontMethodMismatch` | `FontMethodMismatch` |
+| `fonts` | `DetectedFonts` |
+| `forcedColors` | `ForcedColorsActive` |
+| `gamepads` | `ConnectedGamepads` |
+| `gpu` | `GPURenderer` |
+| `gpuVendor` | `GPUVendor` |
+| `hash` | `PageHash` |
+| `hist` | `HistoryLength` |
+| `hover` | `HoverCapable` |
+| `idb` | `IndexedDBSupported` |
+| `invertedColors` | `InvertedColorsActive` |
+| `java` | `JavaEnabled` |
+| `jsHeapLimit` | `Chrome_JSHeapSizeLimit` |
+| `jsHeapTotal` | `Chrome_TotalJSHeapSize` |
+| `jsHeapUsed` | `Chrome_UsedJSHeapSize` |
+| `lang` | `Language` |
+| `langs` | `LanguageList` |
+| `lightMode` | `PrefersColorSchemeLight` |
+| `loadTime` | `PageLoadTimeMs` |
+| `localIp` | `WebRTCLocalIP` |
+| `ls` | `LocalStorageSupported` |
+| `mathFP` | `MathFingerprint` |
+| `mediaDevices` | `MediaDevicesAPISupported` |
+| `mem` | `DeviceMemoryGB` |
+| `mimeList` | `MimeTypeList` |
+| `mimeTypes` | `MimeTypeCount` |
+| `mouseEntropy` | `MouseEntropy` |
+| `mouseMoves` | `MouseMoveCount` |
+| `moveCountBucket` | `MoveCountBucket` |
+| `moveSpeedCV` | `MoveSpeedCV` |
+| `moveTimingCV` | `MoveTimingCV` |
+| `numberFormat` | `NumberFormatSample` |
+| `oh` | `OuterHeight` |
+| `online` | `IsOnline` |
+| `ori` | `ScreenOrientation` |
+| `oscpu` | `Firefox_OSCPU` |
+| `ow` | `OuterWidth` |
+| `path` | `PagePath` |
+| `pd` | `PixelRatio` |
+| `pdf` | `PDFViewerEnabled` |
+| `plt` | `Platform` |
+| `pluginList` | `PluginListDetailed` |
+| `plugins` | `PluginCount` |
+| `pointer` | `PointerType` |
+| `pointerEvent` | `PointerEventsSupported` |
+| `product` | `NavigatorProduct` |
+| `productSub` | `NavigatorProductSub` |
+| `protocol` | `PageProtocol` |
+| `reducedData` | `PrefersReducedData` |
+| `reducedMotion` | `PrefersReducedMotion` |
+| `ref` | `PageReferrer` |
+| `relativeTime` | `RelativeTimeSample` |
+| `rtt` | `RTTMs` |
+| `sah` | `ScreenAvailHeight` |
+| `save` | `DataSaverEnabled` |
+| `saw` | `ScreenAvailWidth` |
+| `scriptExecTime` | `ScriptExecutionTimeMs` |
+| `scrollContradiction` | `ScrollContradiction` |
+| `scrolled` | `UserScrolled` |
+| `scrollY` | `ScrollDepthPx` |
+| `sh` | `ScreenHeight` |
+| `speechSynth` | `SpeechSynthesisSupported` |
+| `ss` | `SessionStorageSupported` |
+| `standalone` | `StandaloneDisplayMode` |
+| `stealthSignals` | `StealthPluginSignals` |
+| `storageQuota` | `StorageQuotaGB` |
+| `storageUsed` | `StorageUsedMB` |
+| `sw` | `ScreenWidth` |
+| `swk` | `ServiceWorkerSupported` |
+| `sx` | `ScreenX` |
+| `sy` | `ScreenY` |
+| `tcpTime` | `TCPConnectMs` |
+| `tier` | `Tier` |
+| `title` | `PageTitle` |
+| `touch` | `MaxTouchPoints` |
+| `touchEvent` | `TouchEventsSupported` |
+| `ts` | `ClientTimestampMs` |
+| `ttfb` | `TimeToFirstByteMs` |
+| `tz` | `Timezone` |
+| `tzLocale` | `TimezoneLocale` |
+| `tzo` | `TimezoneOffsetMins` |
+| `ua` | `ClientUserAgent` |
+| `uaArch` | `UA_Architecture` |
+| `uaBitness` | `UA_Bitness` |
+| `uaBrands` | `UA_Brands` |
+| `uaFormFactor` | `UA_FormFactor` |
+| `uaFullVersion` | `UA_FullVersionList` |
+| `uaMobile` | `UA_IsMobile` |
+| `uaModel` | `UA_Model` |
+| `uaPlatform` | `UA_Platform` |
+| `uaPlatformVersion` | `UA_PlatformVersion` |
+| `uaWow64` | `UA_IsWow64` |
+| `url` | `PageURL` |
+| `vendorSub` | `NavigatorVendorSub` |
+| `vh` | `ViewportHeight` |
+| `videoInputs` | `VideoInputDevices` |
+| `vnd` | `Vendor` |
+| `voices` | `SpeechVoices` |
+| `vw` | `ViewportWidth` |
+| `wasm` | `WebAssemblySupported` |
+| `webdr` | `WebDriverDetected` |
+| `webgl` | `WebGLSupported` |
+| `webgl2` | `WebGL2Supported` |
+| `webglEvasion` | `WebGLEvasionDetected` |
+| `webglExt` | `WebGLExtensionCount` |
+| `webglFP` | `WebGLFingerprint` |
+| `webglParams` | `WebGLParameters` |
+| `ww` | `WebWorkersSupported` |
 
 ---
 
-## API Endpoint Mapping
-
-| Dashboard Card | Primary View | Drill-Down View |
-|----------------|--------------|-----------------|
-| Total Hits | `vw_Dashboard_KPIs.TotalHitsToday` | `vw_Dashboard_Trends` |
-| Unique Devices | `vw_Dashboard_KPIs.UniqueDevicesToday` | `vw_Dashboard_FingerprintDetails` |
-| Bot Rate | `vw_Dashboard_KPIs.BotRatePctToday` | `vw_Dashboard_RiskBuckets` → `vw_Dashboard_BotDetails` |
-| Evasion Rate | `vw_Dashboard_KPIs.EvasionRatePctToday` | `vw_Dashboard_EvasionSummary` → `vw_Dashboard_EvasionDetails` |
-| Cross-Network | `vw_Dashboard_KPIs.CrossNetworkDevicesToday` | `vw_PiXL_DeviceIdentity` |
-| Fast Execs | `vw_Dashboard_KPIs.FastExecsToday` | `vw_Dashboard_TimingAnalysis` |
-| Device Split | `Desktop/Mobile/TabletHitsToday` | `vw_PiXL_DeviceBreakdown` |
-
----
-
-## SQL View Recommendations
-
-### Existing Views (06_AnalyticsViews.sql)
-
-| View | Purpose | Use Case |
-|------|---------|----------|
-| `vw_PiXL_Summary` | 15 columns with composite scores | Quick overview |
-| `vw_PiXL_Complete` | 130+ columns, every data point | Full detail access |
-| `vw_PiXL_ColumnMap` | Maps summary → source columns | Documentation |
-| `vw_PiXL_HourlyStats` | Hourly aggregates | Time series charts |
-| `vw_PiXL_DeviceBreakdown` | Device/OS/Browser breakdown | Device analytics |
-| `vw_PiXL_BotAnalysis` | Bot risk bucketing | Bot detection |
-| `vw_PiXL_FingerprintUniqueness` | Fingerprint entropy | Uniqueness analysis |
-| `vw_PiXL_NetworkHouseholds` | Devices per IP | NAT detection |
-| `vw_PiXL_NetworkDevices` | Device list per IP | Household drill-down |
-| `vw_PiXL_DeviceIdentity` | Cross-network device tracking | Identity resolution |
-| `vw_PiXL_DeviceNetworkHistory` | IP history per device | Network mobility |
-
-### Dashboard Views (07_DashboardViews.sql)
-
-**Summary Level (KPIs):**
-| View | Purpose |
-|------|---------|
-| `vw_Dashboard_KPIs` | Main summary cards with today/yesterday metrics |
-
-**Drill-Down Level 1 (Distributions):**
-| View | Purpose | Drill-Down From |
-|------|---------|-----------------|
-| `vw_Dashboard_RiskBuckets` | Bot risk bucket breakdown | Bot Rate card |
-| `vw_Dashboard_EvasionSummary` | Evasion type pie chart | Evasion Rate card |
-| `vw_Dashboard_TimingAnalysis` | Script timing buckets | Performance card |
-| `vw_Dashboard_Trends` | Day-over-day comparison | Trend arrows |
-
-**Drill-Down Level 2 (Details):**
-| View | Purpose | Drill-Down From |
-|------|---------|-----------------|
-| `vw_Dashboard_BotDetails` | Individual bot records | Risk bucket click |
-| `vw_Dashboard_EvasionDetails` | Individual evasion records | Evasion type click |
-| `vw_Dashboard_FingerprintDetails` | Fingerprint signal breakdown | Fingerprint card |
-
-**Drill-Down Level 3 (Granular):**
-| View | Purpose | Drill-Down From |
-|------|---------|-----------------|
-| `vw_Dashboard_GPUDistribution` | GPU breakdown | WebGL fingerprint |
-| `vw_Dashboard_ScreenDistribution` | Resolution breakdown | Screen card |
-| `vw_Dashboard_LiveFeed` | Real-time feed | Any live monitoring |
-
----
-
-## Frontend Component Mapping
-
-| Summary Card | Level 1 View | Level 2 View | Key Columns |
-|--------------|--------------|--------------|-------------|
-| Bot Rate | `vw_Dashboard_RiskBuckets` | `vw_Dashboard_BotDetails` | BotScore, RiskBucket, BucketColor |
-| Evasion | `vw_Dashboard_EvasionSummary` | `vw_Dashboard_EvasionDetails` | EvasionType, TorSignatureDetected |
-| Fingerprints | `vw_Dashboard_FingerprintDetails` | `vw_Dashboard_GPUDistribution` | FingerprintStrength, FontCount |
-| Devices | `vw_PiXL_DeviceBreakdown` | `vw_PiXL_NetworkDevices` | DeviceType, Browser, OS |
-| Timing | `vw_Dashboard_TimingAnalysis` | `vw_Dashboard_BotDetails` | TimingBucket, AvgBotScore |
-| Network | `vw_PiXL_NetworkHouseholds` | `vw_PiXL_DeviceIdentity` | UniqueIPAddresses, UniqueDevices |
-
-### Dashboard Card Design Pattern
-
-Each card should:
-1. **Header**: Show metric name + primary value from `vw_Dashboard_KPIs`
-2. **Trend Arrow**: Compare `Today` vs `Yesterday` (green up / red down)
-3. **Spark Line**: 7-day trend from `vw_Dashboard_Trends`
-4. **Click Action**: Navigate to Level 1 drill-down view
-5. **Color Coding**: Use `BucketColor` from aggregation views
-
-### Example: Bot Rate Card
-
-```html
-<div class="card" onclick="drillDown('risk-buckets')">
-  <h3>Bot Rate</h3>
-  <span class="value">5.2%</span>
-  <span class="trend up">↑ 0.3% vs yesterday</span>
-  <div class="sparkline"><!-- 7-day chart --></div>
-</div>
-```
-
-When clicked, show `vw_Dashboard_RiskBuckets` as pie chart:
-- High Risk (red): 80-100
-- Medium Risk (orange): 50-79  
-- Low Risk (yellow): 20-49
-- Likely Human (green): 0-19
-
-Click a pie slice → Filter `vw_Dashboard_BotDetails WHERE RiskBucket = 'High Risk'`
+*Last verified: 2026-02-08 against Tier5Script.cs (160 params), vw_PiXL_Complete (169 columns), SQL Migration 15.*

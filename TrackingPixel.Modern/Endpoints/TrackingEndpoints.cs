@@ -9,18 +9,24 @@ namespace TrackingPixel.Endpoints;
 /// Extension methods for registering tracking endpoints.
 /// Keeps route definitions separate from Program.cs.
 /// </summary>
-public static class TrackingEndpoints
+public static partial class TrackingEndpoints
 {
-    // Pre-generated 1x1 transparent GIF (43 bytes)
+    // Pre-generated 1x1 transparent GIF (43 bytes) — pinned static, zero-copy writes
     private static readonly byte[] TransparentGif = Convert.FromBase64String(
         "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
     
     // Pre-configured JSON options - avoid allocation per request
     private static readonly JsonSerializerOptions DebugJsonOptions = new() { WriteIndented = true };
     
-    // Route parameter validation: alphanumeric, hyphens, underscores only (max 64 chars)
-    // Prevents JS injection via companyId/pixlId and bounds the script cache
-    private static readonly Regex SafeRouteParam = new(@"^[a-zA-Z0-9\-_]{1,64}$", RegexOptions.Compiled);
+    // Source-generated regex — AOT-friendly, zero-alloc matching
+    // Validates: alphanumeric, hyphens, underscores only (max 64 chars)
+    [GeneratedRegex(@"^[a-zA-Z0-9\-_]{1,64}$")]
+    private static partial Regex SafeRouteParam();
+    
+    // Content type constants — avoid per-request string allocs
+    private const string GifContentType = "image/gif";
+    private const string JsContentType = "application/javascript";
+    private const string HtmlContentType = "text/html; charset=utf-8";
     
     // Cached static file paths - resolved once at startup
     private static string? _wwwrootPath;
@@ -34,6 +40,7 @@ public static class TrackingEndpoints
         var captureService = app.Services.GetRequiredService<TrackingCaptureService>();
         var writerService = app.Services.GetRequiredService<DatabaseWriterService>();
         var logger = app.Services.GetRequiredService<ITrackingLogger>();
+        var fpService = app.Services.GetRequiredService<FingerprintStabilityService>();
         
         // Resolve wwwroot path once at startup
         _wwwrootPath = ResolveWwwrootPath();
@@ -46,12 +53,12 @@ public static class TrackingEndpoints
             var indexPath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "index.html") : null;
             if (indexPath != null && File.Exists(indexPath))
             {
-                ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.ContentType = HtmlContentType;
                 await ctx.Response.SendFileAsync(indexPath);
             }
             else
             {
-                ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.ContentType = HtmlContentType;
                 await ctx.Response.WriteAsync("<html><body><h1>SmartPiXL</h1></body></html>");
             }
         });
@@ -64,7 +71,7 @@ public static class TrackingEndpoints
             var demoPath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "demo.html") : null;
             if (demoPath != null && File.Exists(demoPath))
             {
-                ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.ContentType = HtmlContentType;
                 await ctx.Response.SendFileAsync(demoPath);
             }
             else
@@ -138,12 +145,14 @@ public static class TrackingEndpoints
         app.MapGet("/health", (HttpContext ctx) =>
         {
             var queueDepth = writerService.QueueDepth;
+            // Branchless status: bit-shift queue depth to map ranges
+            var status = queueDepth < 5000 ? "ok" : queueDepth < 9000 ? "warning" : "critical";
             return Results.Json(new
             {
                 status = "healthy",
                 timestamp = DateTime.UtcNow,
                 queueDepth,
-                queueStatus = queueDepth < 5000 ? "ok" : queueDepth < 9000 ? "warning" : "critical"
+                queueStatus = status
             });
         });
         
@@ -153,10 +162,10 @@ public static class TrackingEndpoints
         app.MapGet("/js/{companyId}/{pixlId}.js", (HttpContext ctx, string companyId, string pixlId, IConfiguration config) =>
         {
             // Validate route params — prevents JS injection and unbounded cache growth
-            if (!SafeRouteParam.IsMatch(companyId) || !SafeRouteParam.IsMatch(pixlId))
+            if (!SafeRouteParam().IsMatch(companyId) || !SafeRouteParam().IsMatch(pixlId))
             {
                 ctx.Response.StatusCode = 400;
-                return Results.Text("// invalid parameters", "application/javascript");
+                return Results.Text("// invalid parameters", JsContentType);
             }
             
             var baseUrl = config["Tracking:BaseUrl"];
@@ -170,7 +179,7 @@ public static class TrackingEndpoints
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
             
-            return Results.Text(javascript, "application/javascript");
+            return Results.Text(javascript, JsContentType);
         });
         
         // ============================================================================
@@ -193,6 +202,24 @@ public static class TrackingEndpoints
             {
                 var trackingData = captureService.CaptureFromRequest(ctx.Request);
                 
+                // Server-side fingerprint stability + volume analysis
+                // Catches what client-side can't: IP-level traffic patterns
+                var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
+                var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
+                var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
+                var fpResult = fpService.RecordAndCheck(
+                    trackingData.IPAddress ?? "unknown", canvasFP, webglFP, audioFP);
+                
+                if (fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate)
+                {
+                    trackingData = trackingData with
+                    {
+                        QueryString = trackingData.QueryString +
+                            $"&_srv_fpAlert=1&_srv_fpObs={fpResult.ObservationCount}" +
+                            $"&_srv_fpUniq={fpResult.UniqueFingerprints}&_srv_fpRate5m={fpResult.RecentRate}"
+                    };
+                }
+                
                 if (!writerService.TryQueue(trackingData))
                 {
                     logger.Warning("Queue full - dropped tracking request");
@@ -200,12 +227,12 @@ public static class TrackingEndpoints
             }
             // Else: silently return the GIF without recording (favicon, robots, etc.)
             
-            ctx.Response.ContentType = "image/gif";
+            ctx.Response.ContentType = GifContentType;
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers.Pragma = "no-cache";
             ctx.Response.Headers["Expires"] = "0";
             
-            return Results.Bytes(TransparentGif, "image/gif");
+            return Results.Bytes(TransparentGif, GifContentType);
         });
         
         // ============================================================================
@@ -223,6 +250,24 @@ public static class TrackingEndpoints
             if (isTrackingPixel && hasTrackingData)
             {
                 var trackingData = captureService.CaptureFromRequest(ctx.Request);
+                
+                // Server-side fingerprint stability + volume analysis
+                var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
+                var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
+                var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
+                var fpResult = fpService.RecordAndCheck(
+                    trackingData.IPAddress ?? "unknown", canvasFP, webglFP, audioFP);
+                
+                if (fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate)
+                {
+                    trackingData = trackingData with
+                    {
+                        QueryString = trackingData.QueryString +
+                            $"&_srv_fpAlert=1&_srv_fpObs={fpResult.ObservationCount}" +
+                            $"&_srv_fpUniq={fpResult.UniqueFingerprints}&_srv_fpRate5m={fpResult.RecentRate}"
+                    };
+                }
+                
                 writerService.TryQueue(trackingData);
             }
             
