@@ -240,19 +240,92 @@ public static class DashboardEndpoints
         });
         
         // ============================================================================
-        // DASHBOARD HTML PAGE
+        // NEW MATERIALIZED VIEWS — PiXL_Parsed (instant reads)
+        // ============================================================================
+        
+        app.MapGet("/api/dash/health", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QuerySingleRowAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_SystemHealth");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/hourly", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
+            var data = await QueryAsync(settings.ConnectionString,
+                $"SELECT TOP {hours} * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/bots", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QueryAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_BotBreakdown ORDER BY SortOrder");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/bot-signals", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QueryAsync(settings.ConnectionString,
+                "SELECT TOP 20 * FROM vw_Dash_TopBotSignals ORDER BY TimesTriggered DESC");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/devices", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QueryAsync(settings.ConnectionString,
+                "SELECT TOP 30 * FROM vw_Dash_DeviceBreakdown ORDER BY HitCount DESC");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/evasion", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QuerySingleRowAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_EvasionSummary");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/behavior", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QueryAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_BehavioralAnalysis");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/recent", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QueryAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_RecentHits");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        app.MapGet("/api/dash/fingerprints", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 50;
+            var data = await QueryAsync(settings.ConnectionString,
+                $"SELECT TOP {limit} * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        // ============================================================================
+        // DASHBOARD HTML PAGES
         // ============================================================================
         app.MapGet("/dashboard", async (HttpContext ctx, IWebHostEnvironment env) =>
         {
             if (!RequireLoopback(ctx)) return;
-            // Use WebRootPath which points to the wwwroot folder
             var dashboardPath = Path.Combine(env.WebRootPath ?? "wwwroot", "dashboard.html");
-            
-            // Fallback to source directory if not found in WebRootPath
             if (!File.Exists(dashboardPath))
-            {
                 dashboardPath = Path.Combine(env.ContentRootPath, "wwwroot", "dashboard.html");
-            }
             
             if (File.Exists(dashboardPath))
             {
@@ -263,6 +336,26 @@ public static class DashboardEndpoints
             {
                 ctx.Response.StatusCode = 404;
                 await ctx.Response.WriteAsync($"Dashboard not found. Looked in: {dashboardPath}");
+            }
+        });
+        
+        // Tron-themed dashboard v2
+        app.MapGet("/tron", async (HttpContext ctx, IWebHostEnvironment env) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var path = Path.Combine(env.WebRootPath ?? "wwwroot", "tron.html");
+            if (!File.Exists(path))
+                path = Path.Combine(env.ContentRootPath, "wwwroot", "tron.html");
+            
+            if (File.Exists(path))
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.SendFileAsync(path);
+            }
+            else
+            {
+                ctx.Response.StatusCode = 404;
+                await ctx.Response.WriteAsync("Tron dashboard not found.");
             }
         });
     }
