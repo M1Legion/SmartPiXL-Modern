@@ -116,15 +116,18 @@ public static class TrackingEndpoints
         // ============================================================================
         
         // ============================================================================
-        // DEBUG ENDPOINT - Restricted to loopback in production
+        // DEBUG ENDPOINT - Restricted to local machine only
         // ============================================================================
         app.MapGet("/debug/headers", (HttpContext ctx) =>
         {
             var remoteIp = ctx.Connection.RemoteIpAddress;
-            if (remoteIp != null && !System.Net.IPAddress.IsLoopback(remoteIp))
-            {
-                return Results.StatusCode(403);
-            }
+            var localIp = ctx.Connection.LocalIpAddress;
+            var isLocal = remoteIp is null
+                || System.Net.IPAddress.IsLoopback(remoteIp)
+                || (localIp != null && remoteIp.Equals(localIp));
+            
+            if (!isLocal) return Results.StatusCode(404);
+            
             var data = captureService.CaptureFromRequest(ctx.Request);
             return Results.Json(data, DebugJsonOptions);
         });
