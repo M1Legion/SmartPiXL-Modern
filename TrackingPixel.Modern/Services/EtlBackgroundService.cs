@@ -5,21 +5,19 @@ using TrackingPixel.Configuration;
 namespace TrackingPixel.Services;
 
 /// <summary>
-/// Background service that periodically runs usp_ParseNewHits to materialize
-/// raw PiXL_Test rows into the indexed PiXL_Parsed table.
-/// This keeps the Tron dashboard views fed with fresh data.
-/// 
-/// Default: runs every 60 seconds, processing up to 50,000 rows per cycle.
-/// Configure via appsettings.json "Tracking:EtlIntervalSeconds" and "Tracking:EtlBatchSize".
+/// Background service that runs ETL processing every 60 seconds.
+/// Calls dbo.usp_ParseNewHits to move data from PiXL_Test → PiXL_Parsed
+/// and populates dimension tables (PiXL_Device, PiXL_IP, PiXL_Visit).
 /// </summary>
 public sealed class EtlBackgroundService : BackgroundService
 {
     private readonly TrackingSettings _settings;
-    private readonly ILogger<EtlBackgroundService> _logger;
+    private readonly ITrackingLogger _logger;
+    private readonly TimeSpan _interval = TimeSpan.FromSeconds(60);
 
     public EtlBackgroundService(
         IOptions<TrackingSettings> settings,
-        ILogger<EtlBackgroundService> logger)
+        ITrackingLogger logger)
     {
         _settings = settings.Value;
         _logger = logger;
@@ -27,62 +25,50 @@ public sealed class EtlBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Let the rest of the app start up before we begin ETL work
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-        _logger.LogInformation("ETL background service started. Interval={Interval}s, BatchSize={Batch}",
-            _settings.EtlIntervalSeconds, _settings.EtlBatchSize);
-
+        // Yield to allow host startup to complete
+        await Task.Yield();
+        
+        _logger.Info("ETL background service started. Running every 60 seconds.");
+        
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var rowsParsed = await RunEtlCycleAsync(stoppingToken);
-
-                if (rowsParsed > 0)
-                    _logger.LogInformation("ETL cycle complete: {Rows} rows materialized", rowsParsed);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
+                await RunEtlAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ETL cycle failed — will retry next interval");
+                _logger.Error($"ETL cycle failed: {ex.Message}");
             }
-
+            
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(_settings.EtlIntervalSeconds), stoppingToken);
+                await Task.Delay(_interval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
         }
-
-        _logger.LogInformation("ETL background service stopped");
+        
+        _logger.Info("ETL background service stopped.");
     }
 
-    private async Task<int> RunEtlCycleAsync(CancellationToken ct)
+    private async Task RunEtlAsync(CancellationToken ct)
     {
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
-
-        await using var cmd = new SqlCommand("dbo.usp_ParseNewHits", conn)
+        
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "dbo.usp_ParseNewHits";
+        cmd.CommandType = System.Data.CommandType.StoredProcedure;
+        cmd.CommandTimeout = 300; // 5 minutes max for large batches
+        
+        var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+        
+        if (rowsAffected > 0)
         {
-            CommandType = System.Data.CommandType.StoredProcedure,
-            CommandTimeout = 120
-        };
-        cmd.Parameters.AddWithValue("@BatchSize", _settings.EtlBatchSize);
-
-        // The proc returns a result set with RowsParsed column
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (await reader.ReadAsync(ct))
-        {
-            var ordinal = reader.GetOrdinal("RowsParsed");
-            return reader.GetInt32(ordinal);
+            _logger.Info($"ETL processed {rowsAffected} rows");
         }
-
-        return 0;
     }
 }

@@ -38,7 +38,21 @@ options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
 
 ## SmartPiXL-Specific Knowledge
 
-This is a **fire-and-forget tracking pixel server** with specific deployment needs:
+This is a **fire-and-forget tracking pixel server** hosted **InProcess in IIS** on `192.168.88.176`.
+
+### Architecture
+- **IIS Site**: `Smartpixl.info`, app pool `Smartpixl.info`, InProcess hosting
+- **Published Path**: `C:\inetpub\Smartpixl.info\`
+- **Source Path**: `C:\Users\Administrator\source\repos\SmartPiXL\TrackingPixel.Modern\`
+- **Database**: `SmartPiXL` on `localhost\SQL2025` (MSSQL 2025 Developer)
+- **IIS Ports**: 6000/6001 (internal Kestrel), 80/443 (IIS bindings)
+- **Dev Ports**: 7000/7001 (Kestrel direct via `dotnet run`)
+
+### Critical Deployment Notes
+- `dotnet publish` **overwrites web.config** — always verify after publishing
+- IIS `appsettings.json` uses ports 6000/6001, dev uses 7000/7001 — do NOT mix
+- Three config locations must stay in sync (see `.github/copilot-instructions.md`)
+- App pool identity `IIS APPPOOL\Smartpixl.info` needs SQL login on target instance
 
 ### Performance Requirements
 - Handle thousands of simultaneous image/JS requests
@@ -48,19 +62,10 @@ This is a **fire-and-forget tracking pixel server** with specific deployment nee
 ### Critical Endpoints
 | Endpoint | Purpose | Latency Target |
 |----------|---------|----------------|
-| `/{clientId}/{campaignId}_SMART.GIF` | Tracking pixel | <10ms |
+| `/{**path}_SMART.GIF` | Tracking pixel | <10ms |
 | `/js/{clientId}/{campaignId}.js` | JavaScript delivery | <50ms |
-| `/health` | Load balancer probe | <5ms |
-
-### Configuration Required
-1. **appsettings.Production.json** - Connection strings, queue settings
-2. **Kestrel section** - Bindings, certificates, limits
-3. **Windows Service** - Service name, recovery, startup type
-
-### Load Balancer Considerations
-- All nodes are stateless (queue is in-memory per instance)
-- Use `/health` endpoint for probes
-- Consider sticky sessions for JavaScript caching
+| `/tron` | Tron dashboard (localhost only) | N/A |
+| `/api/dash/*` | Dashboard API (localhost only) | <500ms |
 
 ## How I Work
 
@@ -82,19 +87,25 @@ sc description SmartPiXL "SmartPiXL Tracking Pixel Server"
 sc failure SmartPiXL reset=60 actions=restart/5000/restart/10000/restart/30000
 ```
 
-### IIS Reverse Proxy
+### IIS InProcess Hosting (actual production config)
 ```xml
-<!-- web.config for IIS -->
+<?xml version="1.0" encoding="utf-8"?>
 <configuration>
-  <system.webServer>
-    <aspNetCore processPath=".\TrackingPixel.exe" 
-                stdoutLogEnabled="true" 
-                hostingModel="OutOfProcess">
-      <environmentVariables>
-        <environmentVariable name="ASPNETCORE_ENVIRONMENT" value="Production" />
-      </environmentVariables>
-    </aspNetCore>
-  </system.webServer>
+  <location path="." inheritInChildApplications="false">
+    <system.webServer>
+      <security>
+        <requestFiltering>
+          <requestLimits maxQueryString="16384" maxUrl="8192" />
+        </requestFiltering>
+      </security>
+      <handlers>
+        <add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
+      </handlers>
+      <aspNetCore processPath="dotnet" arguments=".\TrackingPixel.dll"
+                  stdoutLogEnabled="true" stdoutLogFile=".\logs\stdout"
+                  hostingModel="inprocess" />
+    </system.webServer>
+  </location>
 </configuration>
 ```
 

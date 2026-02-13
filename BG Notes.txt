@@ -1,0 +1,2 @@
+cd C:\Users\Administrator\source\repos\SmartPiXL\TrackingPixel.Modern
+dotnet run

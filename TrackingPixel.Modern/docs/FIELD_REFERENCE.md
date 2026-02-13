@@ -1,11 +1,13 @@
 # SmartPiXL Field Reference
 
-Complete reference for all 176 fields exposed by `vw_PiXL_Complete`.
-Every field here is **verified against the live Tier 5 JavaScript and SQL view** as of 2026-02-08.
+Complete reference for all fields in `pixl_parsed` (175 columns) and `vw_PiXL_Complete` (176 columns).
+Every field here is **verified against the live Tier 5 JavaScript, the `pixl_parsed` materialized table, and the SQL view** as of 2026-02-12.
 
-> **Data flow:** Browser JS (`data.paramName`) → pixel GET request → `PiXL_Test.QueryString` → `vw_PiXL_Complete` SQL view
+> **Data flow:** Browser JS (`data.paramName`) → pixel GET request → `PiXL_Test.QueryString` → `vw_PiXL_Complete` SQL view → `pixl_parsed` materialized table (via `DatabaseWriterService`)
 > 
 > Server-side signals (`_srv_*`) are appended by `IpBehaviorService` before storage.
+
+> **Note:** `pixl_parsed` uses `SourceId` (FK reference to `PiXL_Test.Id`) in place of `Id`, and adds `ParsedAt`. The raw columns `RawQueryString` and `RawHeadersJson` remain only in `vw_PiXL_Complete` / `PiXL_Test`.
 
 ---
 
@@ -13,9 +15,10 @@ Every field here is **verified against the live Tier 5 JavaScript and SQL view**
 
 | Metric | Count |
 |--------|-------|
-| Total SQL view columns | 176 |
+| `pixl_parsed` columns | 175 |
+| `vw_PiXL_Complete` columns | 176 (includes `RawQueryString`/`RawHeadersJson`) |
 | JS query string params | 158 (+ 2 error-only) |
-| Server-side columns (no JS) | 9 (`Id`, `CompanyID`, `PiXLID`, `IPAddress`, `ReceivedAt`, `RequestPath`, `ServerUserAgent`, `ServerReferer`, `RawQueryString`/`RawHeadersJson`) |
+| Server-side columns (no JS) | 9 (`SourceId`, `CompanyID`, `PiXLID`, `IPAddress`, `ReceivedAt`, `RequestPath`, `ServerUserAgent`, `ServerReferer`, `ParsedAt`) |
 | Server-side computed signals | 7 (`Srv_SubnetIps`, `Srv_SubnetHits`, `Srv_HitsIn15s`, `Srv_LastGapMs`, `Srv_SubSecDupe`, `Srv_SubnetAlert`, `Srv_RapidFire`) |
 | Computed columns | 1 (`IsSynthetic`) |
 | Fingerprint hash signals | 7 (canvas, webgl, audio hash, audio sum, math, error, css font) |
@@ -51,6 +54,8 @@ Every field here is **verified against the live Tier 5 JavaScript and SQL view**
 - [Cross-Signal Analysis](#19-cross-signal-analysis)
 - [IP Behavior Analysis (Server-Side)](#20-ip-behavior-analysis-server-side)
 - [Raw Data](#21-raw-data)
+- [Real-World Entropy Analysis](#22-real-world-entropy-analysis-feb-2026)
+- [Data Dictionary](#23-data-dictionary-pixl_parsed)
 
 ---
 
@@ -58,18 +63,19 @@ Every field here is **verified against the live Tier 5 JavaScript and SQL view**
 
 These fields come from the HTTP request itself, not from JavaScript.
 
-| SQL Column | JS Param | SQL Type | Description |
-|------------|----------|----------|-------------|
-| `Id` | — | int | Auto-increment PK |
-| `CompanyID` | — | nvarchar(100) | Client company identifier (from URL route) |
-| `PiXLID` | — | nvarchar(100) | Campaign/pixel identifier (from URL route) |
-| `IPAddress` | — | nvarchar(50) | Visitor IP (from X-Forwarded-For or RemoteIpAddress) |
-| `ReceivedAt` | — | datetime2 | Server UTC timestamp |
-| `RequestPath` | — | nvarchar(500) | HTTP request path |
-| `ServerUserAgent` | — | nvarchar(2000) | User-Agent from HTTP header |
-| `ServerReferer` | — | nvarchar(2000) | Referer from HTTP header |
-| `IsSynthetic` | `synthetic` | int | 1 if test/synthetic traffic, 0 if real. Computed from param. |
-| `Tier` | `tier` | int | Script complexity tier (always 5 for current script) |
+| SQL Column | JS Param | SQL Type | Nullable | Description |
+|------------|----------|----------|:--------:|-------------|
+| `SourceId` | — | int | NO | FK to `PiXL_Test.Id` (auto-increment PK in raw table) |
+| `CompanyID` | — | nvarchar(100) | YES | Client company identifier (from URL route) |
+| `PiXLID` | — | nvarchar(100) | YES | Campaign/pixel identifier (from URL route) |
+| `IPAddress` | — | nvarchar(50) | YES | Visitor IP (from X-Forwarded-For or RemoteIpAddress) |
+| `ReceivedAt` | — | datetime2 | NO | Server UTC timestamp |
+| `RequestPath` | — | nvarchar(500) | YES | HTTP request path |
+| `ServerUserAgent` | — | nvarchar(2000) | YES | User-Agent from HTTP header |
+| `ServerReferer` | — | nvarchar(2000) | YES | Referer from HTTP header |
+| `IsSynthetic` | `synthetic` | bit | NO | 1 if test/synthetic traffic, 0 if real. Computed from param. |
+| `Tier` | `tier` | int | YES | Script complexity tier (always 5 for current script) |
+| `ParsedAt` | — | datetime2 | NO | UTC timestamp when record was parsed into `pixl_parsed` |
 
 ---
 
@@ -268,18 +274,15 @@ These are the core device fingerprinting hashes. Each captures a different hardw
 
 ### Other Fingerprint Hashes
 
-| SQL Column | JS Param | SQL Type | Description | Entropy |
-|------------|----------|----------|-------------|---------|
-| `MathFingerprint` | `mathFP` | nvarchar | Hash of Math function precision (tan, sin, acos, atan, exp, log, sqrt, pow) | ~0 bits (see note) |
-| `ErrorFingerprint` | `errorFP` | nvarchar | `e.message.length + e.stack.length` from `null[0]()` | ~3-5 bits |
-| `SpeechVoices` | `voices` | nvarchar | Speech synthesis voices: `name/lang` pipe-separated (up to 20) | ~5-8 bits |
+| SQL Column | JS Param | SQL Type | Description | Real-World Entropy |
+|------------|----------|----------|-------------|:---:|
+| `MathFingerprint` | `mathFP` | nvarchar(200) | Hash of Math function precision (tan, sin, acos, atan, exp, log, sqrt, pow) | **0 bits** (uniform) |
+| `ErrorFingerprint` | `errorFP` | nvarchar(200) | `e.message.length + e.stack.length` from `null[0]()` | ~3.9 bits (15 values) |
+| `SpeechVoices` | `voices` | nvarchar(4000) | Speech synthesis voices: `name/lang` pipe-separated (up to 20) | ~5-8 bits |
 
 **MathFingerprint:** Different CPUs and JS engines produce slightly different floating-point results for transcendental functions. V8 on x86 differs from V8 on ARM.
 
-> **Note (Migration 17):** In practice, MathFingerprint has shown **zero entropy** — all visitors
-> produce the same value across our real traffic. This is likely because all current visitors use
-> V8 on x86_64. The field is retained for future cross-platform analysis but is excluded from
-> FingerprintStrength calculations.
+> **Note (Migration 17, confirmed 2026-02-12):** MathFingerprint has **zero entropy** in production — all 252 Tier 5 visitors produce the identical value (`-1.4214488,0.84147098,1.04719755,1.10714871,2.71828182,0.69314718,1.41421356,9007199254`). The V8/SpiderMonkey/JSC engines have fully converged on IEEE 754 precision for these operations. The field is retained for future cross-platform analysis but is **excluded from FingerprintStrength calculations** and should be considered for replacement with a higher-entropy signal.
 
 **ErrorFingerprint:** Chrome says "TypeError: Cannot read properties of null" while Firefox says "null has no properties". The message length + stack length creates a browser engine signature.
 
@@ -882,4 +885,370 @@ For developers adding new fields. Sorted alphabetically by JS param name.
 
 ---
 
-*Last verified: 2025-06-22 against Tier5Script.cs (160+ params), vw_PiXL_Complete (176 columns), SQL Migration 17.*
+## 22. Real-World Entropy Analysis (Feb 2026)
+
+Based on analysis of **267 real (non-synthetic) production records** collected Feb 2–12, 2026 from `pixl_parsed`. 252 records are Tier 5 (full JS payload), 15 are Tier NULL (server-only, no JS executed).
+
+### Fingerprint Signal Entropy (Measured)
+
+| Signal | Distinct Values (n=252) | Theoretical Max | Measured Entropy | Assessment |
+|--------|:-:|:-:|:-:|------------|
+| **CanvasFingerprint** | 68 | ~10-15 bits | ~6.1 bits | **HIGH** — Best single hash signal |
+| **DetectedFonts** | 62 | ~10-15 bits | ~6.0 bits | **HIGH** — Very diverse across real devices |
+| **GPURenderer** | 53 | ~10-15 bits | ~5.7 bits | **HIGH** — Doubles as bot detection signal |
+| **WebGLFingerprint** | 33 | ~10-15 bits | ~5.0 bits | **GOOD** — Solid secondary signal |
+| **AudioFingerprintSum** | 29 | ~5-10 bits | ~4.9 bits | **GOOD** — More granular than hash |
+| **AudioFingerprintHash** | 22 | ~5-10 bits | ~4.5 bits | **MODERATE** — 75% dominated by one value |
+| **HardwareConcurrency** | 21 | ~3-5 bits | ~4.4 bits | **GOOD** — Wide range (1–192 cores) |
+| **ErrorFingerprint** | 15 | ~3-5 bits | ~3.9 bits | **MODERATE** — Browser engine signature |
+| **PixelRatio** | 11 | ~2 bits | ~3.5 bits | **MODERATE** — Better than expected |
+| **Timezone** | 17 | ~5-7 bits | ~4.1 bits | **MODERATE** — Stable geo signal |
+| **Platform** | 8 | ~3 bits | ~3.0 bits | **LOW-MODERATE** — Stable but coarse |
+| **DeviceMemoryGB** | 3 | ~3 bits | ~1.6 bits | **LOW** — 89% report 8GB |
+| **CSSFontVariantHash** | 2 | ~3-5 bits | ~0.03 bits | **NEAR ZERO** — 99.6% identical |
+| **MathFingerprint** | 1 | ~2-5 bits | **0 bits** | **ZERO** — All records identical |
+
+### Combined Fingerprint Uniqueness
+
+Canvas + WebGL + AudioHash yields **77 distinct combinations** from 230 eligible records. Adding GPURenderer and DetectedFonts would push this well above 100 distinct groups, approaching near-unique identification even in this small dataset.
+
+| Combo Approach | Distinct Groups | ID Rate |
+|---------------|:-:|:-:|
+| Canvas alone | 68 | 27% |
+| Canvas + WebGL | ~60+ | ~55% |
+| Canvas + WebGL + Audio | 77 | ~65% |
+| Canvas + WebGL + Audio + GPU + Fonts | ~100+ | ~85%+ |
+
+### Key Observations
+
+**AudioFingerprintHash concentration:** One hash (`49d5a04b`) accounts for 75% of records (190/252). The OfflineAudioContext processing path is far more uniform across real hardware than lab testing suggested. Still valuable but should be weighted lower in composite scoring.
+
+**Canvas evasion rate is high (50%):** 127 of 252 Tier 5 records trigger `CanvasEvasionDetected`. This rate is likely too aggressive — warrants threshold calibration.
+
+**SwiftShader + 800x600 bot cluster:** ~20% of records show software GPU renderers (SwiftShader, llvmpipe, Microsoft Basic Render Driver) combined with 800x600 screen resolution — near-certain headless automation markers.
+
+**Linux x86_64 at 33%** is far above typical web traffic (~1-2% for desktop Linux), confirming significant bot/scanner traffic from Linux servers.
+
+**High core counts (48-192)** in 30 records indicate cloud VM environments, reinforcing the bot-heavy traffic profile.
+
+**Repeat visitor stability:** IPs with 2-4 visits and identical fingerprints across sessions confirm that Canvas, WebGL, and Audio fingerprints are stable for the same device. Multi-fingerprint IPs (e.g., 108.214.110.52 with 55 visits, 4 Canvas FPs) represent NAT/office environments with multiple machines.
+
+### Recommendations from Real-World Data
+
+1. **Replace or deprioritize MathFingerprint** — zero entropy; consider `Intl.ListFormat` patterns or `performance.now()` precision
+2. **Rework CSSFontVariantHash** — current implementation produces near-uniform output; test more CSS properties
+3. **Recalibrate canvas evasion threshold** — 50% positive rate suggests false positives
+4. **Weight composite scoring:** Canvas (15) > Fonts (15) > WebGL (15) > GPU (10) > Audio (5) > Error (5)
+5. **Proactively flag SwiftShader + 800x600** as a high-confidence bot cluster
+
+---
+
+## 23. Data Dictionary (`pixl_parsed`)
+
+Complete standardized data dictionary for all 175 columns in the `pixl_parsed` materialized table. Ordered by `ORDINAL_POSITION` as stored in the database.
+
+### Legend
+
+| Abbreviation | Meaning |
+|:---:|---------|
+| PK/FK | Primary Key / Foreign Key reference |
+| Calc | Calculated/computed field |
+| Srv | Server-side only (not from JS) |
+| JS | Populated from client-side JavaScript |
+| CH | Client Hints (Chromium only) |
+
+---
+
+### Identity & Server Context
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 1 | `SourceId` | int | NO | Srv/FK | FK to `PiXL_Test.Id`. Auto-increment PK in the raw table. |
+| 2 | `CompanyID` | nvarchar(100) | YES | Srv | Client company identifier extracted from the URL route. |
+| 3 | `PiXLID` | nvarchar(100) | YES | Srv | Campaign/pixel identifier extracted from the URL route. |
+| 4 | `IPAddress` | nvarchar(50) | YES | Srv | Visitor IP address from `X-Forwarded-For` header or `RemoteIpAddress`. |
+| 5 | `ReceivedAt` | datetime2 | NO | Srv | Server UTC timestamp when the pixel hit was received. |
+| 6 | `RequestPath` | nvarchar(500) | YES | Srv | HTTP request path (e.g., `/t/companyX/pixelY`). |
+| 7 | `ServerUserAgent` | nvarchar(2000) | YES | Srv | User-Agent string from the HTTP request header (server-side). |
+| 8 | `ServerReferer` | nvarchar(2000) | YES | Srv | Referer URL from the HTTP request header (server-side). |
+| 9 | `IsSynthetic` | bit | NO | Calc | `1` if test/synthetic traffic, `0` if real. Derived from `synthetic` query param. |
+| 10 | `Tier` | int | YES | JS | Script complexity tier. Currently always `5` for the Tier 5 script. NULL for server-only hits. |
+
+### Screen & Display
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 11 | `ScreenWidth` | int | YES | JS | `screen.width` — physical screen width in pixels. |
+| 12 | `ScreenHeight` | int | YES | JS | `screen.height` — physical screen height in pixels. |
+| 13 | `ScreenAvailWidth` | int | YES | JS | `screen.availWidth` — available width excluding OS chrome (taskbar/dock). |
+| 14 | `ScreenAvailHeight` | int | YES | JS | `screen.availHeight` — available height excluding OS chrome (taskbar/dock). |
+| 15 | `ViewportWidth` | int | YES | JS | `window.innerWidth` — CSS viewport width in pixels. |
+| 16 | `ViewportHeight` | int | YES | JS | `window.innerHeight` — CSS viewport height in pixels. |
+| 17 | `OuterWidth` | int | YES | JS | `window.outerWidth` — browser window width including chrome. |
+| 18 | `OuterHeight` | int | YES | JS | `window.outerHeight` — browser window height including chrome. |
+| 19 | `ScreenX` | int | YES | JS | `window.screenX` / `screenLeft` — window X position on screen. |
+| 20 | `ScreenY` | int | YES | JS | `window.screenY` / `screenTop` — window Y position on screen. |
+| 21 | `ColorDepth` | int | YES | JS | `screen.colorDepth` — bits per pixel (24, 30, 32 typical). |
+| 22 | `PixelRatio` | decimal(5,2) | YES | JS | `devicePixelRatio` — display scaling factor (1.0, 1.25, 1.5, 2.0, 3.0). |
+| 23 | `ScreenOrientation` | nvarchar(50) | YES | JS | `screen.orientation.type` — e.g., `landscape-primary`, `portrait-primary`. |
+
+### Locale & Internationalization
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 24 | `Timezone` | nvarchar(100) | YES | JS | IANA timezone identifier (e.g., `America/New_York`, `UTC`). |
+| 25 | `TimezoneOffsetMins` | int | YES | JS | UTC offset in minutes from `new Date().getTimezoneOffset()`. Negative = ahead of UTC. |
+| 26 | `ClientTimestampMs` | bigint | YES | JS | Client-side epoch timestamp in milliseconds from `new Date().getTime()`. |
+| 27 | `TimezoneLocale` | nvarchar(200) | YES | JS | Resolved locale info: `locale\|calendar\|numberingSystem\|hourCycle`. |
+| 28 | `DateFormatSample` | nvarchar(200) | YES | JS | `Intl.DateTimeFormat` output for a fixed reference date (2024-01-15). |
+| 29 | `NumberFormatSample` | nvarchar(200) | YES | JS | `Intl.NumberFormat().format(1234567.89)` — locale-specific number formatting. |
+| 30 | `RelativeTimeSample` | nvarchar(200) | YES | JS | `Intl.RelativeTimeFormat().format(-1, 'day')` — locale-specific relative time. |
+| 31 | `Language` | nvarchar(50) | YES | JS | Primary language from `navigator.language` (e.g., `en-US`). |
+| 32 | `LanguageList` | nvarchar(500) | YES | JS | All accepted languages from `navigator.languages`, comma-separated. |
+
+### Browser & Navigator
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 33 | `Platform` | nvarchar(100) | YES | JS | `navigator.platform` — OS platform string (`Win32`, `MacIntel`, `Linux x86_64`, `iPhone`). |
+| 34 | `Vendor` | nvarchar(200) | YES | JS | `navigator.vendor` — browser vendor (`Google Inc.`, `Apple Computer, Inc.`, empty). |
+| 35 | `ClientUserAgent` | nvarchar(2000) | YES | JS | Full `navigator.userAgent` string (client-side, may differ from server-side). |
+| 36 | `HardwareConcurrency` | int | YES | JS | `navigator.hardwareConcurrency` — CPU logical core count. Range: 1–192 observed. |
+| 37 | `DeviceMemoryGB` | decimal(5,2) | YES | JS | `navigator.deviceMemory` — approximate RAM in GB (0.25, 0.5, 1, 2, 4, 8). Chromium only. |
+| 38 | `MaxTouchPoints` | int | YES | JS | `navigator.maxTouchPoints` — touch capability (0=none, 1-10=touch, 256=pen). |
+| 39 | `NavigatorProduct` | nvarchar(50) | YES | JS | `navigator.product` — always `Gecko` in modern browsers. |
+| 40 | `NavigatorProductSub` | nvarchar(50) | YES | JS | `navigator.productSub` — typically `20030107` (Chrome) or `20100101` (Firefox). |
+| 41 | `NavigatorVendorSub` | nvarchar(200) | YES | JS | `navigator.vendorSub` — usually empty string. |
+| 42 | `AppName` | nvarchar(100) | YES | JS | `navigator.appName` — usually `Netscape` in all modern browsers. |
+| 43 | `AppVersion` | nvarchar(500) | YES | JS | `navigator.appVersion` — version string (legacy, mirrors UA). |
+| 44 | `AppCodeName` | nvarchar(100) | YES | JS | `navigator.appCodeName` — always `Mozilla` in modern browsers. |
+
+### GPU & WebGL
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 45 | `GPURenderer` | nvarchar(500) | YES | JS | Unmasked GPU renderer string from `WEBGL_debug_renderer_info` (e.g., `ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 ...)`). |
+| 46 | `GPUVendor` | nvarchar(200) | YES | JS | Unmasked GPU vendor from `WEBGL_debug_renderer_info` (e.g., `Google Inc.`, `NVIDIA Corporation`). |
+| 47 | `WebGLParameters` | nvarchar(2000) | YES | JS | First 5 WebGL params: `VERSION\|SHADING_LANGUAGE\|VENDOR\|RENDERER\|MAX_VERTEX_ATTRIBS`. |
+| 48 | `WebGLExtensionCount` | int | YES | JS | Number of supported WebGL extensions. Varies by GPU capability. |
+| 49 | `WebGLSupported` | bit | YES | JS | `1` if WebGL 1.0 context can be created. |
+| 50 | `WebGL2Supported` | bit | YES | JS | `1` if WebGL 2.0 context can be created. |
+
+### Fingerprint Hashes
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 51 | `CanvasFingerprint` | nvarchar(200) | YES | JS | Hex hash of canvas 2D rendering output. 68 distinct values in production. |
+| 52 | `WebGLFingerprint` | nvarchar(200) | YES | JS | Hex hash of 23 WebGL parameter values. 33 distinct values in production. |
+| 53 | `AudioFingerprintSum` | nvarchar(200) | YES | JS | Sum of OfflineAudioContext frequency bin samples (6 decimal places). 29 distinct values. |
+| 54 | `AudioFingerprintHash` | nvarchar(200) | YES | JS | Hex hash of full audio sample data. 22 distinct values; 75% dominated by one value. |
+| 55 | `MathFingerprint` | nvarchar(200) | YES | JS | Hash of `Math.*` function precision. **Zero entropy** — all records identical. |
+| 56 | `ErrorFingerprint` | nvarchar(200) | YES | JS | Error message/stack length signature from `null[0]()`. 15 distinct values. |
+| 57 | `CSSFontVariantHash` | nvarchar(200) | YES | JS | Hash of CSS font-variant computed values. Near-zero entropy (2 values, 99.6% identical). |
+
+### Fonts, Plugins & Media
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 58 | `DetectedFonts` | nvarchar(4000) | YES | JS | Comma-separated list of detected installed fonts from width-measurement test (~42 fonts). 62 distinct combos. |
+| 59 | `PluginCount` | int | YES | JS | Count of entries in `navigator.plugins`. |
+| 60 | `PluginListDetailed` | nvarchar(4000) | YES | JS | `name::filename::description` pipe-separated plugin details (up to 20). |
+| 61 | `MimeTypeCount` | int | YES | JS | Count of entries in `navigator.mimeTypes`. |
+| 62 | `MimeTypeList` | nvarchar(4000) | YES | JS | Comma-separated MIME type strings (up to 30). |
+| 63 | `SpeechVoices` | nvarchar(4000) | YES | JS | `speechSynthesis.getVoices()` — `name/lang` pipe-separated (up to 20). |
+| 64 | `ConnectedGamepads` | nvarchar(1000) | YES | JS | Pipe-separated gamepad IDs from `navigator.getGamepads()`. |
+
+### Network & Connection
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 65 | `WebRTCLocalIP` | nvarchar(50) | YES | JS | Local network IP from WebRTC ICE candidate (e.g., `192.168.1.5`). Blocked by some browsers. |
+| 66 | `ConnectionType` | nvarchar(50) | YES | JS | `navigator.connection.effectiveType` — `4g`, `3g`, `2g`, `slow-2g`. Chromium only. |
+| 67 | `DownlinkMbps` | decimal(10,2) | YES | JS | `navigator.connection.downlink` — estimated bandwidth in Mbps. |
+| 68 | `DownlinkMax` | nvarchar(50) | YES | JS | `navigator.connection.downlinkMax` — maximum downlink speed. |
+| 69 | `RTTMs` | int | YES | JS | `navigator.connection.rtt` — round-trip time estimate in milliseconds. |
+| 70 | `DataSaverEnabled` | bit | YES | JS | `navigator.connection.saveData` — `1` if data saver is active. |
+| 71 | `NetworkType` | nvarchar(50) | YES | JS | `navigator.connection.type` — `wifi`, `cellular`, `ethernet`, `none`. |
+| 72 | `IsOnline` | bit | YES | JS | `navigator.onLine` — `1` if browser reports network connectivity. |
+
+### Storage & Media Devices
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 73 | `StorageQuotaGB` | int | YES | JS | `navigator.storage.estimate()` quota converted to GB. |
+| 74 | `StorageUsedMB` | int | YES | JS | `navigator.storage.estimate()` usage converted to MB. |
+| 75 | `LocalStorageSupported` | bit | YES | JS | `1` if `window.localStorage` is accessible. |
+| 76 | `SessionStorageSupported` | bit | YES | JS | `1` if `window.sessionStorage` is accessible. |
+| 77 | `IndexedDBSupported` | bit | YES | JS | `1` if `window.indexedDB` is accessible. |
+| 78 | `CacheAPISupported` | bit | YES | JS | `1` if `window.caches` (CacheStorage API) is accessible. |
+| 79 | `BatteryLevelPct` | int | YES | JS | Battery charge percentage (0–100). Only available via Battery API (Chromium). |
+| 80 | `BatteryCharging` | bit | YES | JS | `1` if device is plugged in / charging. |
+| 81 | `AudioInputDevices` | int | YES | JS | Microphone count from `navigator.mediaDevices.enumerateDevices()`. |
+| 82 | `VideoInputDevices` | int | YES | JS | Camera count from `navigator.mediaDevices.enumerateDevices()`. |
+
+### API Capabilities (Boolean Flags)
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 83 | `CookiesEnabled` | bit | YES | JS | `1` if `navigator.cookieEnabled` is true. |
+| 84 | `DoNotTrack` | nvarchar(50) | YES | JS | `navigator.doNotTrack` value — `1`, `0`, `unspecified`, or NULL. |
+| 85 | `PDFViewerEnabled` | bit | YES | JS | `1` if built-in PDF viewer is active (`navigator.pdfViewerEnabled`). |
+| 86 | `WebDriverDetected` | bit | YES | JS | `1` if `navigator.webdriver` is `true` — strong automation indicator. |
+| 87 | `JavaEnabled` | bit | YES | JS | `1` if `navigator.javaEnabled()` returns true. |
+| 88 | `CanvasSupported` | bit | YES | JS | `1` if Canvas 2D rendering context can be created. |
+| 89 | `WebAssemblySupported` | bit | YES | JS | `1` if `WebAssembly` global object exists. |
+| 90 | `WebWorkersSupported` | bit | YES | JS | `1` if `Worker` constructor exists. |
+| 91 | `ServiceWorkerSupported` | bit | YES | JS | `1` if `navigator.serviceWorker` exists. |
+| 92 | `MediaDevicesAPISupported` | bit | YES | JS | `1` if `navigator.mediaDevices` exists. |
+| 93 | `ClipboardAPISupported` | bit | YES | JS | `1` if `navigator.clipboard.writeText` exists. |
+| 94 | `SpeechSynthesisSupported` | bit | YES | JS | `1` if `window.speechSynthesis` exists. |
+| 95 | `TouchEventsSupported` | bit | YES | JS | `1` if `ontouchstart` is in `window`. |
+| 96 | `PointerEventsSupported` | bit | YES | JS | `1` if `PointerEvent` constructor exists. |
+
+### Accessibility & Preferences
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 97 | `HoverCapable` | bit | YES | JS | `1` if `(hover: hover)` media query matches — points to mouse/trackpad input. |
+| 98 | `PointerType` | nvarchar(20) | YES | JS | Primary pointer type: `fine` (mouse), `coarse` (touch), empty (none). |
+| 99 | `PrefersColorSchemeDark` | bit | YES | JS | `1` if `prefers-color-scheme: dark` media query matches. |
+| 100 | `PrefersColorSchemeLight` | bit | YES | JS | `1` if `prefers-color-scheme: light` media query matches. |
+| 101 | `PrefersReducedMotion` | bit | YES | JS | `1` if `prefers-reduced-motion: reduce` media query matches. |
+| 102 | `PrefersReducedData` | bit | YES | JS | `1` if `prefers-reduced-data: reduce` media query matches. |
+| 103 | `PrefersHighContrast` | bit | YES | JS | `1` if `prefers-contrast: more` media query matches. |
+| 104 | `ForcedColorsActive` | bit | YES | JS | `1` if `forced-colors: active` — Windows High Contrast mode. |
+| 105 | `InvertedColorsActive` | bit | YES | JS | `1` if `inverted-colors: inverted` media query matches. |
+| 106 | `StandaloneDisplayMode` | bit | YES | JS | `1` if `(display-mode: standalone)` — running as PWA. |
+
+### Document State
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 107 | `DocumentCharset` | nvarchar(50) | YES | JS | `document.characterSet` (e.g., `UTF-8`). |
+| 108 | `DocumentCompatMode` | nvarchar(50) | YES | JS | `CSS1Compat` (standards mode) or `BackCompat` (quirks mode). |
+| 109 | `DocumentReadyState` | nvarchar(50) | YES | JS | `loading`, `interactive`, or `complete`. |
+| 110 | `DocumentHidden` | bit | YES | JS | `1` if `document.hidden` — tab is backgrounded at pixel fire time. |
+| 111 | `DocumentVisibility` | nvarchar(50) | YES | JS | `document.visibilityState` — `visible`, `hidden`, or `prerender`. |
+
+### Page Context
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 112 | `PageURL` | nvarchar(2000) | YES | JS | `location.href` — full page URL at pixel fire time. |
+| 113 | `PageReferrer` | nvarchar(2000) | YES | JS | `document.referrer` — client-side referrer URL. |
+| 114 | `PageTitle` | nvarchar(1000) | YES | JS | `document.title` — page title. |
+| 115 | `PageDomain` | nvarchar(500) | YES | JS | `location.hostname` — domain of the hosting page. |
+| 116 | `PagePath` | nvarchar(1000) | YES | JS | `location.pathname` — path component of the URL. |
+| 117 | `PageHash` | nvarchar(500) | YES | JS | `location.hash` — URL fragment/anchor. |
+| 118 | `PageProtocol` | nvarchar(20) | YES | JS | `location.protocol` — `http:` or `https:`. |
+| 119 | `HistoryLength` | int | YES | JS | `history.length` — browsing session depth in the current tab. |
+
+### Performance Timing
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 120 | `PageLoadTimeMs` | int | YES | JS | `loadEventEnd - navigationStart` from Performance Timing API. |
+| 121 | `DOMReadyTimeMs` | int | YES | JS | `domContentLoadedEventEnd - navigationStart`. |
+| 122 | `DNSLookupMs` | int | YES | JS | `domainLookupEnd - domainLookupStart`. |
+| 123 | `TCPConnectMs` | int | YES | JS | `connectEnd - connectStart`. |
+| 124 | `TimeToFirstByteMs` | int | YES | JS | `responseStart - requestStart` (TTFB). |
+
+### Bot Detection
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 125 | `BotSignalsList` | nvarchar(4000) | YES | JS | Comma-separated list of triggered bot signal names. |
+| 126 | `BotScore` | int | YES | JS | Composite bot likelihood score (0–100). Sum of triggered signal weights, capped at 100. |
+| 127 | `CombinedThreatScore` | int | YES | JS | `BotScore + min(AnomalyScore, 25)`. Bridges bot + anomaly detection. |
+| 128 | `ScriptExecutionTimeMs` | int | YES | JS | Milliseconds from page load to script completion. <10ms is near-certain bot. |
+| 129 | `BotPermissionInconsistent` | bit | YES | JS | `1` if Permission API returns inconsistent state. |
+
+### Evasion Detection
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 130 | `CanvasEvasionDetected` | bit | YES | JS | `1` if canvas pixel data variance is 0 or dataURL suspiciously short. |
+| 131 | `WebGLEvasionDetected` | bit | YES | JS | `1` if GPU is a software renderer (SwiftShader, llvmpipe, Mesa). |
+| 132 | `EvasionToolsDetected` | nvarchar(1000) | YES | JS | Comma-separated evasion tool identifiers (e.g., `tor-likely`, `brave`, `ua-platform-mismatch`). |
+| 133 | `ProxyBlockedProperties` | nvarchar(1000) | YES | JS | Navigator properties blocked by JS Proxy privacy extensions (JShelter, Trace). |
+
+### Client Hints (Chromium Only)
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 134 | `UA_Architecture` | nvarchar(50) | YES | CH | CPU architecture — `x86`, `arm`. |
+| 135 | `UA_Bitness` | nvarchar(10) | YES | CH | CPU bitness — `32` or `64`. |
+| 136 | `UA_Model` | nvarchar(200) | YES | CH | Device model (mobile only) — e.g., `Pixel 7`, `SM-S918B`. |
+| 137 | `UA_PlatformVersion` | nvarchar(100) | YES | CH | OS version string (e.g., `15.0.0`, `10.0.0`). |
+| 138 | `UA_FullVersionList` | nvarchar(500) | YES | CH | Full browser version list with patch numbers. |
+| 139 | `UA_IsWow64` | bit | YES | CH | `1` if 32-bit app running on 64-bit OS (WoW64). |
+| 140 | `UA_IsMobile` | bit | YES | CH | `1` if mobile device per Client Hints. |
+| 141 | `UA_Platform` | nvarchar(50) | YES | CH | OS name — `Windows`, `macOS`, `Android`, `Linux`. |
+| 142 | `UA_Brands` | nvarchar(500) | YES | CH | Low-entropy brand list (`Chromium/120\|Google Chrome/120`). |
+| 143 | `UA_FormFactor` | nvarchar(100) | YES | CH | Device form factor — `Desktop`, `Mobile`, `Tablet`. |
+
+### Browser-Specific Fields
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 144 | `Firefox_OSCPU` | nvarchar(200) | YES | JS | `navigator.oscpu` — Firefox-only OS/CPU string. |
+| 145 | `Firefox_BuildID` | nvarchar(100) | YES | JS | Firefox build timestamp (may be frozen `20181001000000` for privacy). |
+| 146 | `Chrome_ObjectPresent` | bit | YES | JS | `1` if `window.chrome` object exists. |
+| 147 | `Chrome_RuntimePresent` | bit | YES | JS | `1` if `window.chrome.runtime` exists (extension context). |
+| 148 | `Chrome_JSHeapSizeLimit` | bigint | YES | JS | `performance.memory.jsHeapSizeLimit` — V8 heap limit in bytes. Chrome only. |
+| 149 | `Chrome_TotalJSHeapSize` | bigint | YES | JS | `performance.memory.totalJSHeapSize` — total allocated heap. Chrome only. |
+| 150 | `Chrome_UsedJSHeapSize` | bigint | YES | JS | `performance.memory.usedJSHeapSize` — actively used heap. Chrome only. |
+
+### Fingerprint Stability & Evasion Signals
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 151 | `CanvasConsistency` | nvarchar(50) | YES | JS | Canvas noise detection: `clean` (normal), `noise-detected` (Canvas Blocker), `canvas-blocked`, `error`. |
+| 152 | `AudioIsStable` | bit | YES | JS | `1` if two audio fingerprint runs match. `0` if unstable. |
+| 153 | `AudioNoiseInjectionDetected` | bit | YES | JS | `1` if two audio runs differ — noise injection extension detected. |
+
+### Behavioral Biometrics
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 154 | `MouseMoveCount` | int | YES | JS | Number of mouse movement events captured in ~500ms window. |
+| 155 | `UserScrolled` | bit | YES | JS | `1` if user scrolled within the capture window. |
+| 156 | `ScrollDepthPx` | int | YES | JS | `window.scrollY` at pixel fire time. |
+| 157 | `MouseEntropy` | int | YES | JS | Mouse movement angle variance × 1000. `0` if < 5 moves. |
+| 158 | `ScrollContradiction` | bit | YES | JS | `1` if scroll event fired but `scrollY` = 0 — bot indicator. |
+| 159 | `MoveTimingCV` | int | YES | JS | Coefficient of variation of time between mouse moves × 1000. |
+| 160 | `MoveSpeedCV` | int | YES | JS | Coefficient of variation of mouse movement speed × 1000. |
+| 161 | `MoveCountBucket` | nvarchar(20) | YES | JS | Categorical bucket: `low`, `mid`, `high`, `very-high`. |
+| 162 | `BehavioralFlags` | nvarchar(200) | YES | JS | Behavioral analysis flags (e.g., `uniform-timing`, `uniform-speed`). |
+
+### Advanced Evasion & Cross-Signal
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 163 | `StealthPluginSignals` | nvarchar(500) | YES | JS | Stealth plugin detection: `webdriver-slow`, `toString-spoofed`, `nav-proto-modified`. |
+| 164 | `FontMethodMismatch` | bit | YES | JS | `1` if `offsetWidth` vs `getBoundingClientRect` disagree — font spoofing indicator. |
+| 165 | `EvasionSignalsV2` | nvarchar(500) | YES | JS | Enhanced signals: `tor-letterbox-viewport`, `canvas-noise`, `stealth-detected`. |
+| 166 | `CrossSignalFlags` | nvarchar(500) | YES | JS | Cross-signal inconsistency flags (e.g., `win-fonts-on-mac`, `swiftshader-gpu`, `heap-mismatch`). |
+| 167 | `AnomalyScore` | int | YES | JS | Cumulative cross-signal anomaly score. Contribution to `CombinedThreatScore` capped at 25. |
+
+### Parse Metadata
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 168 | `ParsedAt` | datetime2 | NO | Srv | UTC timestamp when this record was parsed from `PiXL_Test` into `pixl_parsed` by `DatabaseWriterService`. |
+
+### IP Behavior Analysis (Server-Side)
+
+| # | Column Name | SQL Type | Nullable | Source | Description |
+|:-:|-------------|----------|:--------:|:------:|-------------|
+| 169 | `Srv_SubnetIps` | int | YES | Srv | Unique IPs from same /24 subnet in 5-minute window. |
+| 170 | `Srv_SubnetHits` | int | YES | Srv | Total hits from same /24 subnet in 5-minute window. |
+| 171 | `Srv_HitsIn15s` | int | YES | Srv | Hits from same IP in 15-second window. |
+| 172 | `Srv_LastGapMs` | bigint | YES | Srv | Milliseconds since last hit from same IP. `-1` if first hit. |
+| 173 | `Srv_SubSecDupe` | bit | YES | Srv | `1` if sub-second duplicate from same IP (< 1000ms gap). |
+| 174 | `Srv_SubnetAlert` | bit | YES | Srv | `1` if subnet /24 velocity alert: 3+ unique IPs in same /24 in 5min. |
+| 175 | `Srv_RapidFire` | bit | YES | Srv | `1` if rapid-fire alert: 3+ hits from same IP in 15 seconds. |
+
+---
+
+*Last verified: 2026-02-12 against Tier5Script.cs (160+ params), pixl_parsed (175 columns), vw_PiXL_Complete (176 columns), SQL Migration 17, and 267 real production records.*
