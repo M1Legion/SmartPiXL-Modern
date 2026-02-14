@@ -86,6 +86,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpServic
 // raw data from PiXL.Test → PiXL.Parsed (materialized warehouse with ~175 columns).
 builder.Services.AddHostedService<EtlBackgroundService>();
 
+// InfraHealthService: Probes Windows services, SQL connectivity, IIS websites,
+// and in-process app metrics. Results cached 15s to avoid hammering on refresh.
+builder.Services.AddSingleton<InfraHealthService>();
+
 // CORS: Wide-open for tracking pixel — any origin can embed our script/GIF.
 builder.Services.AddCors();
 

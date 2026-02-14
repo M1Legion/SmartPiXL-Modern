@@ -658,6 +658,151 @@ body::before {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); }
+
+/* ─── INFRASTRUCTURE HEALTH ─── */
+.infra-section {
+  margin-bottom: 24px;
+}
+
+.infra-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  border: 1px solid var(--panel-border);
+}
+
+.infra-status-bar.healthy {
+  background: rgba(0,255,136,0.06);
+  border-color: rgba(0,255,136,0.3);
+}
+
+.infra-status-bar.degraded {
+  background: rgba(255,225,77,0.06);
+  border-color: rgba(255,225,77,0.3);
+}
+
+.infra-status-bar.critical {
+  background: rgba(255,45,85,0.06);
+  border-color: rgba(255,45,85,0.3);
+}
+
+.infra-status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.infra-status-dot.healthy { background: var(--green); box-shadow: 0 0 10px var(--green-dim); }
+.infra-status-dot.degraded { background: var(--yellow); box-shadow: 0 0 10px rgba(255,225,77,0.4); }
+.infra-status-dot.critical { background: var(--red); box-shadow: 0 0 10px var(--red-dim); animation: pulse 0.8s ease-in-out infinite; }
+
+.infra-status-text {
+  font-family: var(--display);
+  font-size: 0.75rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.infra-status-bar.healthy .infra-status-text { color: var(--green); }
+.infra-status-bar.degraded .infra-status-text { color: var(--yellow); }
+.infra-status-bar.critical .infra-status-text { color: var(--red); }
+
+.infra-probe-time {
+  margin-left: auto;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+.infra-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.infra-group-title {
+  font-family: var(--display);
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.infra-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.75rem;
+}
+
+.infra-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.infra-dot.up { background: var(--green); box-shadow: 0 0 6px var(--green-dim); }
+.infra-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red-dim); }
+.infra-dot.warn { background: var(--yellow); box-shadow: 0 0 6px rgba(255,225,77,0.3); }
+
+.infra-item-name { flex: 1; }
+.infra-item-detail {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.infra-item-ms {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  color: var(--cyan-dim);
+  width: 50px;
+  text-align: right;
+}
+
+.infra-app-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.infra-app-stat {
+  text-align: center;
+  padding: 8px 4px;
+  background: rgba(0,243,255,0.03);
+  border: 1px solid rgba(0,243,255,0.06);
+  border-radius: 3px;
+}
+
+.infra-app-val {
+  font-family: var(--display);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--cyan);
+}
+
+.infra-app-lbl {
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .infra-grid { grid-template-columns: 1fr; }
+  .infra-app-grid { grid-template-columns: repeat(2, 1fr); }
+}
 </style>
 </head>
 <body>
@@ -783,6 +928,14 @@ body::before {
       <div id="etl-details" style="font-size:0.75rem;"><div class="loading">LOADING</div></div>
     </div>
   </div>
+
+  <!-- ═══════════════════ INFRASTRUCTURE HEALTH ═══════════════════ -->
+  <div class="infra-section">
+    <div class="panel">
+      <div class="panel-title">INFRASTRUCTURE HEALTH</div>
+      <div id="infra-panel"><div class="loading">LOADING</div></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -799,6 +952,7 @@ const API = {
   behavior:     () => fetchJson('/api/dash/behavior'),
   recent:       () => fetchJson('/api/dash/recent'),
   fingerprints: () => fetchJson('/api/dash/fingerprints?limit=12'),
+  infra:        () => fetchJson('/api/dash/infra'),
 };
 
 async function fetchJson(url) {
@@ -1081,6 +1235,204 @@ function renderDevices(data) {
     }).join('') + '</div>';
 }
 
+function renderInfra(data) {
+  const el = document.getElementById('infra-panel');
+  if (!data) { el.innerHTML = '<div style="color:var(--text-dim)">Infrastructure probe unavailable</div>'; return; }
+
+  const status = data.overallStatus || 'unknown';
+  const statusLabel = status === 'healthy' ? 'ALL SYSTEMS OPERATIONAL' :
+                      status === 'degraded' ? 'DEGRADED — SOME ISSUES DETECTED' :
+                      status === 'critical' ? 'CRITICAL — IMMEDIATE ATTENTION REQUIRED' : 'UNKNOWN';
+  const checkedAt = data.checkedAt ? new Date(data.checkedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) + ' UTC' : '--';
+
+  // ── Status bar
+  let html = `<div class="infra-status-bar ${status}">
+    <div class="infra-status-dot ${status}"></div>
+    <div class="infra-status-text">${statusLabel}</div>
+    <div class="infra-probe-time">Probed in ${data.probeTimeMs || 0}ms · ${checkedAt}</div>
+  </div>`;
+
+  // ── Error banner (most important — shows at top if there are errors)
+  if (data.recentErrors && data.recentErrors.hasErrors) {
+    const re = data.recentErrors;
+    const errAge = re.lastErrorUtc ? timeAgo(re.lastErrorUtc) : 'unknown';
+    html += `<div style="background:rgba(255,45,85,0.1);border:1px solid rgba(255,45,85,0.4);border-radius:4px;padding:12px 16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <div class="infra-dot down"></div>
+        <span style="font-family:var(--display);font-size:0.7rem;letter-spacing:2px;color:var(--red);">
+          ${re.totalErrorsToday} ERROR${re.totalErrorsToday > 1 ? 'S' : ''} TODAY · Last: ${errAge}
+        </span>
+      </div>`;
+    re.errors.forEach(e => {
+      const countBadge = e.count > 1 ? `<span style="color:var(--red);font-size:0.6rem;font-weight:bold;">×${e.count}</span> ` : '';
+      html += `<div style="font-size:0.7rem;padding:3px 0 3px 18px;color:var(--text);border-left:2px solid rgba(255,45,85,0.3);margin:2px 0;">
+        ${countBadge}<span style="color:var(--text-dim);">[${e.source}]</span> ${e.message.length > 120 ? e.message.substring(0,120) + '…' : e.message}
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  html += '<div class="infra-grid">';
+
+  // ── Data Flow (THE critical check — would have caught today's bug)
+  html += '<div>';
+  html += '<div class="infra-group-title">Data Flow Pipeline</div>';
+  if (data.dataFlow) {
+    const df = data.dataFlow;
+    const flowDot = df.isFlowing ? 'up' : 'down';
+    const flowLabel = df.isFlowing ? 'DATA FLOWING' : 'DATA NOT FLOWING';
+    const flowColor = df.isFlowing ? 'var(--green)' : 'var(--red)';
+    const staleStr = df.secondsSinceLastInsert > 0 ? formatDuration(df.secondsSinceLastInsert) + ' ago' : 'just now';
+    html += `<div class="infra-item">
+      <div class="infra-dot ${flowDot}"></div>
+      <div class="infra-item-name" style="color:${flowColor};font-weight:bold;">${flowLabel}</div>
+    </div>`;
+    html += `<div class="infra-app-grid" style="margin-top:6px;">
+      <div class="infra-app-stat">
+        <div class="infra-app-val" style="${df.hitsLast5Min === 0 && !df.isFlowing ? 'color:var(--red)' : ''}">${df.hitsLast5Min}</div>
+        <div class="infra-app-lbl">LAST 5 MIN</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${df.hitsLastHour}</div>
+        <div class="infra-app-lbl">LAST HOUR</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val" style="font-size:0.7rem;">${staleStr}</div>
+        <div class="infra-app-lbl">LAST INSERT</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val" style="${df.queueDepth > 100 ? 'color:var(--yellow)' : ''}">${df.queueDepth}</div>
+        <div class="infra-app-lbl">QUEUE</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val" style="${df.etlLag > 50 ? 'color:var(--yellow)' : ''}">${df.etlLag}</div>
+        <div class="infra-app-lbl">ETL LAG</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${num(df.maxTestId)}</div>
+        <div class="infra-app-lbl">MAX TEST ID</div>
+      </div>
+    </div>`;
+    if (df.error) {
+      html += `<div style="font-size:0.7rem;color:var(--red);padding:4px 0 0 18px;">${df.error}</div>`;
+    }
+  }
+  html += '</div>';
+
+  // ── Windows Services
+  html += '<div>';
+  html += '<div class="infra-group-title">Windows Services</div>';
+  if (data.services && data.services.length) {
+    data.services.forEach(s => {
+      const dotCls = s.isRunning ? 'up' : 'down';
+      const detail = s.isRunning ? s.status : (s.error || s.status);
+      const critTag = s.critical ? ' <span style="color:var(--red);font-size:0.55rem;">CRITICAL</span>' : '';
+      html += `<div class="infra-item">
+        <div class="infra-dot ${dotCls}"></div>
+        <div class="infra-item-name">${s.name}${critTag}</div>
+        <div class="infra-item-detail">${detail}</div>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text-dim);font-size:0.7rem;">No service data</div>';
+  }
+  html += '</div>';
+
+  // ── Websites
+  html += '<div>';
+  html += '<div class="infra-group-title">Website Endpoints</div>';
+  if (data.websites && data.websites.length) {
+    data.websites.forEach(w => {
+      const dotCls = w.isHealthy ? 'up' : 'down';
+      const statusTxt = w.isHealthy ? `${w.statusCode} OK` : (w.error || `HTTP ${w.statusCode}`);
+      const critTag = w.critical ? ' <span style="color:var(--red);font-size:0.55rem;">CRITICAL</span>' : '';
+      html += `<div class="infra-item">
+        <div class="infra-dot ${dotCls}"></div>
+        <div class="infra-item-name">${w.name}${critTag}</div>
+        <div class="infra-item-detail">${statusTxt}</div>
+        <div class="infra-item-ms">${w.responseMs}ms</div>
+      </div>`;
+    });
+  } else {
+    html += '<div style="color:var(--text-dim);font-size:0.7rem;">No website data</div>';
+  }
+  html += '</div>';
+
+  // ── SQL Server
+  html += '<div>';
+  html += '<div class="infra-group-title">SQL Server</div>';
+  if (data.sql) {
+    const s = data.sql;
+    const dotCls = s.isConnected ? 'up' : 'down';
+    html += `<div class="infra-item">
+      <div class="infra-dot ${dotCls}"></div>
+      <div class="infra-item-name">${s.dataSource || 'SQL Server'} / ${s.database || '?'}</div>
+      <div class="infra-item-ms">${s.responseMs}ms</div>
+    </div>`;
+    if (s.isConnected) {
+      html += `<div style="font-size:0.7rem;color:var(--text-dim);padding:4px 0 0 18px;">
+        PiXL.Test: ${num(s.testRows)} rows · PiXL.Parsed: ${num(s.parsedRows)} rows · Watermark: ${num(s.watermark)}
+      </div>`;
+      if (s.lastEtlRun) {
+        html += `<div style="font-size:0.65rem;color:var(--text-dim);padding:2px 0 0 18px;">Last ETL: ${timeAgo(s.lastEtlRun)}</div>`;
+      }
+    } else {
+      html += `<div style="font-size:0.7rem;color:var(--red);padding:4px 0 0 18px;">${s.error || 'Connection failed'}</div>`;
+    }
+  }
+  html += '</div>';
+
+  // ── App Runtime
+  html += '<div>';
+  html += '<div class="infra-group-title">App Runtime</div>';
+  if (data.app) {
+    const a = data.app;
+    const uptimeSec = a.uptime ? (a.uptime.totalSeconds || 
+      (a.uptime.hours * 3600 + a.uptime.minutes * 60 + a.uptime.seconds) ||
+      0) : 0;
+    const uptimeStr = uptimeSec > 86400 ? Math.floor(uptimeSec/86400) + 'd ' + Math.floor((uptimeSec%86400)/3600) + 'h' :
+                      uptimeSec > 3600 ? Math.floor(uptimeSec/3600) + 'h ' + Math.floor((uptimeSec%3600)/60) + 'm' :
+                      Math.floor(uptimeSec/60) + 'm';
+    html += `<div class="infra-app-grid">
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${a.processId}</div>
+        <div class="infra-app-lbl">PID</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${uptimeStr}</div>
+        <div class="infra-app-lbl">UPTIME</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${a.workingSetMB}</div>
+        <div class="infra-app-lbl">MEM (MB)</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${a.threadCount}</div>
+        <div class="infra-app-lbl">THREADS</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val">${a.gcHeapMB}</div>
+        <div class="infra-app-lbl">GC HEAP</div>
+      </div>
+      <div class="infra-app-stat">
+        <div class="infra-app-val" style="${a.queueDepth > 100 ? 'color:var(--yellow)' : ''}">${a.queueDepth}</div>
+        <div class="infra-app-lbl">WRITE QUEUE</div>
+      </div>
+    </div>`;
+    html += `<div style="font-size:0.6rem;color:var(--text-dim);margin-top:6px;">${a.machineName} · .NET ${a.dotNetVersion}</div>`;
+  }
+  html += '</div>';
+
+  html += '</div>'; // close infra-grid
+  el.innerHTML = html;
+
+  // ── Update the header beacon based on infra status (overrides the hit-staleness beacon)
+  if (status === 'critical') {
+    document.getElementById('beacon').className = 'beacon-dot danger';
+    document.getElementById('system-status').textContent = 'CRITICAL — CHECK INFRA';
+  }
+}
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -1111,10 +1463,11 @@ const REFRESH_INTERVAL = 10; // seconds
 let countdown = REFRESH_INTERVAL;
 
 async function refreshAll() {
-  const [health, hourly, bots, signals, evasion, behavior, recent, fingerprints, devices] =
+  const [health, hourly, bots, signals, evasion, behavior, recent, fingerprints, devices, infra] =
     await Promise.all([
       API.health(), API.hourly(48), API.bots(), API.signals(),
-      API.evasion(), API.behavior(), API.recent(), API.fingerprints(), API.devices()
+      API.evasion(), API.behavior(), API.recent(), API.fingerprints(), API.devices(),
+      API.infra()
     ]);
 
   renderHero(health);
@@ -1126,6 +1479,7 @@ async function refreshAll() {
   renderLiveFeed(recent);
   renderFingerprints(fingerprints);
   renderDevices(devices);
+  renderInfra(infra);
 
   countdown = REFRESH_INTERVAL;
 }

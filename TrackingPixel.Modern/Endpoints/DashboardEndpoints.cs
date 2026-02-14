@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using TrackingPixel.Configuration;
+using TrackingPixel.Services;
 
 namespace TrackingPixel.Endpoints;
 
@@ -315,6 +316,17 @@ public static class DashboardEndpoints
             var data = await QueryAsync(settings.ConnectionString,
                 $"SELECT TOP {limit} * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC");
             await WriteJsonAsync(ctx, data);
+        });
+        
+        // ============================================================================
+        // INFRASTRUCTURE HEALTH — Services, SQL, Websites, App metrics
+        // ============================================================================
+        app.MapGet("/api/dash/infra", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var infraService = ctx.RequestServices.GetRequiredService<InfraHealthService>();
+            var snapshot = await infraService.GetHealthAsync();
+            await WriteJsonAsync(ctx, snapshot);
         });
         
         // ============================================================================
