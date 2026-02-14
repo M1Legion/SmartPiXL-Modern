@@ -352,9 +352,17 @@ public sealed class InfraHealthService : IDisposable
     // IIS PRODUCTION LOG PROBE — Scan for recent errors in the log file
     // This is what would have caught "Cannot access destination table"
     // ========================================================================
+    // Time windows for error severity classification
+    private static readonly TimeSpan RecentErrorWindow = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan StaleErrorWindow = TimeSpan.FromHours(2);
+
     private RecentErrorsItem ProbeIisLogs()
     {
         var item = new RecentErrorsItem();
+        var now = DateTime.UtcNow;
+        var recentCutoff = now - RecentErrorWindow;   // 30 min ago
+        var staleCutoff = now - StaleErrorWindow;     // 2 hours ago
+
         try
         {
             // Check both IIS and dev log directories
@@ -375,39 +383,54 @@ public sealed class InfraHealthService : IDisposable
 
                 // Read recent lines (last 200 lines is enough)
                 var lines = ReadTailLines(todayFile, 200);
-                var errors = new List<string>();
+                var errorLines = new List<(string Line, DateTime? Timestamp)>();
                 foreach (var line in lines)
                 {
                     if (line.Contains("[ERROR"))
                     {
-                        errors.Add(line);
+                        DateTime? ts = null;
+                        if (line.Length > 25 && DateTime.TryParse(line[1..24], out var parsed))
+                            ts = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                        errorLines.Add((line, ts));
                     }
                 }
 
-                if (errors.Count > 0)
+                if (errorLines.Count > 0)
                 {
-                    item.TotalErrorsToday += errors.Count;
-                    // Keep last 5 distinct error messages per source
-                    var distinct = errors
-                        .Select(e => ExtractErrorMessage(e))
-                        .Distinct()
-                        .TakeLast(5)
-                        .Select(msg => new ErrorEntry { Source = source, Message = msg, Count = errors.Count(e => ExtractErrorMessage(e) == msg) })
-                        .ToList();
-                    item.Errors.AddRange(distinct);
+                    item.TotalErrorsToday += errorLines.Count;
+                    item.RecentErrorCount += errorLines.Count(e => e.Timestamp.HasValue && e.Timestamp.Value >= recentCutoff);
 
-                    // Extract the most recent error timestamp
-                    var lastErr = errors.Last();
-                    if (lastErr.Length > 25 && DateTime.TryParse(lastErr[1..24], out var ts))
-                    {
-                        var tsUtc = DateTime.SpecifyKind(ts, DateTimeKind.Utc);
-                        if (!item.LastErrorUtc.HasValue || tsUtc > item.LastErrorUtc.Value)
-                            item.LastErrorUtc = tsUtc;
-                    }
+                    // Keep last 5 distinct error messages per source, with per-entry timestamps
+                    var grouped = errorLines
+                        .GroupBy(e => ExtractErrorMessage(e.Line))
+                        .TakeLast(5)
+                        .Select(g =>
+                        {
+                            var lastSeen = g.Max(e => e.Timestamp);
+                            var recentCount = g.Count(e => e.Timestamp.HasValue && e.Timestamp.Value >= recentCutoff);
+                            return new ErrorEntry
+                            {
+                                Source = source,
+                                Message = g.Key,
+                                Count = g.Count(),
+                                RecentCount = recentCount,
+                                LastSeenUtc = lastSeen,
+                                IsRecent = lastSeen.HasValue && lastSeen.Value >= recentCutoff,
+                                IsStale = lastSeen.HasValue && lastSeen.Value < staleCutoff,
+                            };
+                        })
+                        .ToList();
+                    item.Errors.AddRange(grouped);
+
+                    // Track the most recent error timestamp
+                    var maxTs = errorLines.Where(e => e.Timestamp.HasValue).MaxBy(e => e.Timestamp);
+                    if (maxTs.Timestamp.HasValue && (!item.LastErrorUtc.HasValue || maxTs.Timestamp.Value > item.LastErrorUtc.Value))
+                        item.LastErrorUtc = maxTs.Timestamp;
                 }
             }
 
             item.HasErrors = item.TotalErrorsToday > 0;
+            item.HasRecentErrors = item.RecentErrorCount > 0;
         }
         catch (Exception ex)
         {
@@ -455,20 +478,27 @@ public sealed class InfraHealthService : IDisposable
         DataFlowHealthItem dataFlow,
         RecentErrorsItem recentErrors)
     {
-        // Critical failures → RED
+        // ================================================================
+        // CRITICAL — something is broken RIGHT NOW and needs intervention
+        // Only RECENT errors (last 30 min) can trigger critical.
+        // Old/stale errors from earlier today are informational only.
+        // ================================================================
         if (!sql.IsConnected) return "critical";
         if (services.Any(s => s.Critical && !s.IsRunning)) return "critical";
         if (websites.Any(w => w.Critical && !w.IsHealthy)) return "critical";
-        // Data not flowing + recent errors = something is very wrong (exactly today's bug)
-        if (!dataFlow.IsFlowing && recentErrors.HasErrors) return "critical";
-        // Repeated write errors = critical even if data was flowing before
-        if (recentErrors.TotalErrorsToday >= 5) return "critical";
+        // Data stopped + fresh errors = active failure
+        if (!dataFlow.IsFlowing && recentErrors.HasRecentErrors) return "critical";
+        // Sustained recent write errors = active failure
+        if (recentErrors.RecentErrorCount >= 5) return "critical";
 
-        // Non-critical warnings → YELLOW
+        // ================================================================
+        // DEGRADED — something warrants attention but isn't an emergency
+        // ================================================================
         if (services.Any(s => !s.IsRunning)) return "degraded";
         if (websites.Any(w => !w.IsHealthy)) return "degraded";
         if (!dataFlow.IsFlowing) return "degraded";
-        if (recentErrors.HasErrors) return "degraded";
+        // Recent errors (last 30 min) → degraded; old errors are just info
+        if (recentErrors.HasRecentErrors) return "degraded";
         if (app.WorkingSetMB > 500) return "degraded";
         if (dataFlow.QueueDepth > 100) return "degraded";
         if (dataFlow.EtlLag > 100) return "degraded";
@@ -570,7 +600,11 @@ public sealed class DataFlowHealthItem
 public sealed class RecentErrorsItem
 {
     public bool HasErrors { get; set; }
+    /// <summary>True if any errors occurred within the recent window (last 30 min).</summary>
+    public bool HasRecentErrors { get; set; }
     public int TotalErrorsToday { get; set; }
+    /// <summary>Error count within the recent window (last 30 min). Only this affects severity.</summary>
+    public int RecentErrorCount { get; set; }
     public DateTime? LastErrorUtc { get; set; }
     public List<ErrorEntry> Errors { get; set; } = [];
     public string? ScanError { get; set; }
@@ -581,4 +615,12 @@ public sealed class ErrorEntry
     public string Source { get; set; } = "";
     public string Message { get; set; } = "";
     public int Count { get; set; }
+    /// <summary>How many of this error occurred in the recent window (last 30 min).</summary>
+    public int RecentCount { get; set; }
+    /// <summary>When this specific error was last seen.</summary>
+    public DateTime? LastSeenUtc { get; set; }
+    /// <summary>True if this error occurred within the last 30 minutes.</summary>
+    public bool IsRecent { get; set; }
+    /// <summary>True if all occurrences are older than 2 hours — likely already resolved.</summary>
+    public bool IsStale { get; set; }
 }

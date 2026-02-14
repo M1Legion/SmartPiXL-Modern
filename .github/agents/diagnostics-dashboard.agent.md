@@ -1,7 +1,7 @@
 ---
 name: SmartPiXL Diagnostics Dashboard
 description: Builds internal diagnostics web UI for viewing platform health, fingerprinting metrics, bot detection, and evasion analysis. Not public-facing.
-tools: ["read", "edit", "execute", "search"]
+tools: [vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, vscode/extensions, execute/runNotebookCell, execute/testFailure, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/runInTerminal, read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, vscode.mermaid-chat-features/renderMermaidDiagram, ms-mssql.mssql/mssql_show_schema, ms-mssql.mssql/mssql_connect, ms-mssql.mssql/mssql_disconnect, ms-mssql.mssql/mssql_list_servers, ms-mssql.mssql/mssql_list_databases, ms-mssql.mssql/mssql_get_connection_details, ms-mssql.mssql/mssql_change_database, ms-mssql.mssql/mssql_list_tables, ms-mssql.mssql/mssql_list_schemas, ms-mssql.mssql/mssql_list_views, ms-mssql.mssql/mssql_list_functions, ms-mssql.mssql/mssql_run_query, todo]
 ---
 
 # SmartPiXL Diagnostics Dashboard Builder

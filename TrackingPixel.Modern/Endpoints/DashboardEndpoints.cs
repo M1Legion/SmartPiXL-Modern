@@ -351,8 +351,28 @@ public static class DashboardEndpoints
             }
         });
         
-        // Tron-themed dashboard v2
+        // Tron Operations dashboard (DevOps daily driver)
         app.MapGet("/tron", async (HttpContext ctx, IWebHostEnvironment env) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var path = Path.Combine(env.WebRootPath ?? "wwwroot", "tron.html");
+            if (!File.Exists(path))
+                path = Path.Combine(env.ContentRootPath, "wwwroot", "tron.html");
+            
+            if (File.Exists(path))
+            {
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.SendFileAsync(path);
+            }
+            else
+            {
+                ctx.Response.StatusCode = 404;
+                await ctx.Response.WriteAsync("Tron dashboard not found.");
+            }
+        });
+        
+        // Tron Analytics dashboard (SPA — same file, JS handles view switch)
+        app.MapGet("/tron/analytics", async (HttpContext ctx, IWebHostEnvironment env) =>
         {
             if (!RequireLoopback(ctx)) return;
             var path = Path.Combine(env.WebRootPath ?? "wwwroot", "tron.html");
