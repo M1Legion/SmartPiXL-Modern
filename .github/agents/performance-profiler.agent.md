@@ -172,7 +172,7 @@ INCLUDE (ReceivedAt, BotScore);
 ## Performance Analysis Commands
 
 Ask me to:
-- "Profile the Tier5 script execution"
+- "Profile the pixel script execution"
 - "Find slow SQL queries in the schema"
 - "Optimize the dashboard API endpoint"
 - "Reduce script bundle size"

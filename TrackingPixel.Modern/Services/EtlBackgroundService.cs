@@ -6,7 +6,7 @@ namespace TrackingPixel.Services;
 
 /// <summary>
 /// Background service that runs ETL processing every 60 seconds.
-/// Calls dbo.usp_ParseNewHits to move data from PiXL_Test → PiXL_Parsed
+/// Calls ETL.usp_ParseNewHits to move data from PiXL.Test → PiXL.Parsed
 /// and populates dimension tables (PiXL_Device, PiXL_IP, PiXL_Visit).
 /// </summary>
 public sealed class EtlBackgroundService : BackgroundService
@@ -60,15 +60,22 @@ public sealed class EtlBackgroundService : BackgroundService
         await conn.OpenAsync(ct);
         
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "dbo.usp_ParseNewHits";
+        cmd.CommandText = "ETL.usp_ParseNewHits";
         cmd.CommandType = System.Data.CommandType.StoredProcedure;
         cmd.CommandTimeout = 300; // 5 minutes max for large batches
         
-        var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
-        
-        if (rowsAffected > 0)
+        // Use ExecuteReader to consume the proc's result set (RowsParsed, FromId, ToId).
+        // ExecuteNonQuery ignores result sets and returns -1 with SET NOCOUNT ON,
+        // which silently swallows errors that arrive after the first result batch.
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
         {
-            _logger.Info($"ETL processed {rowsAffected} rows");
+            var rowsParsed = reader.GetInt32(0);    // RowsParsed
+            var fromId = reader.GetInt32(1);         // FromId
+            var toId = reader.GetInt32(2);           // ToId
+            
+            if (rowsParsed > 0)
+                _logger.Info($"ETL parsed {rowsParsed} rows (Id {fromId}–{toId})");
         }
     }
 }

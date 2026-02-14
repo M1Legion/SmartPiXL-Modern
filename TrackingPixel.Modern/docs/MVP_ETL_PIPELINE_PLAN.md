@@ -19,10 +19,11 @@
   - [3.2 Table Lineage](#32-table-lineage)
   - [3.3 Service Architecture](#33-service-architecture)
 - [4. Implementation Plan — Ordered Steps](#4-implementation-plan--ordered-steps)
+  - [Phase 0: Schema Creation & Table Migration](#phase-0-schema-creation--table-migration)
   - [Phase 1: Foundation — Configuration Tables](#phase-1-foundation--configuration-tables)
   - [Phase 1B: Normalized Dimension & Fact Tables](#phase-1b-normalized-dimension--fact-tables)
   - [Phase 2: SQLCLR Assembly — High-Performance Functions](#phase-2-sqlclr-assembly--high-performance-functions)
-  - [Phase 3: Schema Extensions — Client Params in PiXL_Parsed](#phase-3-schema-extensions--client-params-in-pixl_parsed)
+  - [Phase 3: Schema Extensions — Client Params in PiXL.Parsed](#phase-3-schema-extensions--client-params-in-pixlparsed)
   - [Phase 4: ETL Extension — Device, IP, Visit & Client Params](#phase-4-etl-extension--device-ip-visit--client-params)
   - [Phase 5: AutoConsumer Index — Enable Email Matching](#phase-5-autoconsumer-index--enable-email-matching)
   - [Phase 6: Match Stored Procedure — Identity Resolution](#phase-6-match-stored-procedure--identity-resolution)
@@ -44,13 +45,13 @@ The boss sold a live ETL pipeline before we spec'd it out. A client (CompanyID 1
 
 **What we're building:** An end-to-end pipeline with a **normalized relational schema** that:
 1. Extracts client-specific URL parameters (email, hid, etc.) from the host page via our JavaScript pixel
-2. Ingests them alongside our full fingerprint data into the existing raw table (`PiXL_Test`)
-3. Parses and materializes them into `PiXL_Parsed` (extending the existing ETL)
-4. Computes a **composite device fingerprint hash** (SHA-256 of the top 5 entropy signals) and upserts into `PiXL_Device` — a **platform-wide** device dimension table
-5. Upserts unique IP addresses into `PiXL_IP` — a **platform-wide** IP dimension table with classification metadata
-6. Creates a `PiXL_Visit` fact row (1:1 with `PiXL_Parsed`) that bridges devices, IPs, and client params to each hit
+2. Ingests them alongside our full fingerprint data into the existing raw table (`PiXL.Test`)
+3. Parses and materializes them into `PiXL.Parsed` (extending the existing ETL)
+4. Computes a **composite device fingerprint hash** (SHA-256 of the top 5 entropy signals) and upserts into `PiXL.Device` — a **platform-wide** device dimension table
+5. Upserts unique IP addresses into `PiXL.IP` — a **platform-wide** IP dimension table with classification metadata
+6. Creates a `PiXL.Visit` fact row (1:1 with `PiXL.Parsed`) that bridges devices, IPs, and client params to each hit
 7. Matches emails (and eventually IPs, geo) against `AutoUpdate.dbo.AutoConsumer` using **IndividualKey** (for email/IP matches) and **AddressKey** (for geo matches) — NOT RecordID
-8. Stores identity resolution results in `PiXL_Match` with FKs to `PiXL_Device`, `PiXL_IP`, and `PiXL_Visit`
+8. Stores identity resolution results in `PiXL.Match` with FKs to `PiXL.Device`, `PiXL.IP`, and `PiXL.Visit`
 
 **What we're NOT building (yet):** Client-facing dashboard, billing integration, file delivery mechanism, geo matching (needs geo data not yet in pipeline), CRM push/webhook. Output format is TBD — the boss hasn't specified what the client receives.
 
@@ -66,18 +67,18 @@ The boss sold a live ETL pipeline before we spec'd it out. A client (CompanyID 1
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Tier 5 JS Script | `Scripts/Tier5Script.cs` (1430 lines) | Collecting 158+ fingerprint signals |
+| Pixel JS Script | `Scripts/PiXLScript.cs` (1430 lines) | Collecting 158+ fingerprint signals |
 | Pixel endpoint | `Endpoints/TrackingEndpoints.cs` — `GET /{**path}` | Capturing _SMART.GIF requests |
 | JS script endpoint | `Endpoints/TrackingEndpoints.cs` — `GET /js/{companyId}/{pixlId}.js` | Serving dynamic scripts |
-| Raw storage | `dbo.PiXL_Test` (9 columns) | 963 rows from test traffic |
-| Parsed storage | `dbo.PiXL_Parsed` (~175 columns) | 963 rows materialized |
-| ETL proc | `dbo.usp_ParseNewHits` (8-phase, watermark-based) | Running every 60s via `EtlBackgroundService` |
+| Raw storage | `PiXL.Test` (9 columns) | 963 rows from test traffic |
+| Parsed storage | `PiXL.Parsed` (~175 columns) | 963 rows materialized |
+| ETL proc | `ETL.usp_ParseNewHits` (8-phase, watermark-based) | Running every 60s via `EtlBackgroundService` |
 | `GetQueryParam` UDF | Pure T-SQL scalar function | ~170 calls per row across 8 phases |
-| `PiXL_Config` table | Per-PiXL collection/exclusion rules | Schema exists, 0 rows |
+| `PiXL.Config` table | Per-PiXL collection/exclusion rules | Schema exists, 0 rows |
 | Server-side enrichment | `FingerprintStabilityService`, `IpBehaviorService` | Active — appends `_srv_*` params |
 | Write pipeline | `DatabaseWriterService` — `Channel<T>` → `SqlBulkCopy` | Batched, async, non-blocking |
-| Dashboard views | 10+ `vw_Dash_*` views on `PiXL_Parsed` | Operational |
-| ETL watermark | `dbo.ETL_Watermark` | LastProcessedId = 100916 |
+| Dashboard views | 10+ `vw_Dash_*` views on `PiXL.Parsed` | Operational |
+| ETL watermark | `ETL.Watermark` | LastProcessedId = 100916 |
 
 **Available on G2_Local (not SmartPixl DB):**
 
@@ -87,7 +88,7 @@ The boss sold a live ETL pipeline before we spec'd it out. A client (CompanyID 1
 | AutoConsumer indexes | Clustered on `RecordID` | **No index on EMail** — this is our bottleneck |
 | CLR support | `sys.configurations` | CLR enabled, SQL Server 2019 Enterprise |
 
-**Current test data in PiXL_Test/PiXL_Parsed (963 rows):**
+**Current test data in PiXL.Test/PiXL.Parsed (963 rows):**
 
 | CompanyID | PiXLID | Hits | Date Range |
 |-----------|--------|------|------------|
@@ -104,7 +105,7 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
 |-----|--------|----------|
 | No Company / PiXL tables | Can't associate a CompanyID with configuration, billing, or status | **CRITICAL** |
 | No client-param extraction in JS | Host page URL params (email, hid, etc.) are never captured | **CRITICAL** |
-| No client-param columns in PiXL_Parsed | Even if captured, they wouldn't be materialized | **CRITICAL** |
+| No client-param columns in PiXL.Parsed | Even if captured, they wouldn't be materialized | **CRITICAL** |
 | No device dimension table | No way to track unique devices across the platform or link fingerprints to visitors | **CRITICAL** |
 | No IP dimension table | No way to track unique IPs with classification metadata or link IPs to visitors | **CRITICAL** |
 | No visit fact table | No relational bridge between hits, devices, IPs, and client params | **CRITICAL** |
@@ -120,15 +121,15 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
 
 1. **AutoConsumer is local** — exists in `AutoUpdate` DB on the same G2_Local SQL Server instance. Cross-database queries are fast. We can add indexes but not change the schema.
 2. **IndividualKey for email/IP matches, AddressKey for geo** — AutoConsumer uses `IndividualKey` (varchar(35), 343M distinct, ~1.22 AC rows per key) to identify a person and `AddressKey` (varchar(35), 118M distinct, ~3.56 AC rows per key) to identify a household. We match against these — NOT `RecordID`. AC is denormalized with duplicates across email and VIN vectors; IndividualKey groups those duplicates.
-3. **Normalized schema with 4 new tables** — `PiXL_Device` (global device dim), `PiXL_IP` (global IP dim), `PiXL_Visit` (1:1 fact table), `PiXL_Match` (identity resolution with FKs to device/IP/visit). Maximum normalization — same device or IP across companies shares one row.
-4. **Device hash computed in SQL** — SHA-256 of top 5 entropy fields (Canvas + Fonts + GPU + WebGL + Audio) computed in Phase 9 of `usp_ParseNewHits` via `HASHBYTES`. PiXL_Device is lean (hash + metadata only); join back to PiXL_Parsed for component fields.
-5. **PiXL_Visit as the relational fact table** — 1:1 with PiXL_Parsed (same PK = SourceId), carries FKs to PiXL_Device and PiXL_IP plus ClientParamsJson. PiXL_Parsed stays as the immutable 175-column warehouse; PiXL_Visit is the lightweight relational bridge.
+3. **Normalized schema with 4 new tables** — `PiXL.Device` (global device dim), `PiXL.IP` (global IP dim), `PiXL.Visit` (1:1 fact table), `PiXL.Match` (identity resolution with FKs to device/IP/visit). Maximum normalization — same device or IP across companies shares one row.
+4. **Device hash computed in SQL** — SHA-256 of top 5 entropy fields (Canvas + Fonts + GPU + WebGL + Audio) computed in Phase 9 of `ETL.usp_ParseNewHits` via `HASHBYTES`. PiXL.Device is lean (hash + metadata only); join back to PiXL.Parsed for component fields.
+5. **PiXL.Visit as the relational fact table** — 1:1 with PiXL.Parsed (same PK = SourceId), carries FKs to PiXL.Device and PiXL.IP plus ClientParamsJson. PiXL.Parsed stays as the immutable 175-column warehouse; PiXL.Visit is the lightweight relational bridge.
 6. **Client params in JS** — extracted from `location.search` on the host page, prefixed with `_cp_` to avoid collisions with our 158 built-in fingerprint param names.
 7. **Config-driven param lists** — stored in the PiXL table per-pixel, cached in memory by a new C# service. Zero DB hits on the hot path.
 8. **Lean new tables** — Company and PiXL tables are purpose-built for the new platform, not copies of the 38-col / 46-col old schemas.
 9. **Email-first matching for this client** — fingerprint-based and geo-based matching are future phases. Email is deterministic and the client provides it.
-10. **No staging tables** — the old platform's 4-table staging rotation was a workaround for blocking IIS writes. Our async `Channel<T>` → `SqlBulkCopy` pipeline doesn't need it. `PiXL_Test` IS our raw table.
-11. **No CRM_Match_Dates equivalent** — `PiXL_Visit` is the per-hit fact table. `PiXL_Match` links to visits via `FirstSourceId`/`LatestSourceId`, and all historical hits live in `PiXL_Parsed` (clustered on `ReceivedAt`).
+10. **No staging tables** — the old platform's 4-table staging rotation was a workaround for blocking IIS writes. Our async `Channel<T>` → `SqlBulkCopy` pipeline doesn't need it. `PiXL.Test` IS our raw table.
+11. **No CRM_Match_Dates equivalent** — `PiXL.Visit` is the per-hit fact table. `PiXL.Match` links to visits via `FirstSourceId`/`LatestSourceId`, and all historical hits live in `PiXL.Parsed` (clustered on `ReceivedAt`).
 12. **SQLCLR for performance** — `SAFE` permissions where possible, `UNSAFE` only if we go full pointer-math. Assembly signed with a strong name key.
 13. **Test data stays** — the 963 existing rows remain untouched.
 
@@ -144,7 +145,7 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
         │
         ▼
  ┌─────────────────────────────────────────────────────┐
- │  Tier 5 JavaScript (served by /js/12800/1.js)       │
+ │  Pixel JavaScript (served by /js/12800/1.js)        │
  │                                                     │
  │  1. Collects 158 fingerprint signals (existing)     │
  │  2. NEW: Reads PiXL's ClientParams list             │
@@ -174,85 +175,85 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
  │  DatabaseWriterService (Background, existing)       │
  │                                                     │
  │  Channel<TrackingData> → batch 100 → SqlBulkCopy   │
- │  → dbo.PiXL_Test (9 columns, raw ingest)           │
+ │  → PiXL.Test (9 columns, raw ingest)               │
  │     QueryString carries ALL params including _cp_*  │
  └──────────────────────┬──────────────────────────────┘
                         │
                         ▼
  ┌─────────────────────────────────────────────────────┐
- │  EtlBackgroundService → usp_ParseNewHits            │
+ │  EtlBackgroundService → ETL.usp_ParseNewHits        │
  │  (Every 60s, batch of 50K, existing + NEW phases)   │
  │                                                     │
  │  Phase 1-8:  Existing fingerprint parsing (UNCHGD)  │
  │  Phase 9  (NEW): Compute DeviceHash                 │
  │    → HASHBYTES('SHA2_256', Canvas|Fonts|GPU|WGL|Aud)│
- │  Phase 10 (NEW): MERGE → dbo.PiXL_Device           │
+ │  Phase 10 (NEW): MERGE → PiXL.Device               │
  │    → Upsert device by hash, get DeviceId            │
- │  Phase 11 (NEW): MERGE → dbo.PiXL_IP               │
+ │  Phase 11 (NEW): MERGE → PiXL.IP                   │
  │    → Upsert IP, get IpId                            │
  │  Phase 12 (NEW): Client param extraction            │
  │    → Scan _cp_* from QueryString → JSON             │
- │  Phase 13 (NEW): INSERT → dbo.PiXL_Visit            │
+ │  Phase 13 (NEW): INSERT → PiXL.Visit               │
  │    → 1:1 fact row with DeviceId, IpId, ClientParams │
  │                                                     │
- │  → dbo.PiXL_Parsed (~178 cols, immutable warehouse) │
- │  → dbo.PiXL_Device (global device dimension)        │
- │  → dbo.PiXL_IP     (global IP dimension)            │
- │  → dbo.PiXL_Visit  (relational fact table)          │
+ │  → PiXL.Parsed  (~178 cols, immutable warehouse)    │
+ │  → PiXL.Device  (global device dimension)           │
+ │  → PiXL.IP      (global IP dimension)               │
+ │  → PiXL.Visit   (relational fact table)             │
  └──────────────────────┬──────────────────────────────┘
                         │
                         ▼
  ┌─────────────────────────────────────────────────────┐
- │  MatchBackgroundService → usp_MatchVisits (NEW)     │
+ │  MatchBackgroundService → ETL.usp_MatchVisits (NEW)  │
  │  (Every 120s, independent watermark)                │
  │                                                     │
- │  1. Reads PiXL_Visit where MatchEmail IS NOT NULL   │
+ │  1. Reads PiXL.Visit where MatchEmail IS NOT NULL   │
  │  2. Normalizes email (clr_NormalizeEmail)            │
  │  3. Joins AutoUpdate.dbo.AutoConsumer on EMail       │
  │     → Gets IndividualKey (for email/IP matches)     │
  │     → Gets AddressKey (for future geo matches)      │
- │  4. MERGE into PiXL_Match:                          │
+ │  4. MERGE into PiXL.Match:                          │
  │     • INSERT new matches (with DeviceId, IpId FKs)  │
  │     • UPDATE existing (HitCount, LastSeen)          │
  │                                                     │
- │  → dbo.PiXL_Match (identity resolution w/ FKs)      │
+ │  → PiXL.Match (identity resolution w/ FKs)          │
  └─────────────────────────────────────────────────────┘
 ```
 
 ### 3.2 Table Lineage
 
 ```
- dbo.PiXL_Test (raw ingest — SqlBulkCopy target)
+ PiXL.Test (raw ingest — SqlBulkCopy target)
        │
-       │  usp_ParseNewHits (watermark-based, 50K batch)
+       │  ETL.usp_ParseNewHits (watermark-based, 50K batch)
        │  Phases 1-8: parse fingerprints
        │  Phases 9-13: device, IP, client params, visit
        │
-       ├─────► dbo.PiXL_Parsed (materialized — ~178 typed columns, immutable warehouse)
+       ├─────► PiXL.Parsed (materialized — ~178 typed columns, immutable warehouse)
        │
-       ├─────► dbo.PiXL_Device (global device dimension — one row per DeviceHash)
+       ├─────► PiXL.Device (global device dimension — one row per DeviceHash)
        │          │  DeviceHash = SHA2_256(Canvas|Fonts|GPU|WebGL|Audio)
        │          │  Lean: hash + FirstSeen + LastSeen + HitCount
-       │          │  FK back to PiXL_Parsed for component fields
+       │          │  FK back to PiXL.Parsed for component fields
        │          │
-       ├─────► dbo.PiXL_IP (global IP dimension — one row per IPAddress)
+       ├─────► PiXL.IP (global IP dimension — one row per IPAddress)
        │          │  IPAddress + IpType + IsDatacenter + Provider
        │          │  FirstSeen + LastSeen + HitCount
        │          │
-       └─────► dbo.PiXL_Visit (fact table — 1:1 with PiXL_Parsed)
-                  │  SourceId (PK, same as PiXL_Parsed)
-                  │  DeviceId FK → PiXL_Device
-                  │  IpId FK → PiXL_IP
+       └─────► PiXL.Visit (fact table — 1:1 with PiXL.Parsed)
+                  │  SourceId (PK, same as PiXL.Parsed)
+                  │  DeviceId FK → PiXL.Device
+                  │  IpId FK → PiXL.IP
                   │  ClientParamsJson + MatchEmail (persisted computed)
                   │
-                  │  usp_MatchVisits (watermark-based, 10K batch)
+                  │  ETL.usp_MatchVisits (watermark-based, 10K batch)
                   │
-                  └─────► dbo.PiXL_Match (identity resolution)
+                  └─────► PiXL.Match (identity resolution)
                              │  IndividualKey → AutoConsumer (email/IP matches)
                              │  AddressKey → AutoConsumer (geo matches)
-                             │  DeviceId FK → PiXL_Device
-                             │  IpId FK → PiXL_IP
-                             │  FirstSourceId/LatestSourceId FK → PiXL_Visit
+                             │  DeviceId FK → PiXL.Device
+                             │  IpId FK → PiXL.IP
+                             │  FirstSourceId/LatestSourceId FK → PiXL.Visit
                              │
                              │  Cross-DB lookup
                              └─────► AutoUpdate.dbo.AutoConsumer (421M rows)
@@ -262,10 +263,10 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
 
 
  Supporting / Config:
- ┌────────────────┐   ┌────────────┐   ┌──────────────────┐
- │ dbo.Company    │──▶│ dbo.PiXL   │──▶│ dbo.PiXL_Config  │
- │ (client info)  │   │ (pixel cfg)│   │ (collection rules)│
- └────────────────┘   └────────────┘   └──────────────────┘
+ ┌────────────────┐   ┌──────────────┐   ┌──────────────────┐
+ │ PiXL.Company   │──▶│ PiXL.Pixel   │──▶│ PiXL.Config      │
+ │ (client info)  │   │ (pixel cfg)  │   │ (collection rules)│
+ └────────────────┘   └──────────────┘   └──────────────────┘
 ```
 
 ### 3.3 Service Architecture
@@ -287,8 +288,8 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
  │                                                             │
  │  DatabaseWriterService ........... Continuous drain loop    │
  │  DatacenterIpService ............. Weekly CIDR refresh      │
- │  EtlBackgroundService ............ usp_ParseNewHits q60s   │
- │  MatchBackgroundService (NEW) .... usp_MatchVisits q120s   │
+ │  EtlBackgroundService ............ ETL.usp_ParseNewHits q60s   │
+ │  MatchBackgroundService (NEW) .... ETL.usp_MatchVisits q120s   │
  │  PiXLConfigCacheService (NEW) .... PiXL table refresh q5m  │
  └─────────────────────────────────────────────────────────────┘
 ```
@@ -301,13 +302,71 @@ The phases below are ordered by dependency. Each phase can be validated independ
 
 ---
 
+### Phase 0: Schema Creation & Table Migration
+
+**Migration script:** `SQL/17B_CreateSchemas.sql`
+
+This phase creates the `PiXL` and `ETL` schemas and moves existing `dbo` objects into them. Must run **before** all other MVP migrations. Uses `ALTER SCHEMA ... TRANSFER` which is a metadata-only operation — instant, preserves all data, indexes, constraints, and permissions.
+
+#### Step 0.1: Create Schemas
+
+```sql
+CREATE SCHEMA PiXL AUTHORIZATION dbo;
+CREATE SCHEMA ETL AUTHORIZATION dbo;
+```
+
+#### Step 0.2: Transfer Existing Tables and Rename
+
+`ALTER SCHEMA TRANSFER` moves an object to a new schema but **keeps its original object name**. A follow-up `sp_rename` strips the now-redundant prefix so we get clean dot-notation names (e.g. `PiXL.Test` instead of `PiXL.PiXL_Test`).
+
+```sql
+-- 1. Move to new schemas (metadata-only, instant)
+ALTER SCHEMA PiXL TRANSFER dbo.PiXL_Test;
+ALTER SCHEMA PiXL TRANSFER dbo.PiXL_Parsed;
+ALTER SCHEMA PiXL TRANSFER dbo.PiXL_Config;
+ALTER SCHEMA ETL  TRANSFER dbo.ETL_Watermark;
+ALTER SCHEMA ETL  TRANSFER dbo.usp_ParseNewHits;
+
+-- 2. Strip now-redundant prefixes
+EXEC sp_rename 'PiXL.PiXL_Test',    'Test',            'OBJECT';
+EXEC sp_rename 'PiXL.PiXL_Parsed',  'Parsed',          'OBJECT';
+EXEC sp_rename 'PiXL.PiXL_Config',  'Config',          'OBJECT';
+EXEC sp_rename 'ETL.ETL_Watermark',  'Watermark',       'OBJECT';
+-- ETL.usp_ParseNewHits has no ETL_ prefix — no rename needed
+```
+
+#### Step 0.3: Update Dependent Objects
+
+After the transfers, all objects that reference the old `dbo.*` names must be updated:
+
+1. **`ETL.usp_ParseNewHits`** — Already transferred to ETL schema. Internal references to `dbo.PiXL_Test` and `dbo.PiXL_Parsed` must be updated to `PiXL.Test` and `PiXL.Parsed` via `ALTER PROCEDURE`.
+2. **Dashboard views** — All 10+ `vw_Dash_*` views reference `dbo.PiXL_Parsed` and `dbo.ETL_Watermark`. Each must be `ALTER VIEW`'d to use the new schema-qualified names.
+3. **`dbo.GetQueryParam` UDF** — Stays in `dbo` (generic utility). No change needed since the ETL proc references it by full name.
+
+#### Step 0.4: Update C# Code References
+
+| File | Old Reference | New Reference |
+|------|---------------|---------------|
+| `DatabaseWriterService.cs` | `dbo.PiXL_Test` (SqlBulkCopy destination) | `PiXL.Test` |
+| `EtlBackgroundService.cs` | `EXEC dbo.usp_ParseNewHits` | `EXEC ETL.usp_ParseNewHits` |
+| `DashboardEndpoints.cs` | `vw_Dash_*` queries (views updated in Step 0.3) | No change needed if views keep same names |
+
+**Validation after Step 0:**
+- `SELECT TOP 1 * FROM PiXL.Test` — data intact
+- `SELECT TOP 1 * FROM PiXL.Parsed` — data intact
+- `SELECT * FROM ETL.Watermark` — watermark intact
+- `EXEC ETL.usp_ParseNewHits @BatchSize = 1` — proc runs successfully
+- Hit `/tron` dashboard — verify all panels still load
+
+---
+
 ### Phase 1: Foundation — Configuration Tables
 
 **Migration script:** `SQL/18_CompanyAndPiXLTables.sql`
 
 This phase creates the core configuration tables that everything else references. Must be done first because all downstream tables and services depend on Company/PiXL existing.
 
-#### Step 1.1: Create `dbo.Company`
+#### Step 1.1: Create `PiXL.Company`
 
 Lean schema — just enough to identify and manage a client. Fields can be added as the frontend is built.
 
@@ -331,9 +390,9 @@ Columns:
 
 **14 columns.** Down from the old platform's 38. We dropped: TaxId, NAICS/SIC codes, ParentCompanyId, billing hierarchy, P&L columns, portal URL, sales rep, ramp-up period — all frontend/billing concerns that don't exist yet.
 
-#### Step 1.2: Create `dbo.PiXL`
+#### Step 1.2: Create `PiXL.Pixel`
 
-The core pixel configuration table. The critical new column here is `ClientParams`.
+The core pixel configuration table. Named `Pixel` under the `PiXL` schema to avoid the awkward `PiXL.PiXL`. The critical new column here is `ClientParams`.
 
 ```
 Columns:
@@ -353,7 +412,7 @@ Columns:
 
 Constraints:
   PRIMARY KEY (CompanyId, PiXLId)
-  FOREIGN KEY (CompanyId) → dbo.Company(CompanyID)
+  FOREIGN KEY (CompanyId) → PiXL.Company(CompanyID)
 ```
 
 **13 columns.** Down from the old platform's 46. We dropped: SmartPiXL/PiXLNew/PiXLLegacy paths, output paths, income/networth/marital/children/gender filters, SuspendedId, user assignment, latitude/longitude, policy URL — all legacy concerns.
@@ -362,9 +421,9 @@ Constraints:
 
 Why not a separate table for client params? Because the data is tiny, static, and always read as a whole set per PiXL. A join to a child table adds complexity for zero benefit at this scale.
 
-#### Step 1.3: Create `dbo.ETL_MatchWatermark`
+#### Step 1.3: Create `ETL.MatchWatermark`
 
-Same pattern as the existing `ETL_Watermark` table but for the match stage. Separate table (not a row in ETL_Watermark) to avoid any contention between the two ETL processes.
+Same pattern as the existing `ETL.Watermark` table but for the match stage. Separate table (not a row in ETL.Watermark) to avoid any contention between the two ETL processes.
 
 ```
 Columns:
@@ -375,7 +434,7 @@ Columns:
   RowsMatched         BIGINT        NOT NULL  DEFAULT 0   (** extra counter **)
 ```
 
-Seed: `INSERT INTO dbo.ETL_MatchWatermark VALUES ('MatchVisits', 0, NULL, 0, 0);`
+Seed: `INSERT INTO ETL.MatchWatermark VALUES ('MatchVisits', 0, NULL, 0, 0);`
 
 The extra `RowsMatched` counter tracks how many rows actually resolved to an AutoConsumer record, vs. total rows processed. Useful for monitoring match rates.
 
@@ -387,9 +446,9 @@ The extra `RowsMatched` counter tracks how many rows actually resolved to an Aut
 
 This phase creates the four normalized tables that form the relational star schema. These tables depend on Phase 1 (Company/PiXL for FK references) and must exist before the ETL extensions in Phase 4 can populate them.
 
-#### Step 1B.1: Create `dbo.PiXL_Device` — Global Device Dimension
+#### Step 1B.1: Create `PiXL.Device` — Global Device Dimension
 
-**Platform-wide**, one row per unique device fingerprint hash, regardless of which company or pixel it came from. By design, the same physical device appearing across multiple clients shares one `PiXL_Device` row.
+**Platform-wide**, one row per unique device fingerprint hash, regardless of which company or pixel it came from. By design, the same physical device appearing across multiple clients shares one `PiXL.Device` row.
 
 ```
 Columns:
@@ -404,10 +463,10 @@ Indexes:
   CIX_PiXL_Device        UNIQUE CLUSTERED on (DeviceHash)    — the natural key + MERGE target
 ```
 
-**Lean by design.** Only 5 columns. The component fingerprint fields that form the hash (CanvasFingerprint, DetectedFonts, GPURenderer, WebGLFingerprint, AudioFingerprintHash) live in `PiXL_Parsed`. To see what a device looks like, join `PiXL_Visit.DeviceId → PiXL_Device → PiXL_Visit.SourceId → PiXL_Parsed`.
+**Lean by design.** Only 5 columns. The component fingerprint fields that form the hash (CanvasFingerprint, DetectedFonts, GPURenderer, WebGLFingerprint, AudioFingerprintHash) live in `PiXL.Parsed`. To see what a device looks like, join `PiXL.Visit.DeviceId → PiXL.Device → PiXL.Visit.SourceId → PiXL.Parsed`.
 
 **Why these 5 signals for the hash:**
-From real-world entropy analysis (n=252 Tier 5 records):
+From real-world entropy analysis (n=252 pixel records):
 | Signal | Distinct Values | Entropy |
 |--------|:-:|:-:|
 | CanvasFingerprint | 68 | ~6.1 bits |
@@ -418,7 +477,7 @@ From real-world entropy analysis (n=252 Tier 5 records):
 
 Combined uniqueness: These 5 produce ~85%+ identification rate from test data. Dead signals excluded (MathFingerprint = 0 bits, CSSFontVariantHash ≈ 0.03 bits).
 
-**Hash computation (SQL, Phase 9 of usp_ParseNewHits):**
+**Hash computation (SQL, Phase 9 of ETL.usp_ParseNewHits):**
 ```sql
 HASHBYTES('SHA2_256', 
   CONCAT_WS('|', 
@@ -428,14 +487,14 @@ HASHBYTES('SHA2_256',
 
 **DeviceHash is clustered** because the MERGE in Phase 10 seeks by DeviceHash. Clustering on the MERGE join key makes the upsert a clustered index seek — the most efficient pattern.
 
-#### Step 1B.2: Create `dbo.PiXL_IP` — Global IP Dimension
+#### Step 1B.2: Create `PiXL.IP` — Global IP Dimension
 
 **Platform-wide**, one row per unique IP address. Same IP across multiple companies shares one row, enabling cross-client pattern detection.
 
 ```
 Columns:
   IpId                BIGINT IDENTITY(1,1)              (surrogate PK — nonclustered)
-  IPAddress           VARCHAR(45)     NOT NULL           (supports IPv6, natural key)
+  IPAddress           VARCHAR(50)     NOT NULL           (supports IPv4 & IPv6, natural key)
   IpType              VARCHAR(20)     NULL               (from IpClassificationService: Public/Private/CGNAT/etc.)
   IsDatacenter        BIT             NULL               (from DatacenterIpService)
   DatacenterProvider  VARCHAR(20)     NULL               (AWS/GCP/NULL)
@@ -450,25 +509,25 @@ Indexes:
 
 **Note on IpType/IsDatacenter/DatacenterProvider:** These columns are populated as NULL initially — the `IpClassificationService` and `DatacenterIpService` results are currently NOT persisted to any table (they run at request time only). Phase 11's MERGE will INSERT with NULLs. A future enhancement could backfill these via a scheduled scan, or the MERGE could be extended to call the services inline.
 
-#### Step 1B.3: Create `dbo.PiXL_Visit` — Fact Table (1:1 with PiXL_Parsed)
+#### Step 1B.3: Create `PiXL.Visit` — Fact Table (1:1 with PiXL.Parsed)
 
-The **relational bridge** between the immutable 175-column warehouse (`PiXL_Parsed`) and the normalized dimension tables. One row per pixel fire, same PK as `PiXL_Parsed`.
+The **relational bridge** between the immutable 175-column warehouse (`PiXL.Parsed`) and the normalized dimension tables. One row per pixel fire, same PK as `PiXL.Parsed`.
 
 ```
 Columns:
-  SourceId          BIGINT          NOT NULL  PRIMARY KEY    (same as PiXL_Parsed.SourceId / PiXL_Test.Id)
+  SourceId          BIGINT          NOT NULL  PRIMARY KEY    (same as PiXL.Parsed.SourceId / PiXL.Test.Id)
   CompanyID         INT             NOT NULL                  (denormalized for partitioning/querying)
   PiXLID            INT             NOT NULL                  (denormalized)
-  DeviceId          BIGINT          NULL                      (FK → PiXL_Device — NULL if device hash couldn't be computed)
-  IpId              BIGINT          NULL                      (FK → PiXL_IP — NULL if no IP)
+  DeviceId          BIGINT          NULL                      (FK → PiXL.Device — NULL if device hash couldn't be computed)
+  IpId              BIGINT          NULL                      (FK → PiXL.IP — NULL if no IP)
   ReceivedAt        DATETIME2(3)    NOT NULL                  (denormalized for time queries)
-  ClientParamsJson  NVARCHAR(MAX)   NULL                      (extracted _cp_* params as JSON)
+  ClientParamsJson  NVARCHAR(4000)  NULL                      (extracted _cp_* params as JSON — 11 typical params ≈ 500 chars, 50 max ≈ 2000)
   MatchEmail        AS CAST(JSON_VALUE(ClientParamsJson, '$.email') AS NVARCHAR(200)) PERSISTED
   CreatedAt         DATETIME2(3)    NOT NULL  DEFAULT SYSUTCDATETIME()
 
 Indexes:
-  PK_PiXL_Visit           on (SourceId)                       — PK, same grain as PiXL_Parsed
-  CIX_PiXL_Visit          CLUSTERED on (ReceivedAt, SourceId)  — time-series physical sort (matches PiXL_Parsed)
+  PK_PiXL_Visit           on (SourceId)                       — PK, same grain as PiXL.Parsed
+  CIX_PiXL_Visit          CLUSTERED on (ReceivedAt, SourceId)  — time-series physical sort (matches PiXL.Parsed)
   IX_PiXL_Visit_Company   NONCLUSTERED on (CompanyID, PiXLID, ReceivedAt)
   IX_PiXL_Visit_Device    NONCLUSTERED on (DeviceId) WHERE DeviceId IS NOT NULL
   IX_PiXL_Visit_IP        NONCLUSTERED on (IpId) WHERE IpId IS NOT NULL
@@ -477,13 +536,13 @@ Indexes:
                            WHERE MatchEmail IS NOT NULL
 
 Foreign Keys:
-  FK_Visit_Device → dbo.PiXL_Device(DeviceId)
-  FK_Visit_IP → dbo.PiXL_IP(IpId)
+  FK_Visit_Device → PiXL.Device(DeviceId)
+  FK_Visit_IP → PiXL.IP(IpId)
 ```
 
-**Why SourceId as PK (not IDENTITY):** There's no reason to create a new surrogate key. `PiXL_Visit` is 1:1 with `PiXL_Parsed`, so we reuse the same `SourceId`. This means `PiXL_Visit.SourceId` = `PiXL_Parsed.SourceId` = `PiXL_Test.Id` — a single chain of identity. Joining is trivial and there's no ambiguity.
+**Why SourceId as PK (not IDENTITY):** There's no reason to create a new surrogate key. `PiXL.Visit` is 1:1 with `PiXL.Parsed`, so we reuse the same `SourceId`. This means `PiXL.Visit.SourceId` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — a single chain of identity. Joining is trivial and there's no ambiguity.
 
-**Why denormalize CompanyID, PiXLID, ReceivedAt:** These are the most common query filters. Requiring a join to PiXL_Parsed just to filter by company or date would be wasteful. The denormalization is tiny (12 bytes per row) and eliminates constant joins.
+**Why denormalize CompanyID, PiXLID, ReceivedAt:** These are the most common query filters. Requiring a join to PiXL.Parsed just to filter by company or date would be wasteful. The denormalization is tiny (12 bytes per row) and eliminates constant joins.
 
 **MatchEmail as persisted computed column:** Automatically extracts the `email` value from `ClientParamsJson` and materializes it. SQL Server maintains this on INSERT/UPDATE. The filtered index on `MatchEmail` enables the match proc's watermark scan to be an efficient seek — only rows with emails are indexed.
 
@@ -503,7 +562,7 @@ Foreign Keys:
 
 **Why JSON:** Each client sends different parameters. Hard-coding columns per client would require schema changes for every new client and leave NULLs everywhere. JSON is flexible, self-describing, and `JSON_VALUE()` is optimized in SQL Server 2019.
 
-#### Step 1B.4: Create `dbo.PiXL_Match` — Identity Resolution
+#### Step 1B.4: Create `PiXL.Match` — Identity Resolution
 
 The identity resolution output table. **One row per unique (CompanyID, PiXLID, MatchType, MatchKey) combination.** This is NOT a per-hit table — it's a per-identity table that accumulates hit metadata.
 
@@ -516,10 +575,10 @@ Columns:
   MatchKey            VARCHAR(256)  NOT NULL           (the matched value: email, IP, zip)
   IndividualKey       VARCHAR(35)   NULL               (→ AutoConsumer.IndividualKey — for email/IP matches)
   AddressKey          VARCHAR(35)   NULL               (→ AutoConsumer.AddressKey — for geo matches)
-  DeviceId            BIGINT        NULL               (FK → PiXL_Device — device at time of first match)
-  IpId                BIGINT        NULL               (FK → PiXL_IP — IP at time of first match)
-  FirstSourceId       BIGINT        NOT NULL           (FK → PiXL_Visit.SourceId — first hit)
-  LatestSourceId      BIGINT        NOT NULL           (FK → PiXL_Visit.SourceId — most recent hit)
+  DeviceId            BIGINT        NULL               (FK → PiXL.Device — device at time of first match)
+  IpId                BIGINT        NULL               (FK → PiXL.IP — IP at time of first match)
+  FirstSourceId       BIGINT        NOT NULL           (FK → PiXL.Visit.SourceId — first hit)
+  LatestSourceId      BIGINT        NOT NULL           (FK → PiXL.Visit.SourceId — most recent hit)
   FirstSeen           DATETIME2(3)  NOT NULL
   LastSeen            DATETIME2(3)  NOT NULL
   HitCount            INT           NOT NULL  DEFAULT 1
@@ -535,10 +594,10 @@ Indexes:
   IX_PiXL_Match_LastSeen   NONCLUSTERED on (LastSeen DESC) INCLUDE (CompanyID, PiXLID, MatchType)
 
 Foreign Keys:
-  FK_Match_Device → dbo.PiXL_Device(DeviceId)
-  FK_Match_IP → dbo.PiXL_IP(IpId)
-  FK_Match_FirstVisit → dbo.PiXL_Visit(SourceId)     — via FirstSourceId
-  FK_Match_LatestVisit → dbo.PiXL_Visit(SourceId)    — via LatestSourceId
+  FK_Match_Device → PiXL.Device(DeviceId)
+  FK_Match_IP → PiXL.IP(IpId)
+  FK_Match_FirstVisit → PiXL.Visit(SourceId)     — via FirstSourceId
+  FK_Match_LatestVisit → PiXL.Visit(SourceId)    — via LatestSourceId
 ```
 
 **Key design change from v1: IndividualKey/AddressKey instead of ReferenceRecordID.**
@@ -563,7 +622,7 @@ Both are nullable because a match might be unresolvable (email not in AC, etc.).
 - New C# class library project: `SmartPixl.Clr/` (at repo root or under `TrackingPixel.Modern/`)
 - Migration script: `SQL/19_ClrFunctions.sql`
 
-This phase builds the SQLCLR assembly that will dramatically accelerate the ETL. The current `GetQueryParam` T-SQL UDF is a scalar function that causes per-row context switching — the single biggest performance bottleneck in `usp_ParseNewHits`. Replacing it with a CLR function eliminates that overhead.
+This phase builds the SQLCLR assembly that will dramatically accelerate the ETL. The current `GetQueryParam` T-SQL UDF is a scalar function that causes per-row context switching — the single biggest performance bottleneck in `ETL.usp_ParseNewHits`. Replacing it with a CLR function eliminates that overhead.
 
 We build the CLR assembly before modifying the ETL proc so we can swap the UDF references atomically in Phase 4.
 
@@ -595,7 +654,7 @@ We build the CLR assembly before modifying the ETL proc so we can swap the UDF r
   - `DataAccess = None` → no context switching back into the SQL engine
   - These attributes allow the query optimizer to treat the function call much more efficiently
 
-**Drop-in replacement strategy:** Same name pattern, different schema prefix (`dbo.clr_GetQueryParam` vs `dbo.GetQueryParam`). In Phase 4 we'll update `usp_ParseNewHits` to use the CLR version. The old T-SQL UDF stays as a fallback.
+**Drop-in replacement strategy:** Same name pattern, different schema prefix (`dbo.clr_GetQueryParam` vs `dbo.GetQueryParam`). In Phase 4 we'll update `ETL.usp_ParseNewHits` to use the CLR version. The old T-SQL UDF stays as a fallback.
 
 #### Step 2.3: `clr_UrlDecode` — Standalone URL Decoder
 
@@ -647,23 +706,23 @@ We build the CLR assembly before modifying the ETL proc so we can swap the UDF r
 
 ---
 
-### Phase 3: Schema Extensions — Client Params in PiXL_Parsed
+### Phase 3: Schema Extensions — Client Params in PiXL.Parsed
 
-> **NOTE (v2 revision):** In the v1 plan, `ClientParamsJson` and `MatchEmail` were added as columns on `PiXL_Parsed`. In the normalized design, **these columns now live on `PiXL_Visit`** (defined in Phase 1B, Step 1B.3). `PiXL_Parsed` remains unchanged — it stays as the immutable 175-column warehouse with no new columns.
+> **NOTE (v2 revision):** In the v1 plan, `ClientParamsJson` and `MatchEmail` were added as columns on `PiXL.Parsed`. In the normalized design, **these columns now live on `PiXL.Visit`** (defined in Phase 1B, Step 1B.3). `PiXL.Parsed` remains unchanged — it stays as the immutable 175-column warehouse with no new columns.
 
 **Migration script:** `SQL/20_ClientParamsSupport.sql`
 
-This migration is now a **no-op for PiXL_Parsed** but still creates supporting infrastructure:
+This migration is now a **no-op for PiXL.Parsed** but still creates supporting infrastructure:
 
-#### Step 3.1: Verify PiXL_Visit Indexes
+#### Step 3.1: Verify PiXL.Visit Indexes
 
 Confirm the `IX_PiXL_Visit_MatchEmail` filtered index (created in Phase 1B) is in place. This index enables the match proc to efficiently find visits with email addresses.
 
-#### Step 3.2: ~~Add `ClientParamsJson` to PiXL_Parsed~~ (MOVED to PiXL_Visit)
+#### Step 3.2: ~~Add `ClientParamsJson` to PiXL.Parsed~~ (MOVED to PiXL.Visit)
 
-**This step is no longer needed.** `ClientParamsJson` and `MatchEmail` (persisted computed column) are defined directly on `PiXL_Visit` in Phase 1B, Step 1B.3.
+**This step is no longer needed.** `ClientParamsJson` and `MatchEmail` (persisted computed column) are defined directly on `PiXL.Visit` in Phase 1B, Step 1B.3.
 
-**Rationale for the move:** `PiXL_Parsed` is the wide immutable warehouse. Adding client-specific JSON to it would break the pattern (it only has columns parsed from the fingerprint query string). Client params are relational metadata — they belong on the fact table that bridges to the dimension tables.
+**Rationale for the move:** `PiXL.Parsed` is the wide immutable warehouse. Adding client-specific JSON to it would break the pattern (it only has columns parsed from the fingerprint query string). Client params are relational metadata — they belong on the fact table that bridges to the dimension tables.
 
 ---
 
@@ -671,11 +730,11 @@ Confirm the `IX_PiXL_Visit_MatchEmail` filtered index (created in Phase 1B) is i
 
 **Migration script:** `SQL/21_ParseNewHits_Phases9to13.sql`
 
-This phase extends the existing `usp_ParseNewHits` stored procedure with 5 new phases that populate the normalized dimension and fact tables. All new phases run **after** the existing Phase 8 (IP behavior signals), operating on the same batch of rows already inserted into PiXL_Parsed.
+This phase extends the existing `ETL.usp_ParseNewHits` stored procedure with 5 new phases that populate the normalized dimension and fact tables. All new phases run **after** the existing Phase 8 (IP behavior signals), operating on the same batch of rows already inserted into PiXL.Parsed.
 
 #### Step 4.1: Add Phase 9 — Compute DeviceHash
 
-After Phase 8 inserts rows into PiXL_Parsed, Phase 9 computes the composite device fingerprint hash for each row in the current batch.
+After Phase 8 inserts rows into PiXL.Parsed, Phase 9 computes the composite device fingerprint hash for each row in the current batch.
 
 ```
 Logic:
@@ -691,15 +750,15 @@ Logic:
 
 **Why CONCAT_WS with pipe delimiter:** Without a delimiter, `CONCAT('abc', 'def')` = `CONCAT('ab', 'cdef')` — false collisions. The pipe separator ensures each component is distinct in the hash input.
 
-**Why NULL for all-NULL components:** If a hit has no canvas, fonts, GPU, WebGL, or audio data (likely a bot or headless browser), creating a device record would be meaningless. The PiXL_Visit row will have `DeviceId = NULL`.
+**Why NULL for all-NULL components:** If a hit has no canvas, fonts, GPU, WebGL, or audio data (likely a bot or headless browser), creating a device record would be meaningless. The PiXL.Visit row will have `DeviceId = NULL`.
 
-#### Step 4.2: Add Phase 10 — MERGE PiXL_Device
+#### Step 4.2: Add Phase 10 — MERGE PiXL.Device
 
 Upsert device records using the computed DeviceHash from Phase 9.
 
 ```
 Logic:
-MERGE dbo.PiXL_Device AS target
+MERGE PiXL.Device AS target
 USING (
   SELECT DISTINCT DeviceHash, MIN(ReceivedAt) AS BatchFirstSeen
   FROM #BatchRows WHERE DeviceHash IS NOT NULL
@@ -716,19 +775,19 @@ WHEN NOT MATCHED THEN INSERT (DeviceHash, FirstSeen, LastSeen, HitCount)
 
 -- OUTPUT DeviceId back into #BatchRows for use in Phase 13
 UPDATE b SET b.DeviceId = d.DeviceId
-FROM #BatchRows b JOIN dbo.PiXL_Device d ON b.DeviceHash = d.DeviceHash
+FROM #BatchRows b JOIN PiXL.Device d ON b.DeviceHash = d.DeviceHash
 WHERE b.DeviceHash IS NOT NULL;
 ```
 
 **Why DISTINCT in the source:** A batch of 50K rows may have many rows from the same device. MERGE requires a unique source per target key — deduplicating by DeviceHash avoids the "MERGE attempted to update the same row more than once" error.
 
-#### Step 4.3: Add Phase 11 — MERGE PiXL_IP
+#### Step 4.3: Add Phase 11 — MERGE PiXL.IP
 
 Upsert IP records.
 
 ```
 Logic:
-MERGE dbo.PiXL_IP AS target
+MERGE PiXL.IP AS target
 USING (
   SELECT DISTINCT IPAddress, MIN(ReceivedAt) AS BatchFirstSeen
   FROM #BatchRows WHERE IPAddress IS NOT NULL AND IPAddress <> ''
@@ -745,45 +804,45 @@ WHEN NOT MATCHED THEN INSERT (IPAddress, FirstSeen, LastSeen, HitCount)
 
 -- OUTPUT IpId back into #BatchRows
 UPDATE b SET b.IpId = ip.IpId
-FROM #BatchRows b JOIN dbo.PiXL_IP ip ON b.IPAddress = ip.IPAddress
+FROM #BatchRows b JOIN PiXL.IP ip ON b.IPAddress = ip.IPAddress
 WHERE b.IPAddress IS NOT NULL;
 ```
 
-**IpType, IsDatacenter, DatacenterProvider** are left NULL on initial insert. These could be backfilled by a future maintenance job that calls `IpClassificationService` and `DatacenterIpService` logic in SQL, or by a C# service that scans PiXL_IP rows with NULL metadata.
+**IpType, IsDatacenter, DatacenterProvider** are left NULL on initial insert. These could be backfilled by a future maintenance job that calls `IpClassificationService` and `DatacenterIpService` logic in SQL, or by a C# service that scans PiXL.IP rows with NULL metadata.
 
 #### Step 4.4: Add Phase 12 — Client Parameter Extraction
 
-Extract `_cp_*` prefixed parameters from the QueryString and build a JSON object. This is the same logic as the v1 plan's "Phase 9" but now the JSON is written to `PiXL_Visit` (not `PiXL_Parsed`).
+Extract `_cp_*` prefixed parameters from the QueryString and build a JSON object. This is the same logic as the v1 plan's "Phase 9" but now the JSON is written to `PiXL.Visit` (not `PiXL.Parsed`).
 
 ```
 Logic:
 1. For each row in the current batch:
-   a. Scan the QueryString (from PiXL_Test, joined by SourceId) for params starting with '_cp_'
+   a. Scan the QueryString (from PiXL.Test, joined by SourceId) for params starting with '_cp_'
    b. Extract each _cp_* param using dbo.clr_GetQueryParam
    c. Strip the '_cp_' prefix from the key name
    d. URL-decode all values
    e. Build a JSON object: {"email":"decoded_value", "hid":"decoded_value", ...}
    f. Store in #BatchRows.ClientParamsJson
 
-2. Only process rows from companies with configured ClientParams in dbo.PiXL
+2. Only process rows from companies with configured ClientParams in PiXL.Pixel
    (JOIN to PiXL to check — this is a batch operation, not per-row)
 ```
 
 **Implementation approach: Option A (dynamic `_cp_` scan) recommended.** The `_cp_` prefix convention means we can find ALL client params without knowing what they are. Self-documenting — whatever the JS sends with `_cp_`, the ETL captures.
 
-#### Step 4.5: Add Phase 13 — INSERT PiXL_Visit
+#### Step 4.5: Add Phase 13 — INSERT PiXL.Visit
 
 Insert the fact table rows, connecting everything together.
 
 ```
 Logic:
-INSERT INTO dbo.PiXL_Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson)
+INSERT INTO PiXL.Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson)
 SELECT 
   SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson
 FROM #BatchRows;
 ```
 
-**This is a simple INSERT, not a MERGE.** PiXL_Visit is 1:1 with PiXL_Parsed — each SourceId appears exactly once. The ETL's watermark guarantees rows are processed once. No upsert needed.
+**This is a simple INSERT, not a MERGE.** PiXL.Visit is 1:1 with PiXL.Parsed — each SourceId appears exactly once. The ETL's watermark guarantees rows are processed once. No upsert needed.
 
 **The MatchEmail persisted computed column** auto-populates from `ClientParamsJson` on insert. No additional step required.
 
@@ -842,9 +901,9 @@ GO
 
 **Migration script:** `SQL/23_MatchVisits.sql`
 
-This is the heart of the new functionality — the procedure that resolves visitor identities against AutoConsumer. **Renamed from `usp_MatchByEmail` to `usp_MatchVisits`** to reflect that it now reads from `PiXL_Visit` and will support multiple match types.
+This is the heart of the new functionality — the procedure that resolves visitor identities against AutoConsumer. **Renamed from `usp_MatchByEmail` to `ETL.usp_MatchVisits`** to reflect that it now reads from `PiXL.Visit` and will support multiple match types.
 
-#### Step 6.1: Create `dbo.usp_MatchVisits`
+#### Step 6.1: Create `ETL.usp_MatchVisits`
 
 **Parameters:**
 ```sql
@@ -855,8 +914,8 @@ This is the heart of the new functionality — the procedure that resolves visit
 
 ```
 1. READ WATERMARK
-   Read ETL_MatchWatermark.LastProcessedId for 'MatchVisits'
-   Determine @MaxId = MIN(MAX(SourceId) in PiXL_Visit, @LastId + @BatchSize)
+   Read ETL.MatchWatermark.LastProcessedId for 'MatchVisits'
+   Determine @MaxId = MIN(MAX(SourceId) in PiXL.Visit, @LastId + @BatchSize)
    Short-circuit if nothing to process
 
 2. BUILD CANDIDATE SET
@@ -864,9 +923,9 @@ This is the heart of the new functionality — the procedure that resolves visit
      v.SourceId, v.CompanyID, v.PiXLID, v.DeviceId, v.IpId, v.ReceivedAt,
      v.MatchEmail (from persisted computed column),
      NormalizedEmail = dbo.clr_NormalizeEmail(v.MatchEmail),
-     ip.IPAddress (from PiXL_IP join)
-   FROM PiXL_Visit v
-   LEFT JOIN PiXL_IP ip ON v.IpId = ip.IpId
+     ip.IPAddress (from PiXL.IP join)
+   FROM PiXL.Visit v
+   LEFT JOIN PiXL.IP ip ON v.IpId = ip.IpId
    WHERE v.SourceId > @LastId AND v.SourceId <= @MaxId
      AND v.MatchEmail IS NOT NULL
      AND LEN(v.MatchEmail) > 5          -- basic sanity (a@b.c minimum)
@@ -895,10 +954,10 @@ This is the heart of the new functionality — the procedure that resolves visit
    household identity) — NOT RecordID. IndividualKey groups all AC records 
    for the same person across duplicate email/VIN entries (~1.22 rows per key).
 
-4. MERGE INTO PiXL_Match
+4. MERGE INTO PiXL.Match
    Using #Candidates as the source:
 
-   MERGE dbo.PiXL_Match AS target
+   MERGE PiXL.Match AS target
    USING (
      SELECT CompanyID, PiXLID, 'email' AS MatchType,
             NormalizedEmail AS MatchKey,
@@ -941,7 +1000,7 @@ This is the heart of the new functionality — the procedure that resolves visit
    );
 
 5. UPDATE WATERMARK
-   UPDATE ETL_MatchWatermark SET 
+   UPDATE ETL.MatchWatermark SET 
      LastProcessedId = @MaxId,
      LastRunAt = SYSUTCDATETIME(),
      RowsProcessed = RowsProcessed + @TotalProcessed,
@@ -961,7 +1020,7 @@ This is the heart of the new functionality — the procedure that resolves visit
 
 **Why the `COALESCE` on `IndividualKey` update:** If a visitor emails us twice, and AutoConsumer didn't have their email the first time (new DBA load happened between visits), we want the second visit to populate the match without overwriting an existing good match.
 
-**Why DeviceId/IpId from PiXL_Visit:** The match proc captures the device and IP from the **triggering visit** (via `PiXL_Visit.DeviceId` and `PiXL_Visit.IpId`). For new matches, these are the device/IP at first observation. For existing matches, these aren't updated (we keep the original observation context).
+**Why DeviceId/IpId from PiXL.Visit:** The match proc captures the device and IP from the **triggering visit** (via `PiXL.Visit.DeviceId` and `PiXL.Visit.IpId`). For new matches, these are the device/IP at first observation. For existing matches, these aren't updated (we keep the original observation context).
 
 ---
 
@@ -1018,7 +1077,7 @@ Private methods:
   Task LoadConfigAsync()
     → Opens SqlConnection
     → SELECT CompanyId, PiXLId, PiXLName, PiXLDomain, IsActive, ClientParams 
-      FROM dbo.PiXL WHERE IsActive = 1
+      FROM PiXL.Pixel WHERE IsActive = 1
     → For each row: parse ClientParams, build PiXLConfig, add to dictionary
     → Atomic swap: build new dictionary, then replace reference
     → Log count of loaded configs
@@ -1035,12 +1094,12 @@ Private methods:
 ### Phase 8: C# — JS Script Client Param Support
 
 **Files modified:**
-- `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+- `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 - `TrackingPixel.Modern/Endpoints/TrackingEndpoints.cs`
 
 This phase wires the PiXL config cache into the JS script generation so client-specific params are extracted from the host page.
 
-#### Step 8.1: Modify `Tier5Script.cs`
+#### Step 8.1: Modify `PiXLScript.cs`
 
 **Add a second placeholder to the JS template:**
 
@@ -1094,7 +1153,7 @@ The cache still does its job — the `Replace` runs exactly once per unique (URL
 **Current code (lines ~145-166 of TrackingEndpoints.cs):**
 ```csharp
 var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
-var javascript = Tier5Script.GetScript(pixelUrl);
+var javascript = PiXLScript.GetScript(pixelUrl);
 ```
 
 **New code:**
@@ -1102,7 +1161,7 @@ var javascript = Tier5Script.GetScript(pixelUrl);
 var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
 var config = configCache.GetConfig(companyId, pixlId);
 var clientParamsJs = config?.ClientParamsJsLiteral ?? "";
-var javascript = Tier5Script.GetScript(pixelUrl, clientParamsJs);
+var javascript = PiXLScript.GetScript(pixelUrl, clientParamsJs);
 ```
 
 Where `configCache` is the `PiXLConfigCacheService` injected into the endpoint handler.
@@ -1146,16 +1205,16 @@ ExecuteAsync loop:
 
 RunMatchCycleAsync:
   1. Open SqlConnection (fresh per cycle)
-  2. Execute dbo.usp_MatchVisits with @BatchSize from settings
+  2. Execute ETL.usp_MatchVisits with @BatchSize from settings
   3. Read result set: RowsProcessed, RowsMatched, FromId, ToId
   4. Return (RowsProcessed, RowsMatched)
 ```
 
-**Why 15-second startup delay:** The ETL service starts after 5 seconds and needs at least one cycle (up to 60s) to have parsed data in PiXL_Parsed and PiXL_Visit for the match proc to read. 15 seconds is enough for the ETL to complete its first cycle on the initial 963 existing rows.
+**Why 15-second startup delay:** The ETL service starts after 5 seconds and needs at least one cycle (up to 60s) to have parsed data in PiXL.Parsed and PiXL.Visit for the match proc to read. 15 seconds is enough for the ETL to complete its first cycle on the initial 963 existing rows.
 
 **Why 120-second interval (not 60s):** The match proc does cross-database joins against AutoConsumer (421M rows). Running every 120s gives the ETL two full cycles to accumulate candidates, resulting in larger but less frequent batches — more efficient use of the AC index.
 
-**Why separate from EtlBackgroundService:** The match proc reads from PiXL_Visit (output of ETL) using its own watermark. Running them independently means:
+**Why separate from EtlBackgroundService:** The match proc reads from PiXL.Visit (output of ETL) using its own watermark. Running them independently means:
 - ETL can fall behind without blocking matching
 - Match can be restarted or re-watermarked without affecting ingest
 - Different batch sizes optimize each workload: ETL processes 50K raw rows, match processes 10K visit rows (since match does cross-DB joins per row, smaller batches keep it responsive)
@@ -1214,14 +1273,14 @@ builder.Services.AddHostedService<MatchBackgroundService>();
 #### Step 11.1: Seed Company 12800
 
 ```sql
-INSERT INTO dbo.Company (CompanyID, CompanyName, ContactName, IsActive, Notes)
+INSERT INTO PiXL.Company (CompanyID, CompanyName, ContactName, IsActive, Notes)
 VALUES (12800, 'The Trivia Quest', NULL, 1, 'First MVP client — email matching via host page URL params');
 ```
 
 #### Step 11.2: Seed PiXL 12800/1
 
 ```sql
-INSERT INTO dbo.PiXL (CompanyId, PiXLId, PiXLName, PiXLURL, PiXLDomain, IsActive, ClientParams, Notes)
+INSERT INTO PiXL.Pixel (CompanyId, PiXLId, PiXLName, PiXLURL, PiXLDomain, IsActive, ClientParams, Notes)
 VALUES (
     12800, 1, 
     'Trivia Quest Main',
@@ -1236,28 +1295,29 @@ VALUES (
 #### Step 11.3: Seed Match Watermark
 
 ```sql
-INSERT INTO dbo.ETL_MatchWatermark (ProcessName, LastProcessedId, LastRunAt, RowsProcessed, RowsMatched)
+INSERT INTO ETL.MatchWatermark (ProcessName, LastProcessedId, LastRunAt, RowsProcessed, RowsMatched)
 VALUES ('MatchVisits', 0, NULL, 0, 0);
 ```
 
-**Note:** Setting `LastProcessedId = 0` means the match proc will scan ALL existing PiXL_Visit rows on first run. Since the existing 963 rows don't have emails (no `_cp_email` in their query strings), this processes quickly and finds nothing to match. Once live traffic flows with `_cp_email` params, the watermark advances normally.
+**Note:** Setting `LastProcessedId = 0` means the match proc will scan ALL existing PiXL.Visit rows on first run. Since the existing 963 rows don't have emails (no `_cp_email` in their query strings), this processes quickly and finds nothing to match. Once live traffic flows with `_cp_email` params, the watermark advances normally.
 
 #### Step 11.4: Deployment Sequence
 
 The deployment order for all SQL scripts:
 
 ```
-1. SQL/18_CompanyAndPiXLTables.sql     — Company, PiXL tables
-2. SQL/19_DeviceIpVisitMatchTables.sql — PiXL_Device, PiXL_IP, PiXL_Visit, PiXL_Match, ETL_MatchWatermark
-3. SQL/20_ClientParamsSupport.sql       — (verification only — columns now on PiXL_Visit)
-4. SQL/21_ParseNewHits_Phases9to13.sql  — Phases 9-13 in usp_ParseNewHits (Device, IP, ClientParams, Visit) + CLR swap
+0. SQL/17B_CreateSchemas.sql            — CREATE SCHEMA PiXL/ETL, ALTER SCHEMA TRANSFER, sp_rename, ALTER PROCEDURE/VIEW fixups
+1. SQL/18_CompanyAndPiXLTables.sql     — PiXL.Company, PiXL.Pixel tables
+2. SQL/19_DeviceIpVisitMatchTables.sql — PiXL.Device, PiXL.IP, PiXL.Visit, PiXL.Match, ETL.MatchWatermark
+3. SQL/20_ClientParamsSupport.sql       — (verification only — columns now on PiXL.Visit)
+4. SQL/21_ParseNewHits_Phases9to13.sql  — Phases 9-13 in ETL.usp_ParseNewHits (Device, IP, ClientParams, Visit) + CLR swap
 5. SQL/22_AutoConsumerEmailIndex.sql    — IX_AutoConsumer_EMail (run during maintenance)
-6. SQL/23_MatchVisits.sql               — usp_MatchVisits
+6. SQL/23_MatchVisits.sql               — ETL.usp_MatchVisits
 7. SQL/24_ClrFunctions.sql              — SmartPixl.Clr assembly + 3 functions
 8. SQL/25_SeedClient12800.sql           — Company/PiXL/Watermark seed data
 ```
 
-**Note:** Migration 24 (CLR) can technically be deployed before migration 21, since Phase 4.6 swaps to CLR functions. The CLR assembly just needs to exist before `usp_ParseNewHits` is altered to reference `clr_GetQueryParam`. If CLR is blocked for any reason, migration 21 can use the existing T-SQL `GetQueryParam` UDF.
+**Note:** Migration 24 (CLR) can technically be deployed before migration 21, since Phase 4.6 swaps to CLR functions. The CLR assembly just needs to exist before `ETL.usp_ParseNewHits` is altered to reference `clr_GetQueryParam`. If CLR is blocked for any reason, migration 21 can use the existing T-SQL `GetQueryParam` UDF.
 
 **Then deploy the C# changes:**
 
@@ -1279,29 +1339,29 @@ The deployment order for all SQL scripts:
    → Verify response contains: var cpKeys = ['email','hid','q_id',...];
 
 2. Open https://www.thetriviaquest.com/question/1?email=test@example.com
-   → Verify PiXL_Test gets a new row with _cp_email in QueryString
+   → Verify PiXL.Test gets a new row with _cp_email in QueryString
 
 3. Wait 60 seconds (ETL cycle)
-   → Verify PiXL_Parsed has the row
-   → Verify PiXL_Device has a row with the device's fingerprint hash
-   → Verify PiXL_IP has a row with the visitor's IP
-   → Verify PiXL_Visit has a row with DeviceId, IpId, and ClientParamsJson populated
+   → Verify PiXL.Parsed has the row
+   → Verify PiXL.Device has a row with the device's fingerprint hash
+   → Verify PiXL.IP has a row with the visitor's IP
+   → Verify PiXL.Visit has a row with DeviceId, IpId, and ClientParamsJson populated
 
 4. Wait 120 more seconds (Match cycle)
-   → Verify PiXL_Match has a row with MatchType='email'
+   → Verify PiXL.Match has a row with MatchType='email'
    → Check IndividualKey: populated if test@example.com exists in AutoConsumer, NULL if not
 
 5. Test with a known AutoConsumer email:
-   → Verify PiXL_Match.IndividualKey is populated (varchar(35), starts with 'IND')
-   → Verify PiXL_Match.AddressKey is populated (varchar(35), starts with 'ADD')
-   → Verify PiXL_Match.DeviceId and IpId are populated (FK back to dimension tables)
+   → Verify PiXL.Match.IndividualKey is populated (varchar(35), starts with 'IND')
+   → Verify PiXL.Match.AddressKey is populated (varchar(35), starts with 'ADD')
+   → Verify PiXL.Match.DeviceId and IpId are populated (FK back to dimension tables)
 
 6. Verify relational integrity:
    → SELECT v.*, d.DeviceHash, ip.IPAddress, m.IndividualKey
-     FROM PiXL_Visit v
-     LEFT JOIN PiXL_Device d ON v.DeviceId = d.DeviceId
-     LEFT JOIN PiXL_IP ip ON v.IpId = ip.IpId
-     LEFT JOIN PiXL_Match m ON v.CompanyID = m.CompanyID 
+     FROM PiXL.Visit v
+     LEFT JOIN PiXL.Device d ON v.DeviceId = d.DeviceId
+     LEFT JOIN PiXL.IP ip ON v.IpId = ip.IpId
+     LEFT JOIN PiXL.Match m ON v.CompanyID = m.CompanyID 
        AND v.PiXLID = m.PiXLID AND m.MatchType = 'email'
    → All FKs should resolve, no orphans
 ```
@@ -1315,7 +1375,7 @@ The deployment order for all SQL scripts:
 | Test Class | Tests |
 |------------|-------|
 | `PiXLConfigCacheServiceTests` | Cache loads from DB, returns correct config, returns null for unknown PiXL, handles empty ClientParams, handles DB unavailable at startup, refresh updates cache, concurrent reads are safe |
-| `Tier5ScriptTests` (extend) | Script with client params contains `cpKeys` array, script without client params has empty array, cache works with different param sets, special chars in param names |
+| `PiXLScriptTests` (extend) | Script with client params contains `cpKeys` array, script without client params has empty array, cache works with different param sets, special chars in param names |
 | `MatchBackgroundServiceTests` | Startup delay, interval timing (120s), error recovery, cancellation |
 
 ### Integration Tests (SQL)
@@ -1334,21 +1394,21 @@ The deployment order for all SQL scripts:
 | CLR NormalizeEmail non-gmail | `SELECT dbo.clr_NormalizeEmail('USER@Yahoo.COM')` | `user@yahoo.com` |
 | AutoConsumer index seek | `SET STATISTICS IO ON; SELECT TOP 1 IndividualKey FROM AutoUpdate.dbo.AutoConsumer WHERE EMail = 'test@test.com'` | Verify "Index Seek" in plan, not "Table Scan" |
 | Device hash computation | `SELECT HASHBYTES('SHA2_256', CONCAT_WS('\|', 'canvas1', 'fonts1', 'gpu1', 'webgl1', 'audio1'))` | Returns 32-byte varbinary |
-| PiXL_Device MERGE | Insert row with known hash, run Phase 10 again with same hash | HitCount increments, no duplicate |
-| PiXL_IP MERGE | Insert row with known IP, run Phase 11 again with same IP | HitCount increments, no duplicate |
-| PiXL_Visit insert | Run Phases 9-13 on test batch | PiXL_Visit row count = PiXL_Parsed batch count, all DeviceId/IpId populated |
-| Match proc empty | `EXEC dbo.usp_MatchVisits @BatchSize = 100` | Returns 0 rows processed (watermark catches up to existing data) |
-| Full pipeline | Insert test row into PiXL_Test with `_cp_email=known@email.com`, run ETL, run Match | PiXL_Visit row with ClientParamsJson, PiXL_Match row with IndividualKey populated |
+| PiXL.Device MERGE | Insert row with known hash, run Phase 10 again with same hash | HitCount increments, no duplicate |
+| PiXL.IP MERGE | Insert row with known IP, run Phase 11 again with same IP | HitCount increments, no duplicate |
+| PiXL.Visit insert | Run Phases 9-13 on test batch | PiXL.Visit row count = PiXL.Parsed batch count, all DeviceId/IpId populated |
+| Match proc empty | `EXEC ETL.usp_MatchVisits @BatchSize = 100` | Returns 0 rows processed (watermark catches up to existing data) |
+| Full pipeline | Insert test row into PiXL.Test with `_cp_email=known@email.com`, run ETL, run Match | PiXL.Visit row with ClientParamsJson, PiXL.Match row with IndividualKey populated |
 
 ### Performance Benchmarks
 
 | Benchmark | Method | Target |
 |-----------|--------|--------|
-| CLR vs T-SQL GetQueryParam | Run usp_ParseNewHits on 1000 rows with each, compare elapsed time | CLR should be ≥5x faster |
+| CLR vs T-SQL GetQueryParam | Run ETL.usp_ParseNewHits on 1000 rows with each, compare elapsed time | CLR should be ≥5x faster |
 | AutoConsumer email lookup | `SELECT IndividualKey FROM AutoConsumer WHERE EMail = @email` with index | < 1ms per lookup (index seek) |
 | Match proc throughput | Process 10K rows with mix of matchable/unmatchable emails | < 10 seconds per batch |
-| Device MERGE throughput | MERGE 50K rows into PiXL_Device (mix of new/existing) | < 2 seconds |
-| IP MERGE throughput | MERGE 50K rows into PiXL_IP (mix of new/existing) | < 2 seconds |
+| Device MERGE throughput | MERGE 50K rows into PiXL.Device (mix of new/existing) | < 2 seconds |
+| IP MERGE throughput | MERGE 50K rows into PiXL.IP (mix of new/existing) | < 2 seconds |
 | JS endpoint latency | `curl` with timing for `/js/12800/1.js` | < 5ms (cached script generation) |
 
 ---
@@ -1367,7 +1427,7 @@ The deployment order for all SQL scripts:
 
 ### Decision 2: JSON for Client Params Storage
 
-**Chose:** Single `ClientParamsJson NVARCHAR(MAX)` column with JSON  
+**Chose:** Single `ClientParamsJson NVARCHAR(4000)` column with JSON  
 **Over:** Individual typed columns per param, or EAV (entity-attribute-value) table
 
 **Why:**
@@ -1377,22 +1437,22 @@ The deployment order for all SQL scripts:
 
 ### Decision 3: Persisted Computed Column for MatchEmail
 
-**Chose:** `MatchEmail AS CAST(JSON_VALUE(ClientParamsJson, '$.email') AS NVARCHAR(200)) PERSISTED` on `PiXL_Visit`  
-**Over:** Manual population in the ETL proc, or non-persisted computed column, or column on PiXL_Parsed
+**Chose:** `MatchEmail AS CAST(JSON_VALUE(ClientParamsJson, '$.email') AS NVARCHAR(200)) PERSISTED` on `PiXL.Visit`  
+**Over:** Manual population in the ETL proc, or non-persisted computed column, or column on PiXL.Parsed
 
 **Why:**
 - **vs. manual:** A computed column self-maintains. No ETL logic to update it. If we update `ClientParamsJson` (e.g., to fix a value), `MatchEmail` auto-updates.
 - **vs. non-persisted:** Non-persisted means `JSON_VALUE()` runs on every read. Persisted means the value is physically stored and can be indexed. Critical for the match proc's watermark scan.
-- **vs. on PiXL_Parsed:** `PiXL_Parsed` is the immutable 175-column warehouse for fingerprint data. Client params are relational metadata that belong on the fact table (`PiXL_Visit`), where they sit alongside `DeviceId`, `IpId`, and other relational FKs.
+- **vs. on PiXL.Parsed:** `PiXL.Parsed` is the immutable 175-column warehouse for fingerprint data. Client params are relational metadata that belong on the fact table (`PiXL.Visit`), where they sit alongside `DeviceId`, `IpId`, and other relational FKs.
 
 ### Decision 4: Separate Match Watermark Table
 
-**Chose:** `ETL_MatchWatermark` as a separate table from `ETL_Watermark`  
-**Over:** Adding a second row in `ETL_Watermark`
+**Chose:** `ETL.MatchWatermark` as a separate table from `ETL.Watermark`  
+**Over:** Adding a second row in `ETL.Watermark`
 
 **Why:** Zero contention. The ETL and match services update their watermarks independently in their own transactions. If they shared a table, a long-running match transaction could block the ETL watermark update (or vice versa). Separate tables mean separate page locks — zero interference.
 
-### Decision 5: MERGE for PiXL_Match Upserts
+### Decision 5: MERGE for PiXL.Match Upserts
 
 **Chose:** SQL `MERGE` statement  
 **Over:** `IF EXISTS / UPDATE / ELSE INSERT`, or separate `INSERT ... WHERE NOT EXISTS` + `UPDATE`
@@ -1410,7 +1470,7 @@ The deployment order for all SQL scripts:
 
 ### Decision 7: No Staging Tables
 
-**Chose:** Direct ingest into PiXL_Test via async SqlBulkCopy  
+**Chose:** Direct ingest into PiXL.Test via async SqlBulkCopy  
 **Over:** Old platform's 4-table staging rotation
 
 **Why:** The staging rotation existed because the old IIS handler did a blocking synchronous INSERT into whichever staging table was "active." To prevent read-write contention, it rotated between 4 tables on a 5-minute timer.
@@ -1418,7 +1478,7 @@ The deployment order for all SQL scripts:
 Our architecture is fundamentally different:
 - The pixel endpoint is non-blocking (fires-and-forgets into a `Channel<T>`)
 - `DatabaseWriterService` batches 100 records and uses `SqlBulkCopy` with minimal locking
-- `PiXL_Test` doesn't have a clustered columnstore or any read-heavy workload competing with inserts
+- `PiXL.Test` doesn't have a clustered columnstore or any read-heavy workload competing with inserts
 - The ETL reads by Id range (watermark-based), so it never conflicts with SqlBulkCopy appends
 
 ### Decision 8: CLR Assembly Permission Level
@@ -1430,15 +1490,15 @@ Our architecture is fundamentally different:
 
 ### Decision 9: Normalized Star Schema (4 New Tables)
 
-**Chose:** Separate `PiXL_Device`, `PiXL_IP`, `PiXL_Visit`, `PiXL_Match` tables with proper FKs  
-**Over:** Flat `PiXL_Match` with denormalized device/IP data inline (v1 plan)
+**Chose:** Separate `PiXL.Device`, `PiXL.IP`, `PiXL.Visit`, `PiXL.Match` tables with proper FKs  
+**Over:** Flat `PiXL.Match` with denormalized device/IP data inline (v1 plan)
 
 **Why:** Maximum normalization means:
-- **PiXL_Device is platform-wide** — the same physical device across multiple clients shares one row. Enables cross-client device intelligence without duplicating data.
-- **PiXL_IP is platform-wide** — same rationale. One IP row regardless of which pixel saw it.
-- **PiXL_Visit bridges everything** — 1:1 with PiXL_Parsed (same PK), carries DeviceId/IpId FKs + ClientParamsJson. Separates relational concerns from the wide fingerprint warehouse.
-- **PiXL_Match has proper FKs** — instead of denormalizing IP address as a VARCHAR, it has `IpId` FK to `PiXL_IP` and `DeviceId` FK to `PiXL_Device`. Joins are on indexed integers, not string comparisons.
-- **Evolves independently** — adding metadata to PiXL_IP (e.g., geo data, ISP) doesn't touch any other table. Adding signals to PiXL_Device (e.g., stability score) is isolated.
+- **PiXL.Device is platform-wide** — the same physical device across multiple clients shares one row. Enables cross-client device intelligence without duplicating data.
+- **PiXL.IP is platform-wide** — same rationale. One IP row regardless of which pixel saw it.
+- **PiXL.Visit bridges everything** — 1:1 with PiXL.Parsed (same PK), carries DeviceId/IpId FKs + ClientParamsJson. Separates relational concerns from the wide fingerprint warehouse.
+- **PiXL.Match has proper FKs** — instead of denormalizing IP address as a VARCHAR, it has `IpId` FK to `PiXL.IP` and `DeviceId` FK to `PiXL.Device`. Joins are on indexed integers, not string comparisons.
+- **Evolves independently** — adding metadata to PiXL.IP (e.g., geo data, ISP) doesn't touch any other table. Adding signals to PiXL.Device (e.g., stability score) is isolated.
 
 ### Decision 10: IndividualKey/AddressKey Instead of RecordID
 
@@ -1451,43 +1511,43 @@ Our architecture is fundamentally different:
 - Geo match → `AddressKey` identifies the household
 - Downstream joins to AC can use `IndividualKey` to pull the full record set for a person
 
-### Decision 11: Lean PiXL_Device (Hash + Metadata Only)
+### Decision 11: Lean PiXL.Device (Hash + Metadata Only)
 
 **Chose:** 5-column device table (DeviceId, DeviceHash, FirstSeen, LastSeen, HitCount)  
 **Over:** Full component snapshot (Canvas, WebGL, Audio, GPU, Fonts, Screen, Platform, etc.)
 
-**Why:** The component fingerprint fields already exist in `PiXL_Parsed` (175 columns). Duplicating them into `PiXL_Device` would be redundant and require complex UPDATE logic when a device "evolves" (e.g., browser update changes WebGL fingerprint). The lean approach means:
-- `PiXL_Device` is tiny and fast to MERGE (5 columns, clustered on 32-byte hash)
-- To see component fields, join through `PiXL_Visit → PiXL_Parsed` (one hop)
-- Hash collisions can be debugged by comparing component values across PiXL_Parsed rows for the same DeviceId
+**Why:** The component fingerprint fields already exist in `PiXL.Parsed` (175 columns). Duplicating them into `PiXL.Device` would be redundant and require complex UPDATE logic when a device "evolves" (e.g., browser update changes WebGL fingerprint). The lean approach means:
+- `PiXL.Device` is tiny and fast to MERGE (5 columns, clustered on 32-byte hash)
+- To see component fields, join through `PiXL.Visit → PiXL.Parsed` (one hop)
+- Hash collisions can be debugged by comparing component values across PiXL.Parsed rows for the same DeviceId
 
 ### Decision 12: Device Hash Computed in SQL (Not C#)
 
-**Chose:** `HASHBYTES('SHA2_256', CONCAT_WS('|', Canvas, Fonts, GPU, WebGL, Audio))` in Phase 9 of `usp_ParseNewHits`  
+**Chose:** `HASHBYTES('SHA2_256', CONCAT_WS('|', Canvas, Fonts, GPU, WebGL, Audio))` in Phase 9 of `ETL.usp_ParseNewHits`  
 **Over:** New C# `MatchBackgroundService` computing hash and doing device upsert
 
 **Why:** Keeps all ETL logic in one place. The hash computation runs on the same batch temp table that Phase 8 already populated — no additional database round-trip. `HASHBYTES` is highly optimized in SQL Server 2019 Enterprise (hardware-accelerated SHA-256). The device MERGE in Phase 10 can use the hash directly from the temp table.
 
 ### Decision 13: Global (Platform-Wide) Device and IP Tables
 
-**Chose:** One `PiXL_Device` row per unique device hash, one `PiXL_IP` row per unique IP address, regardless of company  
+**Chose:** One `PiXL.Device` row per unique device hash, one `PiXL.IP` row per unique IP address, regardless of company  
 **Over:** Per-company device/IP tables (CompanyID in the PK)
 
 **Why:**
 - **Cross-client intelligence:** If the same device appears on two different clients' pixels, we see it. Useful for fraud detection and audience overlap analysis.
 - **More normalized:** A device is a physical thing — it doesn't belong to a company. An IP is a network address — it doesn't belong to a company.
 - **Smaller tables:** De-duplication means fewer rows. A bot that hits 10 different pixels is one device row with HitCount=10, not 10 rows.
-- **The company relationship** is captured in `PiXL_Visit` (which has CompanyID) and `PiXL_Match` (which has CompanyID). To find "all devices seen by Company X," join `PiXL_Visit` on CompanyID and DeviceId.
+- **The company relationship** is captured in `PiXL.Visit` (which has CompanyID) and `PiXL.Match` (which has CompanyID). To find "all devices seen by Company X," join `PiXL.Visit` on CompanyID and DeviceId.
 
-### Decision 14: PiXL_Visit as PK=SourceId (Not New IDENTITY)
+### Decision 14: PiXL.Visit as PK=SourceId (Not New IDENTITY)
 
-**Chose:** `PiXL_Visit.SourceId` = `PiXL_Parsed.SourceId` = `PiXL_Test.Id` — reuse the existing chain  
-**Over:** New BIGINT IDENTITY column on PiXL_Visit
+**Chose:** `PiXL.Visit.SourceId` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — reuse the existing chain  
+**Over:** New BIGINT IDENTITY column on PiXL.Visit
 
 **Why:** There's no reason to create a new surrogate key for a 1:1 relationship. Using the same `SourceId` means:
-- Joining PiXL_Visit to PiXL_Parsed is trivial (same PK)
+- Joining PiXL.Visit to PiXL.Parsed is trivial (same PK)
 - No ambiguity about which visit corresponds to which parsed row
-- FKs from PiXL_Match (`FirstSourceId`, `LatestSourceId`) point to both tables interchangeably
+- FKs from PiXL.Match (`FirstSourceId`, `LatestSourceId`) point to both tables interchangeably
 - One less IDENTITY to manage
 
 ---
@@ -1498,32 +1558,32 @@ These are explicitly **not** in scope for this MVP but the design accommodates t
 
 ### 7.1 Fingerprint-Based Visitor Identity
 
-The MVP already computes a composite device hash and populates `PiXL_Device`. The next step is using `PiXL_Device` as a match vector:
+The MVP already computes a composite device hash and populates `PiXL.Device`. The next step is using `PiXL.Device` as a match vector:
 - `MatchType = 'fingerprint'`
 - `MatchKey = CONVERT(VARCHAR(64), DeviceHash, 2)` (hex string of the 32-byte hash)
-- New logic in `usp_MatchVisits`: For visits WITHOUT email, find previous visits from the same `DeviceId` that DO have a resolved `IndividualKey`, and propagate the identity
-- No new proc needed — extend `usp_MatchVisits` with a fingerprint-matching phase
-- The `PiXL_Match` table's `(MatchType, MatchKey)` design handles this with zero schema changes
-- `PiXL_Match.DeviceId` FK already captures the device relationship
+- New logic in `ETL.usp_MatchVisits`: For visits WITHOUT email, find previous visits from the same `DeviceId` that DO have a resolved `IndividualKey`, and propagate the identity
+- No new proc needed — extend `ETL.usp_MatchVisits` with a fingerprint-matching phase
+- The `PiXL.Match` table's `(MatchType, MatchKey)` design handles this with zero schema changes
+- `PiXL.Match.DeviceId` FK already captures the device relationship
 
 ### 7.2 IP + Geo Matching
 
-`PiXL_IP` already exists as a global dimension table. The next step is IP-based and geo-based matching:
-- **IP match:** `MatchType = 'ip'`, `MatchKey = <ip_address>`. Join `PiXL_IP.IPAddress` to `AutoConsumer.IP_Clean` (index already exists on AC). Get `IndividualKey`.
-- **Geo match:** `MatchType = 'geo'`, `MatchKey = <zip_code>`. Use `PiXL.Zipcode` + `PiXL.Radius` to find AutoConsumer records by `AddressKey` within the geo radius. Requires adding geo data (lat/lon or spatial index) to `PiXL_IP` or a separate geo lookup.
-- Both populate `PiXL_Match` with `IndividualKey` (for IP) or `AddressKey` (for geo) — the schema already supports this.
+`PiXL.IP` already exists as a global dimension table. The next step is IP-based and geo-based matching:
+- **IP match:** `MatchType = 'ip'`, `MatchKey = <ip_address>`. Join `PiXL.IP.IPAddress` to `AutoConsumer.IP_Clean` (index already exists on AC). Get `IndividualKey`.
+- **Geo match:** `MatchType = 'geo'`, `MatchKey = <zip_code>`. Use `PiXL.Zipcode` + `PiXL.Radius` to find AutoConsumer records by `AddressKey` within the geo radius. Requires adding geo data (lat/lon or spatial index) to `PiXL.IP` or a separate geo lookup.
+- Both populate `PiXL.Match` with `IndividualKey` (for IP) or `AddressKey` (for geo) — the schema already supports this.
 
 ### 7.3 Cross-Device Linking
 
 The normalized schema enables cross-device linking natively:
-- `PiXL_Visit` has both `DeviceId` FK and `IpId` FK, plus `MatchEmail`
-- When the same `IndividualKey` appears in `PiXL_Match` from different `DeviceId` values → those are the same person on different devices
+- `PiXL.Visit` has both `DeviceId` FK and `IpId` FK, plus `MatchEmail`
+- When the same `IndividualKey` appears in `PiXL.Match` from different `DeviceId` values → those are the same person on different devices
 - When the same `DeviceId` appears from different `IpId` values → that device moved between networks
-- Query example: `SELECT DISTINCT m1.DeviceId, m2.DeviceId FROM PiXL_Match m1 JOIN PiXL_Match m2 ON m1.IndividualKey = m2.IndividualKey WHERE m1.DeviceId <> m2.DeviceId` → device graph for people with multiple devices
+- Query example: `SELECT DISTINCT m1.DeviceId, m2.DeviceId FROM PiXL.Match m1 JOIN PiXL.Match m2 ON m1.IndividualKey = m2.IndividualKey WHERE m1.DeviceId <> m2.DeviceId` → device graph for people with multiple devices
 
 ### 7.4 Date Partitioning
 
-When `PiXL_Parsed` grows beyond ~10M rows, add monthly partitioning on `ReceivedAt`:
+When `PiXL.Parsed` grows beyond ~10M rows, add monthly partitioning on `ReceivedAt`:
 - Partition function: monthly boundaries
 - Partition scheme: map months to filegroups
 - The existing clustered index `CIX_PiXL_Parsed_ReceivedAt` becomes partition-aligned
@@ -1532,9 +1592,9 @@ When `PiXL_Parsed` grows beyond ~10M rows, add monthly partitioning on `Received
 ### 7.5 Client Delivery
 
 When the boss decides what the client receives:
-- **File export:** SQL Agent job runs nightly, queries `PiXL_Match JOIN AutoConsumer` for new matches, exports to CSV
+- **File export:** SQL Agent job runs nightly, queries `PiXL.Match JOIN AutoConsumer` for new matches, exports to CSV
 - **API:** New endpoint in TrackingEndpoints: `GET /api/{companyId}/matches?since=<datetime>`
-- **Dashboard:** New views in the Diagnostics project reading from PiXL_Match
+- **Dashboard:** New views in the Diagnostics project reading from PiXL.Match
 - **Webhook:** New background service that POST's new matches to a client-configured URL
 
 ### 7.6 CLR Function Expansion
@@ -1562,10 +1622,10 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 | AutoConsumer has dirty email data (duplicates, bad formats) | High | Medium — match quality degrades | `clr_NormalizeEmail` handles case, whitespace, Gmail aliases. `TOP 1 ORDER BY RecordID DESC` handles duplicates by picking most recent. IndividualKey groups duplicate AC records for the same person. |
 | PiXL config cache serves stale data | Low | Low — client params won't be extracted until next refresh | 5-minute refresh interval is acceptable. For urgent changes, restart the service. |
 | QueryString exceeds NVARCHAR(MAX) with many client params | Very Low | Low — SQL truncation | Each `_cp_*` param adds ~20-50 chars. Even 100 params would add ~5KB. QueryString is NVARCHAR(MAX). Not a concern. |
-| Device hash collisions (different devices produce same hash) | Low | Low — match quality slightly reduced | 5 entropy signals at ~27 combined bits = very low collision rate at our scale. PiXL_Parsed has full component fields for collision analysis. Can add more signals to hash if needed. |
+| Device hash collisions (different devices produce same hash) | Low | Low — match quality slightly reduced | 5 entropy signals at ~27 combined bits = very low collision rate at our scale. PiXL.Parsed has full component fields for collision analysis. Can add more signals to hash if needed. |
 | Triple MERGE per ETL batch (Device + IP + Visit INSERT) adds latency | Medium | Low — ETL takes longer per cycle | Device and IP MERGEs are on unique clustered indexes (seek + point update). Visit is a simple INSERT. Total added time should be <2s per 50K batch. Monitor ETL cycle time after deployment. |
-| IndividualKey/AddressKey change semantics in future AC reload | Low | Medium — orphaned keys in PiXL_Match | AC keys are maintained by the DBA team and are contractually stable. If they change, PiXL_Match rows would need a backfill pass. |
-| Boss asks "where's the client delivery?" | High | Medium — scope creep | This plan explicitly scopes delivery as TBD. The pipeline produces correct data in `PiXL_Match`. Delivery is a separate workstream. |
+| IndividualKey/AddressKey change semantics in future AC reload | Low | Medium — orphaned keys in PiXL.Match | AC keys are maintained by the DBA team and are contractually stable. If they change, PiXL.Match rows would need a backfill pass. |
+| Boss asks "where's the client delivery?" | High | Medium — scope creep | This plan explicitly scopes delivery as TBD. The pipeline produces correct data in `PiXL.Match`. Delivery is a separate workstream. |
 
 ---
 
@@ -1575,12 +1635,13 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 
 | File | Type | Description |
 |------|------|-------------|
-| `SQL/18_CompanyAndPiXLTables.sql` | SQL Migration | Company, PiXL, ETL_MatchWatermark |
-| `SQL/19_DeviceIpVisitMatchTables.sql` | SQL Migration | PiXL_Device, PiXL_IP, PiXL_Visit, PiXL_Match (normalized schema) |
-| `SQL/20_ClientParamsSupport.sql` | SQL Migration | Verification-only — confirms PiXL_Visit.ClientParamsJson & MatchEmail exist |
-| `SQL/21_ParseNewHits_Phases9to13.sql` | SQL Migration | Adds Phases 9-13 to usp_ParseNewHits (DeviceHash, MERGE Device, MERGE IP, Client Params, INSERT Visit) + CLR swap |
+| `SQL/17B_CreateSchemas.sql` | SQL Migration | CREATE SCHEMA PiXL/ETL, transfer existing tables, rename, fix dependent objects |
+| `SQL/18_CompanyAndPiXLTables.sql` | SQL Migration | PiXL.Company, PiXL.Pixel, ETL.MatchWatermark |
+| `SQL/19_DeviceIpVisitMatchTables.sql` | SQL Migration | PiXL.Device, PiXL.IP, PiXL.Visit, PiXL.Match (normalized schema) |
+| `SQL/20_ClientParamsSupport.sql` | SQL Migration | Verification-only — confirms PiXL.Visit.ClientParamsJson & MatchEmail exist |
+| `SQL/21_ParseNewHits_Phases9to13.sql` | SQL Migration | Adds Phases 9-13 to ETL.usp_ParseNewHits (DeviceHash, MERGE Device, MERGE IP, Client Params, INSERT Visit) + CLR swap |
 | `SQL/22_AutoConsumerEmailIndex.sql` | SQL Migration | IX_AutoConsumer_EMail (INCLUDE IndividualKey, AddressKey) |
-| `SQL/23_MatchVisits.sql` | SQL Migration | usp_MatchVisits proc |
+| `SQL/23_MatchVisits.sql` | SQL Migration | ETL.usp_MatchVisits proc |
 | `SQL/24_ClrFunctions.sql` | SQL Migration | SmartPixl.Clr assembly + 3 functions |
 | `SQL/25_SeedClient12800.sql` | SQL Migration | Company/PiXL/Watermark seed data |
 | `SmartPixl.Clr/SmartPixl.Clr.csproj` | C# Project | CLR assembly project |
@@ -1594,7 +1655,7 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 
 | File | Changes |
 |------|---------|
-| `Scripts/Tier5Script.cs` | Add `{{CLIENT_PARAMS}}` placeholder, update `GetScript` signature/cache |
+| `Scripts/PiXLScript.cs` | Add `{{CLIENT_PARAMS}}` placeholder, update `GetScript` signature/cache |
 | `Endpoints/TrackingEndpoints.cs` | Inject `PiXLConfigCacheService`, pass client params to JS endpoint |
 | `Configuration/TrackingSettings.cs` | Add `MatchIntervalSeconds`, `MatchBatchSize` |
 | `appsettings.json` | Add match settings (120s interval) |
@@ -1604,21 +1665,21 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 
 | Object | Type | Database |
 |--------|------|----------|
-| `dbo.Company` | Table | SmartPixl |
-| `dbo.PiXL` | Table | SmartPixl |
-| `dbo.PiXL_Device` | Table (dimension) | SmartPixl |
-| `dbo.PiXL_IP` | Table (dimension) | SmartPixl |
-| `dbo.PiXL_Visit` | Table (fact, 1:1 with PiXL_Parsed) | SmartPixl |
-| `dbo.PiXL_Match` | Table (identity resolution) | SmartPixl |
-| `dbo.ETL_MatchWatermark` | Table | SmartPixl |
-| `dbo.PiXL_Visit.ClientParamsJson` | Column | SmartPixl |
-| `dbo.PiXL_Visit.MatchEmail` | Computed Column | SmartPixl |
+| `PiXL.Company` | Table | SmartPixl |
+| `PiXL.Pixel` | Table | SmartPixl |
+| `PiXL.Device` | Table (dimension) | SmartPixl |
+| `PiXL.IP` | Table (dimension) | SmartPixl |
+| `PiXL.Visit` | Table (fact, 1:1 with PiXL.Parsed) | SmartPixl |
+| `PiXL.Match` | Table (identity resolution) | SmartPixl |
+| `ETL.MatchWatermark` | Table | SmartPixl |
+| `PiXL.Visit.ClientParamsJson` | Column | SmartPixl |
+| `PiXL.Visit.MatchEmail` | Computed Column | SmartPixl |
 | `IX_PiXL_Visit_MatchEmail` | Index | SmartPixl |
 | `SmartPixl.Clr` | Assembly | SmartPixl |
 | `dbo.clr_UrlDecode` | CLR Function | SmartPixl |
 | `dbo.clr_GetQueryParam` | CLR Function | SmartPixl |
 | `dbo.clr_NormalizeEmail` | CLR Function | SmartPixl |
-| `dbo.usp_MatchVisits` | Stored Proc | SmartPixl |
+| `ETL.usp_MatchVisits` | Stored Proc | SmartPixl |
 | `IX_AutoConsumer_EMail` | Index (INCLUDE IndividualKey, AddressKey) | AutoUpdate |
 
 ---
@@ -1628,7 +1689,7 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 **Input:** User visits `https://www.thetriviaquest.com/question/1?hid=2602102158531672553&email=bpryce6%40gmail.com&q_id=RT2025030601518a07f3e4fa2d11e&answer=true&guess=Tool%20Time&difficulty=easy&decade=90s&category_id=4&sub_category_id=4.04&datatype=ret-openers`
 
 **Step 1 — JS Script executes:**
-The Tier 5 script (served from `/js/12800/1.js`) runs on the page. It:
+The pixel script (served from `/js/12800/1.js`) runs on the page. It:
 - Collects 158 fingerprint signals into `data = {}`
 - Reads `ClientParams` config: `['email','hid','q_id','id','answer','guess','difficulty','decade','category_id','sub_category_id','datatype']`
 - Extracts from `location.search`:
@@ -1650,21 +1711,21 @@ QueryString: "sw=1920&sh=1080&...&_cp_email=bpryce6%40gmail.com&_cp_hid=26021021
 Server-side enrichment runs (FP stability, IP behavior), then the record is queued.
 
 **Step 3 — DatabaseWriterService writes:**
-SqlBulkCopy inserts into `PiXL_Test`. The QueryString column contains everything, including all `_cp_*` params.
+SqlBulkCopy inserts into `PiXL.Test`. The QueryString column contains everything, including all `_cp_*` params.
 
-**Step 4 — EtlBackgroundService runs usp_ParseNewHits (Phases 1–13):**
-- **Phases 1-8:** Parse all 158+ fingerprint signals into PiXL_Parsed columns (unchanged)
+**Step 4 — EtlBackgroundService runs ETL.usp_ParseNewHits (Phases 1–13):**
+- **Phases 1-8:** Parse all 158+ fingerprint signals into PiXL.Parsed columns (unchanged)
 - **Phase 9 — DeviceHash:** Compute `HASHBYTES('SHA2_256', CONCAT_WS('|', CanvasFingerprint, DetectedFonts, GPURenderer, WebGLFingerprint, AudioFingerprintHash))` → `0xA3F1...` (32-byte hash)
-- **Phase 10 — MERGE PiXL_Device:**
+- **Phase 10 — MERGE PiXL.Device:**
   ```
-  MERGE PiXL_Device ON DeviceHash = 0xA3F1...
+  MERGE PiXL.Device ON DeviceHash = 0xA3F1...
   WHEN NOT MATCHED → INSERT (DeviceHash, FirstSeenAt, LastSeenAt, HitCount)
   WHEN MATCHED → UPDATE LastSeenAt, HitCount += 1
   → DeviceId = 47 (new device, identity auto-assigned)
   ```
-- **Phase 11 — MERGE PiXL_IP:**
+- **Phase 11 — MERGE PiXL.IP:**
   ```
-  MERGE PiXL_IP ON IPAddress = '98.45.67.123'
+  MERGE PiXL.IP ON IPAddress = '98.45.67.123'
   WHEN NOT MATCHED → INSERT (IPAddress, FirstSeenAt, LastSeenAt, HitCount)
   WHEN MATCHED → UPDATE LastSeenAt, HitCount += 1
   → IpId = 312 (existing IP, seen before across clients)
@@ -1673,19 +1734,19 @@ SqlBulkCopy inserts into `PiXL_Test`. The QueryString column contains everything
   ```json
   {"email":"bpryce6@gmail.com","hid":"2602102158531672553","guess":"Tool Time",...}
   ```
-- **Phase 13 — INSERT PiXL_Visit:**
+- **Phase 13 — INSERT PiXL.Visit:**
   ```
-  INSERT PiXL_Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ClientParamsJson, VisitedAt)
+  INSERT PiXL.Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ClientParamsJson, VisitedAt)
   VALUES (964, 12800, 1, 47, 312, '{"email":"bpryce6@gmail.com",...}', '2026-02-13 14:30:00')
   ```
   → `MatchEmail` computed column auto-populates: `bpryce6@gmail.com` (extracted from ClientParamsJson via CLR)
 
-**Step 5 — MatchBackgroundService runs usp_MatchVisits:**
-- Reads PiXL_Visit rows where `SourceId > LastProcessedSourceId` and `MatchEmail IS NOT NULL`
+**Step 5 — MatchBackgroundService runs ETL.usp_MatchVisits:**
+- Reads PiXL.Visit rows where `SourceId > LastProcessedSourceId` and `MatchEmail IS NOT NULL`
 - Normalizes: `clr_NormalizeEmail('bpryce6@gmail.com')` → `bpryce6@gmail.com` (already clean)
 - Looks up: `SELECT TOP 1 IndividualKey, AddressKey FROM AutoUpdate.dbo.AutoConsumer WHERE EMail = 'bpryce6@gmail.com' AND VPN_Flag IS NULL ORDER BY RecordID DESC`
   → Returns `IndividualKey = 'IND00000518234567890123456789012'`, `AddressKey = 'ADD00000098765432101234567890012'`
-- MERGEs into `PiXL_Match`:
+- MERGEs into `PiXL.Match`:
   ```
   MatchId: 1
   CompanyID: 12800
@@ -1706,20 +1767,20 @@ SqlBulkCopy inserts into `PiXL_Test`. The QueryString column contains everything
 
 **Step 6 — Same user returns:**
 User visits another question. The pixel fires again with the same email.
-- **usp_ParseNewHits:**
-  - Phase 10 MERGE on PiXL_Device: MATCHED → `HitCount = 2`, `LastSeenAt` updated
-  - Phase 11 MERGE on PiXL_IP: MATCHED → `HitCount` incremented
-  - Phase 13 INSERT PiXL_Visit: New row `SourceId = 965`, same `DeviceId = 47`, same `IpId = 312`
-- **usp_MatchVisits MERGE:**
+- **ETL.usp_ParseNewHits:**
+  - Phase 10 MERGE on PiXL.Device: MATCHED → `HitCount = 2`, `LastSeenAt` updated
+  - Phase 11 MERGE on PiXL.IP: MATCHED → `HitCount` incremented
+  - Phase 13 INSERT PiXL.Visit: New row `SourceId = 965`, same `DeviceId = 47`, same `IpId = 312`
+- **ETL.usp_MatchVisits MERGE:**
   - `WHEN MATCHED THEN UPDATE SET LatestSourceId = 965, LastSeen = 2026-02-13 14:35:00, HitCount = 2`
   - IndividualKey/AddressKey stay as-is — already resolved.
 
 **Resulting Star Schema after 2 visits:**
 ```
-PiXL_Device (DeviceId=47)  ←──  PiXL_Visit (SourceId=964)  ──→  PiXL_IP (IpId=312)
-                                 PiXL_Visit (SourceId=965)
+PiXL.Device (DeviceId=47)  ←──  PiXL.Visit (SourceId=964)  ──→  PiXL.IP (IpId=312)
+                                 PiXL.Visit (SourceId=965)
                                        ↓
-                                 PiXL_Match (MatchId=1, IndividualKey='IND...', AddressKey='ADD...')
+                                 PiXL.Match (MatchId=1, IndividualKey='IND...', AddressKey='ADD...')
 ```
 
 ---

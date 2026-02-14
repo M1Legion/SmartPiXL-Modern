@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using TrackingPixel.Scripts;
@@ -158,7 +159,7 @@ public static partial class TrackingEndpoints
         });
         
         // ============================================================================
-        // TIER 5: JAVASCRIPT FILE ENDPOINT
+        // JAVASCRIPT FILE ENDPOINT — Serves the fingerprint collection script
         // ============================================================================
         app.MapGet("/js/{companyId}/{pixlId}.js", (HttpContext ctx, string companyId, string pixlId, IConfiguration config) =>
         {
@@ -175,7 +176,7 @@ public static partial class TrackingEndpoints
                 baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
             }
             var pixelUrl = $"{baseUrl}/{companyId}/{pixlId}_SMART.GIF";
-            var javascript = Tier5Script.GetScript(pixelUrl);
+            var javascript = PiXLScript.GetScript(pixelUrl);
             
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
             ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -185,7 +186,7 @@ public static partial class TrackingEndpoints
         
         // ============================================================================
         // MAIN PIXEL ENDPOINT - Returns 1x1 GIF
-        // TIER 5 ONLY: Only records requests with actual tracking data (querystring)
+        // Only records requests with actual tracking data (querystring from the JS script)
         // Ignores favicon.ico, robots.txt, and other browser chrome requests
         // ============================================================================
         app.MapGet("/{**path}", (HttpContext ctx) =>
@@ -201,47 +202,7 @@ public static partial class TrackingEndpoints
             
             if (isTrackingPixel && hasTrackingData)
             {
-                var trackingData = captureService.CaptureFromRequest(ctx.Request);
-                
-                // Server-side fingerprint stability + volume analysis
-                // Catches what client-side can't: IP-level traffic patterns
-                var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
-                var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
-                var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
-                var fpResult = fpService.RecordAndCheck(
-                    trackingData.IPAddress ?? "unknown", canvasFP, webglFP, audioFP);
-                
-                if (fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate)
-                {
-                    trackingData = trackingData with
-                    {
-                        QueryString = trackingData.QueryString +
-                            $"&_srv_fpAlert=1&_srv_fpObs={fpResult.ObservationCount}" +
-                            $"&_srv_fpUniq={fpResult.UniqueFingerprints}&_srv_fpRate5m={fpResult.RecentRate}"
-                    };
-                }
-                
-                // Server-side IP behavior analysis: subnet velocity + rapid-fire timing
-                var ipResult = ipBehaviorService.RecordAndCheck(trackingData.IPAddress ?? "unknown");
-                if (ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate)
-                {
-                    trackingData = trackingData with
-                    {
-                        QueryString = trackingData.QueryString +
-                            $"&_srv_subnetIps={ipResult.SubnetUniqueIps}" +
-                            $"&_srv_subnetHits={ipResult.SubnetTotalHits}" +
-                            $"&_srv_hitsIn15s={ipResult.HitsIn15Seconds}" +
-                            $"&_srv_lastGapMs={ipResult.LastGapMs}" +
-                            (ipResult.SubSecondDuplicate ? "&_srv_subSecDupe=1" : "") +
-                            (ipResult.SubnetVelocityAlert ? "&_srv_subnetAlert=1" : "") +
-                            (ipResult.RapidFireAlert ? "&_srv_rapidFire=1" : "")
-                    };
-                }
-                
-                if (!writerService.TryQueue(trackingData))
-                {
-                    logger.Warning("Queue full - dropped tracking request");
-                }
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, writerService, logger);
             }
             // Else: silently return the GIF without recording (favicon, robots, etc.)
             
@@ -254,56 +215,20 @@ public static partial class TrackingEndpoints
         });
         
         // ============================================================================
-        // ALTERNATIVE 204 ENDPOINT - No body, slightly faster (TIER 5 ONLY)
+        // ALTERNATIVE 204 ENDPOINT — No body, slightly faster
         // ============================================================================
         app.MapGet("/pixel204/{**path}", (HttpContext ctx) =>
         {
             var path = ctx.Request.Path.ToString();
             var queryString = ctx.Request.QueryString.ToString();
             
-            // Only record Tier 5 tracking data
+            // Only record enriched tracking data (requires querystring from JS)
             var isTrackingPixel = path.Contains("_SMART.GIF", StringComparison.OrdinalIgnoreCase);
             var hasTrackingData = queryString.Length > 10;
             
             if (isTrackingPixel && hasTrackingData)
             {
-                var trackingData = captureService.CaptureFromRequest(ctx.Request);
-                
-                // Server-side fingerprint stability + volume analysis
-                var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
-                var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
-                var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
-                var fpResult = fpService.RecordAndCheck(
-                    trackingData.IPAddress ?? "unknown", canvasFP, webglFP, audioFP);
-                
-                if (fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate)
-                {
-                    trackingData = trackingData with
-                    {
-                        QueryString = trackingData.QueryString +
-                            $"&_srv_fpAlert=1&_srv_fpObs={fpResult.ObservationCount}" +
-                            $"&_srv_fpUniq={fpResult.UniqueFingerprints}&_srv_fpRate5m={fpResult.RecentRate}"
-                    };
-                }
-                
-                // Server-side IP behavior analysis: subnet velocity + rapid-fire timing
-                var ipResult = ipBehaviorService.RecordAndCheck(trackingData.IPAddress ?? "unknown");
-                if (ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate)
-                {
-                    trackingData = trackingData with
-                    {
-                        QueryString = trackingData.QueryString +
-                            $"&_srv_subnetIps={ipResult.SubnetUniqueIps}" +
-                            $"&_srv_subnetHits={ipResult.SubnetTotalHits}" +
-                            $"&_srv_hitsIn15s={ipResult.HitsIn15Seconds}" +
-                            $"&_srv_lastGapMs={ipResult.LastGapMs}" +
-                            (ipResult.SubSecondDuplicate ? "&_srv_subSecDupe=1" : "") +
-                            (ipResult.SubnetVelocityAlert ? "&_srv_subnetAlert=1" : "") +
-                            (ipResult.RapidFireAlert ? "&_srv_rapidFire=1" : "")
-                    };
-                }
-                
-                writerService.TryQueue(trackingData);
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, writerService, logger);
             }
             
             return Results.NoContent();
@@ -321,4 +246,82 @@ public static partial class TrackingEndpoints
             return Directory.Exists(path) ? path : null;
         }
     }
+    
+    // ========================================================================
+    // SHARED PIXEL PROCESSING — Extracted from main pixel + pixel204 endpoints
+    // to eliminate code duplication. Server-side enrichment (fingerprint
+    // stability, IP behavior) is performed and appended to the query string
+    // before enqueuing for database write.
+    // ========================================================================
+    
+    /// <summary>
+    /// Captures tracking data from the HTTP request, runs server-side analysis
+    /// (fingerprint stability + IP behavior), appends alert parameters to the
+    /// query string, and enqueues the enriched record for bulk database write.
+    /// Uses a thread-static StringBuilder to avoid per-request heap allocations
+    /// when building server-side query string extensions.
+    /// </summary>
+    private static void CaptureAndEnqueue(
+        HttpContext ctx,
+        TrackingCaptureService captureService,
+        FingerprintStabilityService fpService,
+        IpBehaviorService ipBehaviorService,
+        DatabaseWriterService writerService,
+        ITrackingLogger logger)
+    {
+        var trackingData = captureService.CaptureFromRequest(ctx.Request);
+        var ip = trackingData.IPAddress ?? "unknown";
+        
+        // --- Server-side fingerprint stability + volume analysis ---
+        // Catches what client-side can't: IP-level traffic patterns
+        var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
+        var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
+        var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
+        var fpResult = fpService.RecordAndCheck(ip, canvasFP, webglFP, audioFP);
+        
+        // --- Server-side IP behavior analysis ---
+        // Subnet velocity + rapid-fire timing (cross-request correlation)
+        var ipResult = ipBehaviorService.RecordAndCheck(ip);
+        
+        // Build server-side query string extension only when alerts are triggered
+        var hasFpAlert = fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate;
+        var hasIpAlert = ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate;
+        
+        if (hasFpAlert || hasIpAlert)
+        {
+            // Thread-local StringBuilder — zero alloc after first request per thread
+            var sb = t_alertSb ??= new StringBuilder(256);
+            sb.Clear();
+            sb.Append(trackingData.QueryString);
+            
+            if (hasFpAlert)
+            {
+                sb.Append("&_srv_fpAlert=1&_srv_fpObs=").Append(fpResult.ObservationCount)
+                  .Append("&_srv_fpUniq=").Append(fpResult.UniqueFingerprints)
+                  .Append("&_srv_fpRate5m=").Append(fpResult.RecentRate);
+            }
+            
+            if (hasIpAlert)
+            {
+                sb.Append("&_srv_subnetIps=").Append(ipResult.SubnetUniqueIps)
+                  .Append("&_srv_subnetHits=").Append(ipResult.SubnetTotalHits)
+                  .Append("&_srv_hitsIn15s=").Append(ipResult.HitsIn15Seconds)
+                  .Append("&_srv_lastGapMs=").Append(ipResult.LastGapMs);
+                
+                if (ipResult.SubSecondDuplicate) sb.Append("&_srv_subSecDupe=1");
+                if (ipResult.SubnetVelocityAlert) sb.Append("&_srv_subnetAlert=1");
+                if (ipResult.RapidFireAlert) sb.Append("&_srv_rapidFire=1");
+            }
+            
+            trackingData = trackingData with { QueryString = sb.ToString() };
+        }
+        
+        if (!writerService.TryQueue(trackingData))
+        {
+            logger.Warning("Queue full - dropped tracking request");
+        }
+    }
+    
+    [ThreadStatic]
+    private static StringBuilder? t_alertSb;
 }

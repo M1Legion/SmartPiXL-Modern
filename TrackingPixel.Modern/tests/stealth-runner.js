@@ -1,10 +1,10 @@
 /**
  * SmartPiXL RED TEAM Stealth Synthetic Runner
  * 
- * Goal: Generate synthetic hits that BYPASS the Tier5 bot detection.
+ * Goal: Generate synthetic hits that BYPASS the SmartPiXL bot detection.
  * Every signal in the bot detector has a specific countermeasure here.
  * 
- * ATTACK SURFACE (Tier5Script.cs bot detection checks):
+ * ATTACK SURFACE (PiXLScript.cs bot detection checks):
  *   1.  navigator.webdriver === true                    → CDP override to false
  *   2.  !window.chrome && UA says Chrome                → Inject full chrome object
  *   2b. UA length < 30 or known fake                    → Use real-length UAs
@@ -559,14 +559,14 @@ async function runStealthHit(browserEntry) {
         // Navigate
         await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        // NOTE: We simulate AFTER script inject, because the Tier5 script 
+        // NOTE: We simulate AFTER script inject, because the pixel script 
         // registers its mousemove/scroll listeners at load time.
 
         // Small random delay (like a user seeing the page before script loads)
         await page.waitForTimeout(randInt(200, 600));
 
-        // Inject the Tier 5 tracking script
-        // The Tier5 script registers mousemove/scroll listeners immediately,
+        // Inject the SmartPiXL tracking script
+        // The pixel script registers mousemove/scroll listeners immediately,
         // then waits ~500ms before firing the pixel. We need to:
         //   1. Load the script
         //   2. Immediately start mouse simulation (within the 500ms window)
@@ -584,7 +584,7 @@ async function runStealthHit(browserEntry) {
         // Simulate mouse/scroll DURING the 500ms behavioral window
         await page.evaluate(`(async () => { ${buildMouseSimulation()} })()`);
 
-        // Wait for pixel fire (the Tier5 500ms timer + async collectors)
+        // Wait for pixel fire (the pixel 500ms timer + async collectors)
         await page.waitForTimeout(2000);
 
         return { success: true, pixelFired };
@@ -646,7 +646,7 @@ async function main() {
 
     console.log('╔══════════════════════════════════════════════════════════════╗');
     console.log('║  RED TEAM Stealth Synthetic Runner                           ║');
-    console.log('║  Goal: Bypass Tier5 bot detection with clean synthetic hits  ║');
+    console.log('║  Goal: Bypass SmartPiXL bot detection with clean synthetic hits  ║');
     console.log('╚══════════════════════════════════════════════════════════════╝');
     console.log();
     console.log(`   Target:      ${target.toLocaleString()} stealth hits`);

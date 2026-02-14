@@ -8,7 +8,7 @@ Last Updated: January 26, 2026
 
 ### Phase 1: Core Server
 - [x] ASP.NET Core 8 Minimal APIs server
-- [x] Tier 5 fingerprinting script (100+ data points)
+- [x] Fingerprinting script (100+ data points)
 - [x] Background SQL bulk writer with graceful shutdown
 - [x] Async file logger with buffering
 - [x] SQL schema with parsed view (vw_PiXL_Parsed)

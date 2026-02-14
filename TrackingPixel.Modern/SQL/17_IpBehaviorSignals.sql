@@ -9,7 +9,7 @@
 --   3. Update vw_PiXL_Complete to expose the new columns
 --   4. Update dashboard views to use new bot scoring signals
 --
--- JS Changes (Tier5Script.cs — no SQL impact, flows through querystring):
+-- JS Changes (PiXLScript.cs — no SQL impact, flows through querystring):
 --   - chrome-no-runtime weight reduced from 3 → 1
 --   - heap-size-spoofed promoted from cross-signal to primary bot signal (+8)
 --   - heap-total-equals-used promoted from cross-signal to primary bot signal (+5)

@@ -252,7 +252,7 @@ async function runSyntheticHit(browserEntry) {
             timeout: 15000
         });
 
-        // Inject the Tier 5 tracking script dynamically
+        // Inject the SmartPiXL tracking script dynamically
         // This mimics a real customer embedding: <script src="/js/12345/1.js"></script>
         await page.evaluate((scriptUrl) => {
             return new Promise((resolve) => {

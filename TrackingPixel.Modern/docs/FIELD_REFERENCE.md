@@ -1,7 +1,7 @@
 # SmartPiXL Field Reference
 
 Complete reference for all fields in `pixl_parsed` (175 columns) and `vw_PiXL_Complete` (176 columns).
-Every field here is **verified against the live Tier 5 JavaScript, the `pixl_parsed` materialized table, and the SQL view** as of 2026-02-12.
+Every field here is **verified against the live pixel JavaScript, the `pixl_parsed` materialized table, and the SQL view** as of 2026-02-12.
 
 > **Data flow:** Browser JS (`data.paramName`) → pixel GET request → `PiXL_Test.QueryString` → `vw_PiXL_Complete` SQL view → `pixl_parsed` materialized table (via `DatabaseWriterService`)
 > 
@@ -282,7 +282,7 @@ These are the core device fingerprinting hashes. Each captures a different hardw
 
 **MathFingerprint:** Different CPUs and JS engines produce slightly different floating-point results for transcendental functions. V8 on x86 differs from V8 on ARM.
 
-> **Note (Migration 17, confirmed 2026-02-12):** MathFingerprint has **zero entropy** in production — all 252 Tier 5 visitors produce the identical value (`-1.4214488,0.84147098,1.04719755,1.10714871,2.71828182,0.69314718,1.41421356,9007199254`). The V8/SpiderMonkey/JSC engines have fully converged on IEEE 754 precision for these operations. The field is retained for future cross-platform analysis but is **excluded from FingerprintStrength calculations** and should be considered for replacement with a higher-entropy signal.
+> **Note (Migration 17, confirmed 2026-02-12):** MathFingerprint has **zero entropy** in production — all 252 visitors produce the identical value (`-1.4214488,0.84147098,1.04719755,1.10714871,2.71828182,0.69314718,1.41421356,9007199254`). The V8/SpiderMonkey/JSC engines have fully converged on IEEE 754 precision for these operations. The field is retained for future cross-platform analysis but is **excluded from FingerprintStrength calculations** and should be considered for replacement with a higher-entropy signal.
 
 **ErrorFingerprint:** Chrome says "TypeError: Cannot read properties of null" while Firefox says "null has no properties". The message length + stack length creates a browser engine signature.
 
@@ -369,7 +369,7 @@ Boolean flags for browser API support. Each contributes 1 bit of entropy. The co
 | `TouchEventsSupported` | `touchEvent` | bit | `ontouchstart` in window |
 | `PointerEventsSupported` | `pointerEvent` | bit | PointerEvent API available |
 
-> **Note on removed phantom fields:** The previous version of this document listed 13 additional API capability fields (Geolocation, Notifications, Push, Bluetooth, USB, Serial, HID, MIDI, SpeechRecognition, Share, Credentials, PaymentRequest, WebXR) that were never collected by the Tier 5 script and had no SQL view columns. They have been removed. If these are needed for future fingerprinting, they must be added to Tier5Script.cs first, then to the SQL view.
+> **Note on removed phantom fields:** The previous version of this document listed 13 additional API capability fields (Geolocation, Notifications, Push, Bluetooth, USB, Serial, HID, MIDI, SpeechRecognition, Share, Credentials, PaymentRequest, WebXR) that were never collected by the pixel script and had no SQL view columns. They have been removed. If these are needed for future fingerprinting, they must be added to PiXLScript.cs first, then to the SQL view.
 
 ---
 
@@ -887,7 +887,7 @@ For developers adding new fields. Sorted alphabetically by JS param name.
 
 ## 22. Real-World Entropy Analysis (Feb 2026)
 
-Based on analysis of **267 real (non-synthetic) production records** collected Feb 2–12, 2026 from `pixl_parsed`. 252 records are Tier 5 (full JS payload), 15 are Tier NULL (server-only, no JS executed).
+Based on analysis of **267 real (non-synthetic) production records** collected Feb 2–12, 2026 from `pixl_parsed`. 252 records have full JS payload, 15 are server-only (no JS executed).
 
 ### Fingerprint Signal Entropy (Measured)
 
@@ -923,7 +923,7 @@ Canvas + WebGL + AudioHash yields **77 distinct combinations** from 230 eligible
 
 **AudioFingerprintHash concentration:** One hash (`49d5a04b`) accounts for 75% of records (190/252). The OfflineAudioContext processing path is far more uniform across real hardware than lab testing suggested. Still valuable but should be weighted lower in composite scoring.
 
-**Canvas evasion rate is high (50%):** 127 of 252 Tier 5 records trigger `CanvasEvasionDetected`. This rate is likely too aggressive — warrants threshold calibration.
+**Canvas evasion rate is high (50%):** 127 of 252 records trigger `CanvasEvasionDetected`. This rate is likely too aggressive — warrants threshold calibration.
 
 **SwiftShader + 800x600 bot cluster:** ~20% of records show software GPU renderers (SwiftShader, llvmpipe, Microsoft Basic Render Driver) combined with 800x600 screen resolution — near-certain headless automation markers.
 
@@ -972,7 +972,7 @@ Complete standardized data dictionary for all 175 columns in the `pixl_parsed` m
 | 7 | `ServerUserAgent` | nvarchar(2000) | YES | Srv | User-Agent string from the HTTP request header (server-side). |
 | 8 | `ServerReferer` | nvarchar(2000) | YES | Srv | Referer URL from the HTTP request header (server-side). |
 | 9 | `IsSynthetic` | bit | NO | Calc | `1` if test/synthetic traffic, `0` if real. Derived from `synthetic` query param. |
-| 10 | `Tier` | int | YES | JS | Script complexity tier. Currently always `5` for the Tier 5 script. NULL for server-only hits. |
+| 10 | `Tier` | int | YES | JS | Script identifier. Currently always `5` for full JS hits. NULL for server-only hits. |
 
 ### Screen & Display
 
@@ -1251,4 +1251,4 @@ Complete standardized data dictionary for all 175 columns in the `pixl_parsed` m
 
 ---
 
-*Last verified: 2026-02-12 against Tier5Script.cs (160+ params), pixl_parsed (175 columns), vw_PiXL_Complete (176 columns), SQL Migration 17, and 267 real production records.*
+*Last verified: 2026-02-12 against PiXLScript.cs (160+ params), pixl_parsed (175 columns), vw_PiXL_Complete (176 columns), SQL Migration 17, and 267 real production records.*

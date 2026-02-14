@@ -4,7 +4,7 @@ using TrackingPixel.Scripts;
 namespace TrackingPixel.Tests;
 
 /// <summary>
-/// Tests for the Tier5Script JavaScript template.
+/// Tests for the PiXLScript JavaScript template.
 /// Verifies critical properties:
 ///   1. Template generates valid JavaScript
 ///   2. Permission-triggering APIs are NOT present (MIDI, Bluetooth, etc.)
@@ -12,7 +12,7 @@ namespace TrackingPixel.Tests;
 ///   4. Required fingerprint collectors exist
 ///   5. Pixel URL placeholder exists for replacement
 /// </summary>
-public sealed class Tier5ScriptTests
+public sealed class PiXLScriptTests
 {
     // ========================================================================
     // TEMPLATE BASICS
@@ -21,20 +21,20 @@ public sealed class Tier5ScriptTests
     [Fact]
     public void Template_ShouldNotBeEmpty()
     {
-        Tier5Script.Template.Should().NotBeNullOrWhiteSpace();
+        PiXLScript.Template.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void Template_ContainsPixelUrlPlaceholder()
     {
-        Tier5Script.Template.Should().Contain("{{PIXEL_URL}}",
+        PiXLScript.Template.Should().Contain("{{PIXEL_URL}}",
             "Template must contain the placeholder for per-request URL injection");
     }
 
     [Fact]
     public void Template_ReplacePlaceholder_ProducesValidUrl()
     {
-        var result = Tier5Script.Template.Replace("{{PIXEL_URL}}", "https://smartpixl.info/99/1_SMART.GIF");
+        var result = PiXLScript.Template.Replace("{{PIXEL_URL}}", "https://smartpixl.info/99/1_SMART.GIF");
 
         result.Should().Contain("https://smartpixl.info/99/1_SMART.GIF");
         result.Should().NotContain("{{PIXEL_URL}}");
@@ -62,7 +62,7 @@ public sealed class Tier5ScriptTests
     [InlineData("data.speechRecog", "Speech recognition removed - triggers permission prompt")]
     public void Template_ShouldNotContain_PermissionTriggeringApis(string forbidden, string reason)
     {
-        Tier5Script.Template.Should().NotContain(forbidden, reason);
+        PiXLScript.Template.Should().NotContain(forbidden, reason);
     }
 
     // ========================================================================
@@ -82,7 +82,7 @@ public sealed class Tier5ScriptTests
     [InlineData("data.lang", "Language helps identify user")]
     public void Template_ShouldContain_RequiredCollectors(string required, string reason)
     {
-        Tier5Script.Template.Should().Contain(required, reason);
+        PiXLScript.Template.Should().Contain(required, reason);
     }
 
     // ========================================================================
@@ -96,7 +96,7 @@ public sealed class Tier5ScriptTests
     [InlineData("fontMethodMismatch", "V-09: Font detection dual-method anti-spoof")]
     public void Template_ShouldContain_EvasionCountermeasures(string field, string reason)
     {
-        Tier5Script.Template.Should().Contain(field, reason);
+        PiXLScript.Template.Should().Contain(field, reason);
     }
 
     // ========================================================================
@@ -106,7 +106,7 @@ public sealed class Tier5ScriptTests
     [Fact]
     public void Template_ContainsSafeAccessor()
     {
-        Tier5Script.Template.Should().Contain("safeGet",
+        PiXLScript.Template.Should().Contain("safeGet",
             "safeGet() is required to handle Proxy traps from privacy extensions");
     }
 
@@ -118,7 +118,7 @@ public sealed class Tier5ScriptTests
     public void Template_CreatesImageRequest()
     {
         // The script should create an Image and set src to fire the pixel
-        Tier5Script.Template.Should().Contain("new Image()",
+        PiXLScript.Template.Should().Contain("new Image()",
             "Must create Image element to fire pixel request");
     }
 
@@ -126,7 +126,7 @@ public sealed class Tier5ScriptTests
     public void Template_SendsDataAsQueryString()
     {
         // Data should be sent as query string params on the GIF URL
-        Tier5Script.Template.Should().Contain(".src =",
+        PiXLScript.Template.Should().Contain(".src =",
             "Must set Image src to fire the tracking request");
     }
 
@@ -137,14 +137,14 @@ public sealed class Tier5ScriptTests
     [Fact]
     public void Template_IsSelfExecuting()
     {
-        Tier5Script.Template.Should().Contain("(function()",
+        PiXLScript.Template.Should().Contain("(function()",
             "Script must be wrapped in an IIFE to avoid polluting global scope");
     }
 
     [Fact]
     public void Template_HasErrorHandling()
     {
-        Tier5Script.Template.Should().Contain("try {",
+        PiXLScript.Template.Should().Contain("try {",
             "Top-level try/catch prevents script errors from breaking the host page");
     }
 }

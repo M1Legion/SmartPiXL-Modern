@@ -85,10 +85,10 @@ if (hasConsent('analytics')) {
 ```
 
 ### 3. Data Minimization
-Tier approach:
-- **Tier 1 (Essential):** Bot detection only, no storage
-- **Tier 3 (Functional):** Session identification, short retention
-- **Tier 5 (Full):** Complete fingerprint, requires consent
+Approach by data sensitivity:
+- **Essential:** Bot detection only, no storage
+- **Functional:** Session identification, short retention
+- **Full:** Complete fingerprint, requires consent
 
 ### 4. Retention Limits
 ```sql

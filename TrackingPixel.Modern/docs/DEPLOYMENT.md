@@ -110,7 +110,7 @@ Copy-Item -Path ".\publish\*" -Destination "C:\SmartPiXL" -Recurse
 sc.exe create SmartPiXL binPath="C:\SmartPiXL\TrackingPixel.exe" start=auto displayname="SmartPiXL Tracking Server"
 
 # Set description
-sc.exe description SmartPiXL "SmartPiXL Tier 5 Fingerprinting Tracking Pixel Server"
+sc.exe description SmartPiXL "SmartPiXL Fingerprinting Tracking Pixel Server"
 
 # Configure recovery (restart on failure)
 sc.exe failure SmartPiXL reset=86400 actions=restart/60000/restart/60000/restart/60000

@@ -276,7 +276,7 @@ You should see the test page with live data collection.
 
 ```powershell
 # Quick curl test
-Invoke-WebRequest -Uri "https://tracking.yourdomain.com/t?sw=1920&sh=1080&tier=1" -Method GET
+Invoke-WebRequest -Uri "https://tracking.yourdomain.com/t?sw=1920&sh=1080" -Method GET
 ```
 
 ### 5.3 Verify Database Insert
@@ -301,7 +301,7 @@ ORDER BY ReceivedAt DESC;
 
 The script URL format is:
 ```
-https://tracking.yourdomain.com/js/{CLIENT_ID}/{CAMPAIGN_ID}.js
+https://tracking.yourdomain.com/js/{CompanyID}/{PiXLID}.js
 ```
 
 Example:
@@ -388,18 +388,18 @@ GROUP BY DATEPART(HOUR, ReceivedAt)
 ORDER BY Hour;
 ```
 
-### Check Tier Distribution
+### Check Data Volume
 
 ```sql
--- What tier are most clients hitting?
+-- How much data is being collected?
 SELECT 
-    Tier,
+    CompanyID,
     COUNT(*) AS Count,
     CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() AS DECIMAL(5,2)) AS Percentage
 FROM vw_PiXL_Parsed
 WHERE ReceivedAt > DATEADD(DAY, -7, GETDATE())
-GROUP BY Tier
-ORDER BY Tier;
+GROUP BY CompanyID
+ORDER BY Count DESC;
 ```
 
 ### IIS Performance
@@ -431,7 +431,7 @@ Set-ItemProperty "IIS:\AppPools\SmartPiXL" -Name processModel.idleTimeout -Value
 ```sql
 -- Add index for common queries
 CREATE INDEX IX_PiXL_Test_ReceivedAt ON PiXL_Test(ReceivedAt DESC);
-CREATE INDEX IX_PiXL_Test_ClientCampaign ON PiXL_Test(ClientID, CampaignID, ReceivedAt DESC);
+CREATE INDEX IX_PiXL_Test_ClientCampaign ON PiXL_Test(CompanyID, PiXLID, ReceivedAt DESC);
 ```
 
 ---
@@ -442,8 +442,8 @@ CREATE INDEX IX_PiXL_Test_ClientCampaign ON PiXL_Test(ClientID, CampaignID, Rece
 |------|-------------|
 | Test endpoint | `https://tracking.yourdomain.com/test` |
 | Health check | `https://tracking.yourdomain.com/health` |
-| Raw pixel (Tier 1) | `https://tracking.yourdomain.com/t?tier=1&sw=1920&sh=1080` |
-| Client script | `https://tracking.yourdomain.com/js/{CLIENT}/{CAMPAIGN}.js` |
+| Tracking pixel | `https://tracking.yourdomain.com/ACME/test_SMART.GIF?sw=1920&sh=1080` |
+| Client script | `https://tracking.yourdomain.com/js/{CompanyID}/{PiXLID}.js` |
 | Restart app pool | `Restart-WebAppPool -Name "SmartPiXL"` |
 | View logs | `Get-Content C:\inetpub\SmartPiXL\logs\stdout*.log -Tail 100` |
 

@@ -36,7 +36,7 @@ The following browser APIs are **permanently excluded** from all fingerprinting 
 - Add near-zero fingerprinting entropy (all modern Chrome has them, Firefox/Safari don't)
 - Get flagged by privacy extensions
 
-**Files modified:** `Tier5Script.cs`, `test.html`, `README.md`
+**Files modified:** `PiXLScript.cs`, `test.html`, `README.md`
 
 ---
 
@@ -46,7 +46,7 @@ The following browser APIs are **permanently excluded** from all fingerprinting 
 
 ## Executive Summary
 
-This document provides actionable remediation guidance for vulnerabilities identified during red team adversarial testing of the SmartPiXL Tier 5 fingerprinting system. Each section includes:
+This document provides actionable remediation guidance for vulnerabilities identified during red team adversarial testing of the SmartPiXL fingerprinting system. Each section includes:
 
 - **Vulnerability description** - What the gap is
 - **Evasion technique** - How adversaries exploit it
@@ -79,7 +79,7 @@ This document provides actionable remediation guidance for vulnerabilities ident
 Canvas fingerprinting can be evaded by injecting random noise into pixel data. Tools like Canvas Blocker, JShelter, and Trace modify `getImageData()` or `toDataURL()` to add per-pixel noise.
 
 ### Current State
-`Tier5Script.cs` lines 86-101 check for uniform variance (blocking), but noise injection produces valid variance.
+`PiXLScript.cs` lines 86-101 check for uniform variance (blocking), but noise injection produces valid variance.
 
 ### Evasion Technique
 ```javascript
@@ -101,7 +101,7 @@ CanvasRenderingContext2D.prototype.getImageData = function(...args) {
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Add after the existing canvas fingerprint (around line 103):**
 
@@ -183,7 +183,7 @@ END AS CanvasEvasionDetected
 Audio fingerprinting can be evaded by injecting noise into `AudioBuffer.getChannelData()`.
 
 ### Current State
-`Tier5Script.cs` lines 172-208 collect audio fingerprint but don't detect if it's being spoofed.
+`PiXLScript.cs` lines 172-208 collect audio fingerprint but don't detect if it's being spoofed.
 
 ### Countermeasure: Audio Fingerprint Stability Check
 
@@ -191,7 +191,7 @@ Audio fingerprinting can be evaded by injecting noise into `AudioBuffer.getChann
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Replace the audio fingerprint section with:**
 
@@ -263,7 +263,7 @@ All current fingerprinting signals are static and can be pre-computed. Behaviora
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Add before the setTimeout that fires the pixel:**
 
@@ -400,7 +400,7 @@ setTimeout(function() {
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Add new detection section:**
 
@@ -613,7 +613,7 @@ WHERE FP_SuspiciousVariation = 1;
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Replace the setTimeout at the end with:**
 
@@ -874,7 +874,7 @@ Font detection via `offsetWidth` is easily spoofable by overriding the property 
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Replace font detection with multi-method approach:**
 
@@ -955,14 +955,14 @@ Current detection only checks for 1000x1000 screen size. Modern Tor uses variabl
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Scripts/Tier5Script.cs`
+**File:** `TrackingPixel.Modern/Scripts/PiXLScript.cs`
 
 **Update evasion detection section:**
 
 ```javascript
 // In evasionResult function, replace Tor detection:
 // Note: This assumes 's' is defined as 'var s = screen;' at the top of the script
-// and 'w' is defined as 'var w = window;' (see Tier5Script.cs lines 17-19)
+// and 'w' is defined as 'var w = window;' (see PiXLScript.cs lines 17-19)
 
 // 1. Tor Browser (letterboxing detection)
 // Tor rounds to 200x100 pixel increments
@@ -1043,7 +1043,7 @@ SQL/06_DatacenterDetection.sql
 
 ### Modified Files
 ```
-Scripts/Tier5Script.cs          - Most client-side countermeasures
+Scripts/PiXLScript.cs          - Most client-side countermeasures
 Services/TrackingCaptureService.cs - TLS header capture
 Services/DatabaseWriterService.cs  - Integration of new services
 Models/TrackingData.cs          - New fields for detection results

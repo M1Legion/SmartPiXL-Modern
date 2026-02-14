@@ -1,7 +1,7 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
  * ║  SmartPiXL RED TEAM — Stealth Synthetic Runner v3 (Pass 3)     ║
- * ║  Target: Bypass ALL Tier5 bot detection + cross-signal checks  ║
+ * ║  Target: Bypass ALL SmartPiXL bot detection + cross-signal checks  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * PASS 2 POST-MORTEM:
@@ -22,7 +22,7 @@
  *   9. JIT warmup for property getters (prevents V-04 timing artifacts)
  *  10. Proper Notification.permission / chrome.runtime / plugins consistency
  *
- * ATTACK SURFACE COVERED (Tier5Script.cs):
+ * ATTACK SURFACE COVERED (PiXLScript.cs):
  *   Checks  1-25: All bot detection signals
  *   V-01/02/04/09/10: All evasion countermeasures
  *   CS-01 to CS-11:   All cross-signal consistency checks

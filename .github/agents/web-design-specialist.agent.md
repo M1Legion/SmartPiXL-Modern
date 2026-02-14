@@ -42,7 +42,7 @@ Expert in frontend development with a focus on tracking scripts, browser fingerp
 ## SmartPiXL-Specific Knowledge
 
 ### Current Architecture
-- **Tier5Script.cs** - JavaScript template as C# string constant
+- **PixelScript.cs** - JavaScript template as C# string constant
 - **test.html** - Live demo page for testing all 100+ data points
 - **Pixel response** - 43-byte transparent 1x1 GIF
 

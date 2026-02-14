@@ -1,38 +1,45 @@
 -- =============================================
--- SmartPiXL Database - MAINTENANCE PROCEDURES
--- 
--- Run this after initial setup to add data lifecycle management.
+-- SmartPiXL Database — MAINTENANCE PROCEDURES
+--
+-- Targets the PiXL.* / ETL.* schema layout (post-17B).
 -- These procedures handle:
---   - Data archival (move old data to archive table)
---   - Raw data purge (delete processed raw data)
---   - Materialization with concurrency protection
---   - Statistics and monitoring queries
+--   - Data archival  (PiXL.Parsed → PiXL.Archive)
+--   - Raw data purge (PiXL.Test rows already parsed)
+--   - Statistics / monitoring
+--   - Index maintenance
 --
--- Schedule Recommendations:
---   - sp_MaterializePiXLData_Safe: Every 5 minutes (SQL Agent)
---   - sp_PurgeRawData: Daily at 3 AM
---   - sp_ArchivePiXLData: Weekly on Sunday at 2 AM
+-- Schedule Recommendations (SQL Agent or Windows Task Scheduler):
+--   - ETL.usp_PurgeRawData        : Daily at 3 AM
+--   - ETL.usp_ArchiveParsedData   : Weekly on Sunday at 2 AM
+--   - ETL.usp_IndexMaintenance    : Weekly on Sunday at 4 AM
+--   - ETL.usp_PipelineStatistics  : On demand
 --
--- Last Updated: 2026-02-02
+-- Prerequisites: 17B_CreateSchemas.sql (PiXL / ETL schemas exist)
+-- Last Updated: 2026-02-13
 -- =============================================
 
-USE SmartPixl;
+USE SmartPiXL;
 GO
 
 -- =============================================
 -- SECTION 1: ARCHIVE TABLE
--- Stores historical data for compliance/analysis
+-- Cold storage for parsed data past its retention window.
+-- Same column set as PiXL.Parsed, plus ArchivedAt metadata.
 -- =============================================
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PiXL_Archive')
+IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = 'PiXL' AND t.name = 'Archive')
 BEGIN
-    CREATE TABLE dbo.PiXL_Archive (
-        Id              BIGINT NOT NULL,
-        SourceId        INT NOT NULL,
-        CompanyID       NVARCHAR(100),
-        PiXLID          NVARCHAR(100),
-        IPAddress       NVARCHAR(50),
+    CREATE TABLE PiXL.[Archive] (
+        -- Identity / source link
+        Id              BIGINT          NOT NULL,   -- PK from PiXL.Parsed
+        SourceId        INT             NOT NULL,   -- FK back to PiXL.Test.Id
+
+        -- Core dimensions
+        CompanyID       VARCHAR(100),
+        PiXLID          VARCHAR(100),
+        IPAddress       VARCHAR(50),
         ReceivedAt      DATETIME2,
-        
+
         -- Screen
         ScreenWidth     INT,
         ScreenHeight    INT,
@@ -40,230 +47,158 @@ BEGIN
         ViewportHeight  INT,
         ColorDepth      INT,
         PixelRatio      DECIMAL(5,2),
-        
+
         -- Device
-        [Platform]      NVARCHAR(50),
+        [Platform]      VARCHAR(50),
         CPUCores        INT,
         DeviceMemory    DECIMAL(5,2),
-        GPU             NVARCHAR(500),
-        
+        GPU             VARCHAR(500),
+
         -- Fingerprints
-        CanvasFingerprint   NVARCHAR(100),
-        WebGLFingerprint    NVARCHAR(100),
-        AudioFingerprint    NVARCHAR(100),
-        MathFingerprint     NVARCHAR(200),
-        
-        -- Location/Time
-        Timezone        NVARCHAR(100),
-        [Language]      NVARCHAR(50),
-        
+        CanvasFingerprint   VARCHAR(100),
+        WebGLFingerprint    VARCHAR(100),
+        AudioFingerprint    VARCHAR(100),
+        MathFingerprint     VARCHAR(200),
+
+        -- Location / Time
+        Timezone        VARCHAR(100),
+        [Language]      VARCHAR(50),
+
         -- Page
-        PageURL         NVARCHAR(2000),
-        PageReferrer    NVARCHAR(2000),
-        Domain          NVARCHAR(200),
-        
+        PageURL         VARCHAR(2000),
+        PageReferrer    VARCHAR(2000),
+        Domain          VARCHAR(200),
+
         -- Flags
         DarkModePreferred   BIT,
         CookiesEnabled      BIT,
         WebDriverDetected   BIT,
-        
-        -- IP Classification (if populated)
-        IpType          NVARCHAR(20)    NULL,
+
+        -- IP classification
+        IpType          VARCHAR(20)     NULL,
         ShouldGeolocate BIT             NULL,
-        
-        -- Geo Data (if populated)
-        Country         NVARCHAR(100)   NULL,
-        Region          NVARCHAR(100)   NULL,
-        City            NVARCHAR(100)   NULL,
-        PostalCode      NVARCHAR(20)    NULL,
+
+        -- Geo
+        Country         VARCHAR(100)    NULL,
+        Region          VARCHAR(100)    NULL,
+        City            VARCHAR(100)    NULL,
+        PostalCode      VARCHAR(20)     NULL,
         Latitude        DECIMAL(9,6)    NULL,
         Longitude       DECIMAL(9,6)    NULL,
-        
-        -- Original processing time
-        MaterializedAt  DATETIME2,
-        
-        -- Archive metadata
-        ArchivedAt      DATETIME2 NOT NULL DEFAULT GETUTCDATE()
-    ) ON [SmartPixl];
-    
-    -- Minimal indexes for archive (read-only, rare access)
-    CREATE CLUSTERED INDEX IX_PiXL_Archive_ReceivedAt 
-    ON dbo.PiXL_Archive(ReceivedAt) ON [SmartPixl];
-    
-    CREATE INDEX IX_PiXL_Archive_Company 
-    ON dbo.PiXL_Archive(CompanyID, ReceivedAt) ON [SmartPixl];
-    
-    PRINT 'Table PiXL_Archive created.';
+
+        -- Bot / threat scores
+        BotScore        INT             NULL,
+        AnomalyScore    INT             NULL,
+        CombinedThreatScore INT         NULL,
+
+        -- Timestamps
+        ParsedAt        DATETIME2       NULL,
+        ArchivedAt      DATETIME2       NOT NULL DEFAULT GETUTCDATE()
+    );
+
+    CREATE CLUSTERED INDEX IX_Archive_ReceivedAt
+        ON PiXL.[Archive](ReceivedAt);
+
+    CREATE NONCLUSTERED INDEX IX_Archive_Company
+        ON PiXL.[Archive](CompanyID, ReceivedAt);
+
+    PRINT 'Created PiXL.Archive table.';
 END
 GO
 
 -- =============================================
--- SECTION 2: SAFE MATERIALIZATION PROCEDURE
--- Prevents concurrent execution with app lock
+-- SECTION 2: PURGE RAW DATA
+-- Deletes rows from PiXL.Test that have already been parsed
+-- (Id <= ETL.Watermark.LastProcessedId) and are older than
+-- the retention window.
 -- =============================================
-IF OBJECT_ID('dbo.sp_MaterializePiXLData_Safe', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.sp_MaterializePiXLData_Safe;
+IF OBJECT_ID('ETL.usp_PurgeRawData', 'P') IS NOT NULL
+    DROP PROCEDURE ETL.usp_PurgeRawData;
 GO
 
-CREATE PROCEDURE dbo.sp_MaterializePiXLData_Safe
-    @BatchSize INT = 10000  -- Process in batches to reduce lock time
+CREATE PROCEDURE ETL.usp_PurgeRawData
+    @DaysToKeep     INT = 7,        -- Keep raw rows for N days after parsing
+    @BatchSize      INT = 5000,     -- Delete in batches to limit lock duration
+    @MaxBatches     INT = 200       -- Safety cap per execution
 AS
 BEGIN
     SET NOCOUNT ON;
-    
-    -- Prevent concurrent execution
-    DECLARE @LockResult INT;
-    EXEC @LockResult = sp_getapplock 
-        @Resource = 'MaterializePiXLData', 
-        @LockMode = 'Exclusive', 
-        @LockTimeout = 0;  -- Don't wait, just exit if locked
-    
-    IF @LockResult < 0
+
+    DECLARE @CutoffDate     DATETIME2 = DATEADD(DAY, -@DaysToKeep, GETUTCDATE());
+    DECLARE @WatermarkId    BIGINT;
+    DECLARE @TotalDeleted   INT = 0;
+    DECLARE @BatchDeleted   INT = 1;
+    DECLARE @BatchCount     INT = 0;
+
+    -- Only purge rows the ETL has already processed
+    SELECT @WatermarkId = LastProcessedId FROM ETL.Watermark
+    WHERE ProcessName = 'ParseNewHits';
+
+    IF @WatermarkId IS NULL
     BEGIN
-        SELECT 
-            0 AS RecordsMaterialized,
-            'Another materialization is in progress' AS Status;
+        PRINT 'No watermark found — nothing to purge.';
         RETURN;
     END
-    
-    DECLARE @TotalMaterialized INT = 0;
-    DECLARE @BatchMaterialized INT = 1;
-    DECLARE @LastProcessedId INT;
-    DECLARE @StartTime DATETIME2 = GETUTCDATE();
-    
-    BEGIN TRY
-        WHILE @BatchMaterialized > 0
-        BEGIN
-            -- Get last processed ID
-            SELECT @LastProcessedId = ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Materialized;
-            
-            -- Insert batch
-            INSERT INTO dbo.PiXL_Materialized (
-                SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
-                ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-                [Platform], CPUCores, DeviceMemory, GPU,
-                CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-                Timezone, [Language],
-                PageURL, PageReferrer, Domain,
-                DarkModePreferred, CookiesEnabled, WebDriverDetected
-            )
-            SELECT TOP (@BatchSize)
-                Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
-                ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
-                [Platform], CPUCores, DeviceMemory, GPU,
-                CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
-                Timezone, [Language],
-                PageURL, PageReferrer, Domain,
-                DarkModePreferred, CookiesEnabled, WebDriverDetected
-            FROM dbo.vw_PiXL_Parsed
-            WHERE Id > @LastProcessedId
-            ORDER BY Id;
-            
-            SET @BatchMaterialized = @@ROWCOUNT;
-            SET @TotalMaterialized = @TotalMaterialized + @BatchMaterialized;
-            
-            -- Yield to other operations between batches
-            IF @BatchMaterialized = @BatchSize
-                WAITFOR DELAY '00:00:00.050';
-        END
-        
-        SELECT 
-            @TotalMaterialized AS RecordsMaterialized,
-            'Success' AS Status,
-            DATEDIFF(MILLISECOND, @StartTime, GETUTCDATE()) AS DurationMs;
-    END TRY
-    BEGIN CATCH
-        SELECT 
-            @TotalMaterialized AS RecordsMaterialized,
-            ERROR_MESSAGE() AS Status;
-        THROW;
-    END CATCH
-    
-    -- Release lock
-    EXEC sp_releaseapplock @Resource = 'MaterializePiXLData';
-END
-GO
 
-PRINT 'Procedure sp_MaterializePiXLData_Safe created.';
-GO
-
--- =============================================
--- SECTION 3: PURGE RAW DATA PROCEDURE
--- Deletes materialized raw data older than retention period
--- =============================================
-IF OBJECT_ID('dbo.sp_PurgeRawData', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.sp_PurgeRawData;
-GO
-
-CREATE PROCEDURE dbo.sp_PurgeRawData
-    @DaysToKeep INT = 7,       -- Keep raw data for 7 days (for reprocessing if needed)
-    @BatchSize INT = 5000,     -- Delete in batches to reduce lock time
-    @MaxBatches INT = 100      -- Safety limit per execution
-AS
-BEGIN
-    SET NOCOUNT ON;
-    
-    DECLARE @CutoffDate DATETIME2 = DATEADD(DAY, -@DaysToKeep, GETUTCDATE());
-    DECLARE @MaxMaterializedId INT = (SELECT ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Materialized);
-    DECLARE @TotalDeleted INT = 0;
-    DECLARE @BatchDeleted INT = 1;
-    DECLARE @BatchCount INT = 0;
-    
     WHILE @BatchDeleted > 0 AND @BatchCount < @MaxBatches
     BEGIN
-        DELETE TOP (@BatchSize) FROM dbo.PiXL_Test
-        WHERE Id <= @MaxMaterializedId
+        DELETE TOP (@BatchSize)
+        FROM PiXL.Test
+        WHERE Id <= @WatermarkId
           AND ReceivedAt < @CutoffDate;
-        
+
         SET @BatchDeleted = @@ROWCOUNT;
         SET @TotalDeleted = @TotalDeleted + @BatchDeleted;
-        SET @BatchCount = @BatchCount + 1;
-        
-        -- Yield between batches
+        SET @BatchCount   = @BatchCount + 1;
+
         IF @BatchDeleted = @BatchSize
-            WAITFOR DELAY '00:00:00.100';
+            WAITFOR DELAY '00:00:00.100';   -- yield between batches
     END
-    
-    SELECT 
-        @TotalDeleted AS RecordsPurged,
-        @CutoffDate AS CutoffDate,
-        @BatchCount AS BatchesProcessed,
-        CASE WHEN @BatchCount >= @MaxBatches THEN 'MoreRemaining' ELSE 'Complete' END AS Status;
+
+    SELECT
+        @TotalDeleted   AS RecordsPurged,
+        @CutoffDate     AS CutoffDate,
+        @WatermarkId    AS WatermarkAtExecution,
+        @BatchCount     AS BatchesProcessed,
+        CASE WHEN @BatchCount >= @MaxBatches
+             THEN 'MoreRemaining' ELSE 'Complete' END AS [Status];
 END
 GO
 
-PRINT 'Procedure sp_PurgeRawData created.';
+PRINT 'Created ETL.usp_PurgeRawData.';
 GO
 
 -- =============================================
--- SECTION 4: ARCHIVE DATA PROCEDURE
--- Moves old materialized data to archive table
+-- SECTION 3: ARCHIVE PARSED DATA
+-- Moves old rows from PiXL.Parsed → PiXL.Archive, then deletes
+-- the source rows.  Runs inside explicit transactions per batch.
 -- =============================================
-IF OBJECT_ID('dbo.sp_ArchivePiXLData', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.sp_ArchivePiXLData;
+IF OBJECT_ID('ETL.usp_ArchiveParsedData', 'P') IS NOT NULL
+    DROP PROCEDURE ETL.usp_ArchiveParsedData;
 GO
 
-CREATE PROCEDURE dbo.sp_ArchivePiXLData
-    @DaysToKeep INT = 90,      -- Keep in main table for 90 days
-    @BatchSize INT = 5000,     -- Archive in batches
-    @MaxBatches INT = 200      -- Safety limit per execution
+CREATE PROCEDURE ETL.usp_ArchiveParsedData
+    @DaysToKeep     INT = 90,       -- Rows older than 90 days get archived
+    @BatchSize      INT = 5000,
+    @MaxBatches     INT = 200
 AS
 BEGIN
     SET NOCOUNT ON;
-    
-    DECLARE @CutoffDate DATETIME2 = DATEADD(DAY, -@DaysToKeep, GETUTCDATE());
-    DECLARE @TotalArchived INT = 0;
-    DECLARE @BatchArchived INT = 1;
-    DECLARE @BatchCount INT = 0;
-    
+
+    DECLARE @CutoffDate     DATETIME2 = DATEADD(DAY, -@DaysToKeep, GETUTCDATE());
+    DECLARE @TotalArchived  INT = 0;
+    DECLARE @BatchArchived  INT = 1;
+    DECLARE @BatchCount     INT = 0;
+
     WHILE @BatchArchived > 0 AND @BatchCount < @MaxBatches
     BEGIN
         BEGIN TRANSACTION;
-        
+
         -- Copy to archive
-        INSERT INTO dbo.PiXL_Archive (
+        INSERT INTO PiXL.[Archive] (
             Id, SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
-            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight,
+            ColorDepth, PixelRatio,
             [Platform], CPUCores, DeviceMemory, GPU,
             CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
             Timezone, [Language],
@@ -271,11 +206,13 @@ BEGIN
             DarkModePreferred, CookiesEnabled, WebDriverDetected,
             IpType, ShouldGeolocate,
             Country, Region, City, PostalCode, Latitude, Longitude,
-            MaterializedAt
+            BotScore, AnomalyScore, CombinedThreatScore,
+            ParsedAt
         )
         SELECT TOP (@BatchSize)
             Id, SourceId, CompanyID, PiXLID, IPAddress, ReceivedAt,
-            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight, ColorDepth, PixelRatio,
+            ScreenWidth, ScreenHeight, ViewportWidth, ViewportHeight,
+            ColorDepth, PixelRatio,
             [Platform], CPUCores, DeviceMemory, GPU,
             CanvasFingerprint, WebGLFingerprint, AudioFingerprint, MathFingerprint,
             Timezone, [Language],
@@ -283,172 +220,179 @@ BEGIN
             DarkModePreferred, CookiesEnabled, WebDriverDetected,
             IpType, ShouldGeolocate,
             Country, Region, City, PostalCode, Latitude, Longitude,
-            MaterializedAt
-        FROM dbo.PiXL_Materialized
+            BotScore, AnomalyScore, CombinedThreatScore,
+            ParsedAt
+        FROM PiXL.Parsed
         WHERE ReceivedAt < @CutoffDate
         ORDER BY Id;
-        
+
         SET @BatchArchived = @@ROWCOUNT;
-        
-        -- Delete archived records
+
+        -- Delete the rows we just copied
         IF @BatchArchived > 0
         BEGIN
-            DELETE TOP (@BatchSize) FROM dbo.PiXL_Materialized
-            WHERE ReceivedAt < @CutoffDate;
+            ;WITH Batch AS (
+                SELECT TOP (@BatchSize) Id
+                FROM PiXL.Parsed
+                WHERE ReceivedAt < @CutoffDate
+                ORDER BY Id
+            )
+            DELETE FROM PiXL.Parsed
+            WHERE Id IN (SELECT Id FROM Batch);
         END
-        
+
         COMMIT TRANSACTION;
-        
+
         SET @TotalArchived = @TotalArchived + @BatchArchived;
-        SET @BatchCount = @BatchCount + 1;
-        
-        -- Yield between batches
+        SET @BatchCount    = @BatchCount + 1;
+
         IF @BatchArchived = @BatchSize
             WAITFOR DELAY '00:00:00.100';
     END
-    
-    SELECT 
-        @TotalArchived AS RecordsArchived,
-        @CutoffDate AS CutoffDate,
-        @BatchCount AS BatchesProcessed,
-        CASE WHEN @BatchCount >= @MaxBatches THEN 'MoreRemaining' ELSE 'Complete' END AS Status;
+
+    SELECT
+        @TotalArchived  AS RecordsArchived,
+        @CutoffDate     AS CutoffDate,
+        @BatchCount     AS BatchesProcessed,
+        CASE WHEN @BatchCount >= @MaxBatches
+             THEN 'MoreRemaining' ELSE 'Complete' END AS [Status];
 END
 GO
 
-PRINT 'Procedure sp_ArchivePiXLData created.';
+PRINT 'Created ETL.usp_ArchiveParsedData.';
 GO
 
 -- =============================================
--- SECTION 5: MONITORING/STATISTICS PROCEDURES
+-- SECTION 4: PIPELINE STATISTICS
+-- Quick health check: table sizes, ETL lag, insert rate,
+-- top companies.
 -- =============================================
-IF OBJECT_ID('dbo.sp_PiXLStatistics', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.sp_PiXLStatistics;
+IF OBJECT_ID('ETL.usp_PipelineStatistics', 'P') IS NOT NULL
+    DROP PROCEDURE ETL.usp_PipelineStatistics;
 GO
 
-CREATE PROCEDURE dbo.sp_PiXLStatistics
+CREATE PROCEDURE ETL.usp_PipelineStatistics
 AS
 BEGIN
     SET NOCOUNT ON;
-    
-    -- Table sizes
-    SELECT 
-        'TableSizes' AS Category,
-        t.name AS TableName,
-        SUM(p.rows) AS RowCount,
-        CAST(ROUND((SUM(a.total_pages) * 8) / 1024.0, 2) AS DECIMAL(10,2)) AS SizeMB
+
+    -- 1. Table sizes
+    SELECT
+        'TableSizes'                    AS Category,
+        s.name + '.' + t.name          AS TableName,
+        SUM(p.rows)                     AS [RowCount],
+        CAST(ROUND(SUM(a.total_pages) * 8 / 1024.0, 2) AS DECIMAL(10,2)) AS SizeMB
     FROM sys.tables t
-    INNER JOIN sys.indexes i ON t.object_id = i.object_id
-    INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
-    INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
-    WHERE t.name IN ('PiXL_Test', 'PiXL_Materialized', 'PiXL_Archive')
-    GROUP BY t.name;
-    
-    -- Materialization lag
-    SELECT 
-        'MaterializationLag' AS Category,
-        (SELECT MAX(Id) FROM dbo.PiXL_Test) AS MaxRawId,
-        (SELECT ISNULL(MAX(SourceId), 0) FROM dbo.PiXL_Materialized) AS MaxMaterializedId,
-        (SELECT MAX(Id) FROM dbo.PiXL_Test) - 
-            ISNULL((SELECT MAX(SourceId) FROM dbo.PiXL_Materialized), 0) AS UnmaterializedRecords;
-    
-    -- Recent insert rate (last hour, per minute)
-    SELECT 
-        'InsertRate' AS Category,
+    JOIN sys.schemas s           ON t.schema_id = s.schema_id
+    JOIN sys.indexes i           ON t.object_id = i.object_id
+    JOIN sys.partitions p        ON i.object_id = p.object_id AND i.index_id = p.index_id
+    JOIN sys.allocation_units a  ON p.partition_id = a.container_id
+    WHERE s.name IN ('PiXL', 'ETL')
+    GROUP BY s.name, t.name
+    ORDER BY SizeMB DESC;
+
+    -- 2. ETL lag (un-parsed rows)
+    SELECT
+        'ETL_Lag'                       AS Category,
+        (SELECT MAX(Id) FROM PiXL.Test)                             AS MaxTestId,
+        (SELECT LastProcessedId FROM ETL.Watermark
+         WHERE ProcessName = 'ParseNewHits')                        AS WatermarkId,
+        (SELECT MAX(Id) FROM PiXL.Test)
+            - ISNULL((SELECT LastProcessedId FROM ETL.Watermark
+                      WHERE ProcessName = 'ParseNewHits'), 0)      AS UnparsedRows;
+
+    -- 3. Insert rate — last hour, per minute
+    SELECT
+        'InsertRate'                                AS Category,
         DATEADD(MINUTE, DATEDIFF(MINUTE, 0, ReceivedAt), 0) AS MinuteBucket,
-        COUNT(*) AS RecordsPerMinute
-    FROM dbo.PiXL_Test WITH (NOLOCK)
+        COUNT(*)                                    AS RecordsPerMinute
+    FROM PiXL.Test WITH (NOLOCK)
     WHERE ReceivedAt >= DATEADD(HOUR, -1, GETUTCDATE())
     GROUP BY DATEADD(MINUTE, DATEDIFF(MINUTE, 0, ReceivedAt), 0)
     ORDER BY MinuteBucket DESC;
-    
-    -- Top companies today
+
+    -- 4. Top companies today
     SELECT TOP 10
-        'TopCompaniesToday' AS Category,
+        'TopCompaniesToday'     AS Category,
         CompanyID,
-        COUNT(*) AS PixelFires
-    FROM dbo.PiXL_Test WITH (NOLOCK)
+        COUNT(*)                AS PixelFires
+    FROM PiXL.Test WITH (NOLOCK)
     WHERE ReceivedAt >= CAST(GETUTCDATE() AS DATE)
     GROUP BY CompanyID
     ORDER BY COUNT(*) DESC;
 END
 GO
 
-PRINT 'Procedure sp_PiXLStatistics created.';
+PRINT 'Created ETL.usp_PipelineStatistics.';
 GO
 
 -- =============================================
--- SECTION 6: INDEX MAINTENANCE PROCEDURE
+-- SECTION 5: INDEX MAINTENANCE
+-- Rebuilds fragmented indexes across all PiXL / ETL tables.
 -- =============================================
-IF OBJECT_ID('dbo.sp_PiXLIndexMaintenance', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.sp_PiXLIndexMaintenance;
+IF OBJECT_ID('ETL.usp_IndexMaintenance', 'P') IS NOT NULL
+    DROP PROCEDURE ETL.usp_IndexMaintenance;
 GO
 
-CREATE PROCEDURE dbo.sp_PiXLIndexMaintenance
-    @FragmentationThreshold FLOAT = 30.0  -- Rebuild if > 30% fragmented
+CREATE PROCEDURE ETL.usp_IndexMaintenance
+    @FragmentationThreshold FLOAT = 30.0    -- Rebuild if > 30% fragmented
 AS
 BEGIN
     SET NOCOUNT ON;
-    
-    DECLARE @SQL NVARCHAR(MAX);
-    DECLARE @IndexName NVARCHAR(256);
-    DECLARE @TableName NVARCHAR(256);
-    DECLARE @Fragmentation FLOAT;
-    
-    DECLARE IndexCursor CURSOR FOR
-        SELECT 
+
+    DECLARE @SQL            NVARCHAR(MAX);
+    DECLARE @SchemaName     NVARCHAR(128);
+    DECLARE @TableName      NVARCHAR(128);
+    DECLARE @IndexName      NVARCHAR(256);
+    DECLARE @Fragmentation  FLOAT;
+
+    DECLARE IndexCursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT
+            s.name              AS SchemaName,
             OBJECT_NAME(ips.object_id) AS TableName,
-            i.name AS IndexName,
+            i.name              AS IndexName,
             ips.avg_fragmentation_in_percent
         FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED') ips
-        INNER JOIN sys.indexes i ON ips.object_id = i.object_id AND ips.index_id = i.index_id
-        WHERE OBJECT_NAME(ips.object_id) IN ('PiXL_Test', 'PiXL_Materialized', 'PiXL_Archive')
+        JOIN sys.indexes i  ON ips.object_id = i.object_id AND ips.index_id = i.index_id
+        JOIN sys.tables  t  ON ips.object_id = t.object_id
+        JOIN sys.schemas s  ON t.schema_id   = s.schema_id
+        WHERE s.name IN ('PiXL', 'ETL')
           AND ips.avg_fragmentation_in_percent > @FragmentationThreshold
-          AND ips.page_count > 1000  -- Only indexes with significant pages
+          AND ips.page_count > 1000
           AND i.name IS NOT NULL;
-    
+
     OPEN IndexCursor;
-    FETCH NEXT FROM IndexCursor INTO @TableName, @IndexName, @Fragmentation;
-    
+    FETCH NEXT FROM IndexCursor INTO @SchemaName, @TableName, @IndexName, @Fragmentation;
+
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SET @SQL = 'ALTER INDEX [' + @IndexName + '] ON dbo.[' + @TableName + '] REBUILD WITH (ONLINE = ON)';
-        
         BEGIN TRY
-            PRINT 'Rebuilding ' + @IndexName + ' on ' + @TableName + ' (' + CAST(@Fragmentation AS VARCHAR(10)) + '% fragmented)';
+            -- Try ONLINE rebuild first (Enterprise / Developer edition)
+            PRINT 'Rebuilding [' + @IndexName + '] on '
+                  + QUOTENAME(@SchemaName) + '.' + QUOTENAME(@TableName)
+                  + ' (' + CAST(CAST(@Fragmentation AS DECIMAL(5,1)) AS VARCHAR(10)) + '% frag)';
+            SET @SQL = 'ALTER INDEX ' + QUOTENAME(@IndexName)
+                     + ' ON ' + QUOTENAME(@SchemaName) + '.' + QUOTENAME(@TableName)
+                     + ' REBUILD WITH (ONLINE = ON)';
             EXEC sp_executesql @SQL;
         END TRY
         BEGIN CATCH
-            -- If ONLINE rebuild fails (non-Enterprise), try offline
-            SET @SQL = 'ALTER INDEX [' + @IndexName + '] ON dbo.[' + @TableName + '] REBUILD';
+            -- Fall back to offline rebuild
+            SET @SQL = 'ALTER INDEX ' + QUOTENAME(@IndexName)
+                     + ' ON ' + QUOTENAME(@SchemaName) + '.' + QUOTENAME(@TableName)
+                     + ' REBUILD';
             EXEC sp_executesql @SQL;
         END CATCH
-        
-        FETCH NEXT FROM IndexCursor INTO @TableName, @IndexName, @Fragmentation;
+
+        FETCH NEXT FROM IndexCursor INTO @SchemaName, @TableName, @IndexName, @Fragmentation;
     END
-    
+
     CLOSE IndexCursor;
     DEALLOCATE IndexCursor;
-    
+
     PRINT 'Index maintenance complete.';
 END
 GO
 
-PRINT 'Procedure sp_PiXLIndexMaintenance created.';
-GO
-
--- =============================================
--- VERIFICATION
--- =============================================
-PRINT '';
-PRINT '============================================';
-PRINT 'Maintenance Procedures Installation Complete!';
-PRINT '============================================';
-PRINT '';
-PRINT 'Schedule Recommendations:';
-PRINT '  - sp_MaterializePiXLData_Safe: Every 5 minutes';
-PRINT '  - sp_PurgeRawData: Daily at 3 AM';
-PRINT '  - sp_ArchivePiXLData: Weekly on Sunday at 2 AM';
-PRINT '  - sp_PiXLIndexMaintenance: Weekly on Sunday at 4 AM';
-PRINT '  - sp_PiXLStatistics: On-demand for monitoring';
-PRINT '';
+PRINT 'Created ETL.usp_IndexMaintenance.';
 GO

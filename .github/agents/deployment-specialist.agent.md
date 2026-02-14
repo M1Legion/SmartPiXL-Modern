@@ -63,7 +63,7 @@ This is a **fire-and-forget tracking pixel server** hosted **InProcess in IIS** 
 | Endpoint | Purpose | Latency Target |
 |----------|---------|----------------|
 | `/{**path}_SMART.GIF` | Tracking pixel | <10ms |
-| `/js/{clientId}/{campaignId}.js` | JavaScript delivery | <50ms |
+| `/js/{CompanyID}/{PiXLID}.js` | JavaScript delivery | <50ms |
 | `/tron` | Tron dashboard (localhost only) | N/A |
 | `/api/dash/*` | Dashboard API (localhost only) | <500ms |
 

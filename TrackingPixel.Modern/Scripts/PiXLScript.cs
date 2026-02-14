@@ -4,18 +4,18 @@ using System.Collections.Concurrent;
 namespace TrackingPixel.Scripts;
 
 /// <summary>
-/// Contains the Tier 5 JavaScript template for maximum data collection.
-/// Stored as a constant string - allocated once at startup.
+/// Contains the SmartPiXL JavaScript template for fingerprint data collection.
+/// Stored as a constant string — allocated once at startup.
 /// Uses string.Create + Span for zero-allocation script generation after first hit.
 /// </summary>
-public static class Tier5Script
+public static class PiXLScript
 {
     /// <summary>
     /// JavaScript template with {{PIXEL_URL}} placeholder for pixel URL.
     /// Use GetScript(pixelUrl) for cached, zero-alloc generation per companyId/pixlId.
     /// </summary>
     public const string Template = @"
-// SmartPiXL Tracking Script - Tier 5 (Maximum Data Collection)
+// SmartPiXL Tracking Script — Fingerprint Data Collection
 (function() {
     try {
         var s = screen;
@@ -1417,13 +1417,22 @@ public static class Tier5Script
 })();
 ";
 
-    // Cache per pixel URL — zero allocation after first hit per companyId/pixlId combo
+    // Cache per pixel URL — zero allocation after first hit per companyId/pixlId combo.
+    // Capped at 10,000 entries to prevent memory exhaustion from malicious URL generation.
     private static readonly ConcurrentDictionary<string, string> _cache = new();
+    private const int MaxCacheEntries = 10_000;
 
     /// <summary>
     /// Returns script with pixel URL injected. Cached per URL.
     /// Uses simple Replace for correctness — cached so only runs once per URL.
+    /// Evicts the entire cache if it grows beyond MaxCacheEntries to bound memory.
     /// </summary>
-    public static string GetScript(string pixelUrl) =>
-        _cache.GetOrAdd(pixelUrl, url => Template.Replace("{{PIXEL_URL}}", url));
+    public static string GetScript(string pixelUrl)
+    {
+        if (_cache.Count >= MaxCacheEntries)
+        {
+            _cache.Clear(); // Nuclear eviction — acceptable since warm-up is cheap
+        }
+        return _cache.GetOrAdd(pixelUrl, url => Template.Replace("{{PIXEL_URL}}", url));
+    }
 }

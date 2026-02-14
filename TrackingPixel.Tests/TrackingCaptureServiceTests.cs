@@ -164,7 +164,7 @@ public sealed class TrackingCaptureServiceTests
     [Fact]
     public void CaptureFromRequest_LargeQueryString_Preserved()
     {
-        // Simulate a real Tier 5 query string with lots of fingerprint params
+        // Simulate a real query string with lots of fingerprint params
         var qs = "sw=1920&sh=1080&saw=1920&sah=1040&vw=1903&vh=969&ow=1920&oh=1040" +
                  "&sx=0&sy=0&cd=24&pd=1&ori=landscape-primary&cores=8&mem=8" +
                  "&canvasFP=abc123&webglFP=def456&audioFP=1.234567&audioHash=gh789" +

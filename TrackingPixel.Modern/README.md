@@ -12,7 +12,7 @@ SmartPiXL is a complete rewrite of the legacy ASP.NET WebForms tracking pixel sy
 - **100+ Data Points** - Captures screen, device, browser, fingerprints, preferences, and more
 - **No Cookies Required** - Works in a post-cookie world
 - **High Performance** - Fire-and-forget SQL inserts, compiled regex, zero-allocation patterns
-- **Tiered Collection** - 5 tiers from basic pixel to full fingerprinting
+- **Full Fingerprinting** - 100+ data points from a single script tag
 
 ## 🚀 Quick Start
 
@@ -41,12 +41,12 @@ See all 100+ data points captured in real-time from YOUR browser.
 
 ## 📦 Client Integration
 
-### Tier 5 (Maximum Data - Recommended)
+### Integration
 
 Add this single line to any webpage:
 
 ```html
-<script src="https://your-domain.com/js/CLIENT_ID/CAMPAIGN_ID.js"></script>
+<script src="https://your-domain.com/js/CompanyID/PiXLID.js"></script>
 ```
 
 That's it. The script handles everything automatically.
@@ -116,7 +116,7 @@ TrackingPixel.Modern/
 - **Compiled Regex** - Pre-compiled patterns for URL parsing
 - **DataTable Template Cloning** - Avoids column recreation per batch
 - **Const JS Template** - Pre-built JavaScript with `string.Format` placeholder
-- **stackalloc** - Stack allocation for small tier arrays
+- **stackalloc** - Stack allocation for small arrays
 - **CORS Preflight Handling** - Immediate OPTIONS responses
 
 ## 🗄️ Database
@@ -151,15 +151,11 @@ SELECT * FROM vw_PiXL_Parsed
 WHERE WebDriverDetected = 1;
 ```
 
-## 📊 Tiered Collection
+## 📊 Data Collection
 
-| Tier | Method | Data Points | Use Case |
-|------|--------|-------------|----------|
-| 1 | Image pixel | ~5 | Email opens |
-| 2 | Basic JS | ~15 | Minimal tracking |
-| 3 | Standard JS | ~35 | Standard analytics |
-| 4 | Enhanced JS | ~50 | Detailed analytics |
-| 5 | Maximum JS | 100+ | Full fingerprinting |
+SmartPiXL captures 100+ data points via a single JavaScript tag, including screen info,
+device details, browser fingerprints (Canvas, WebGL, Audio), timing data, and evasion
+countermeasures. All data is stored in `PiXL_Test` and parsed into `PiXL_Parsed` (~175 columns).
 
 ## 🔧 Configuration
 
@@ -182,8 +178,8 @@ builder.WebHost.UseUrls("http://*:5000", "https://*:5001");
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/{clientId}/{campaignId}_SMART.GIF` | Tracking pixel (receives data) |
-| `/js/{clientId}/{campaignId}.js` | Tier 5 JavaScript |
+| `/{CompanyID}/{PiXLID}_SMART.GIF` | Tracking pixel (receives data) |
+| `/js/{CompanyID}/{PiXLID}.js` | Pixel JavaScript |
 | `/test` | Live demo page |
 | `/debug/headers` | Debug incoming headers |
 

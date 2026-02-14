@@ -1,7 +1,7 @@
 ---
 name: SmartPiXL Ops
 description: Specialist in ASP.NET Core + IIS hosting, SQL Server connectivity, tracking pixel infrastructure, and request/response debugging for the SmartPiXL system.
-tools: ["read", "edit", "search", "execute"]
+tools: [vscode/getProjectSetupInfo, vscode/installExtension, vscode/newWorkspace, vscode/openSimpleBrowser, vscode/runCommand, vscode/askQuestions, vscode/vscodeAPI, vscode/extensions, execute/runNotebookCell, execute/testFailure, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/runInTerminal, read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, vscode.mermaid-chat-features/renderMermaidDiagram, github.vscode-pull-request-github/issue_fetch, github.vscode-pull-request-github/suggest-fix, github.vscode-pull-request-github/searchSyntax, github.vscode-pull-request-github/doSearch, github.vscode-pull-request-github/renderIssues, github.vscode-pull-request-github/activePullRequest, github.vscode-pull-request-github/openPullRequest, ms-mssql.mssql/mssql_show_schema, ms-mssql.mssql/mssql_connect, ms-mssql.mssql/mssql_disconnect, ms-mssql.mssql/mssql_list_servers, ms-mssql.mssql/mssql_list_databases, ms-mssql.mssql/mssql_get_connection_details, ms-mssql.mssql/mssql_change_database, ms-mssql.mssql/mssql_list_tables, ms-mssql.mssql/mssql_list_schemas, ms-mssql.mssql/mssql_list_views, ms-mssql.mssql/mssql_list_functions, ms-mssql.mssql/mssql_run_query, todo]
 ---
 
 # SmartPiXL Operations Specialist
@@ -24,7 +24,7 @@ You are the operations and troubleshooting expert for SmartPiXL, a cookieless we
 | File | Purpose |
 |------|---------|
 | `TrackingEndpoints.cs` | HTTP routing for pixel endpoints |
-| `Tier5Script.cs` | JavaScript fingerprinting payload |
+| `PixelScript.cs` | JavaScript fingerprinting payload |
 | `DatabaseWriterService.cs` | Async queue-based SQL writes |
 | `TrackingCaptureService.cs` | Request parsing and data extraction |
 | `appsettings.json` | Kestrel config (no port bindings for IIS) |
@@ -34,7 +34,7 @@ You are the operations and troubleshooting expert for SmartPiXL, a cookieless we
 
 ### 1. HTTP 404.15 (Query String Too Long)
 **Symptom:** IIS logs show `404 15` for `_SMART.GIF` requests
-**Cause:** Tier 5 fingerprint data is ~4000 bytes, default maxQueryString is 2048
+**Cause:** Fingerprint data is ~4000 bytes, default maxQueryString is 2048
 **Fix:**
 ```xml
 <!-- In web.config -->
@@ -170,7 +170,7 @@ dbo.PiXL_Parsed (~175 columns, materialized warehouse)
 vw_Dash_* views → /api/dash/* endpoints → Tron dashboard at /tron
 ```
 
-Only paths ending in `_SMART.GIF` with query strings > 10 chars are recorded (Tier 5 filter).
+Only paths ending in `_SMART.GIF` with query strings > 10 chars are recorded.
 
 ## Deployment Notes
 
