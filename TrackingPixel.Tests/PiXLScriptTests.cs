@@ -19,20 +19,20 @@ public sealed class PiXLScriptTests
     // ========================================================================
 
     [Fact]
-    public void Template_ShouldNotBeEmpty()
+    public void Template_should_notBeEmpty()
     {
         PiXLScript.Template.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
-    public void Template_ContainsPixelUrlPlaceholder()
+    public void Template_should_containPixelUrlPlaceholder()
     {
         PiXLScript.Template.Should().Contain("{{PIXEL_URL}}",
             "Template must contain the placeholder for per-request URL injection");
     }
 
     [Fact]
-    public void Template_ReplacePlaceholder_ProducesValidUrl()
+    public void Template_should_produceValidUrl_when_placeholderReplaced()
     {
         var result = PiXLScript.Template.Replace("{{PIXEL_URL}}", "https://smartpixl.info/99/1_SMART.GIF");
 
@@ -60,7 +60,7 @@ public sealed class PiXLScriptTests
     [InlineData("data.push", "Push API removed - associated with notification permission")]
     [InlineData("data.payment", "Payment Request removed - triggers UI")]
     [InlineData("data.speechRecog", "Speech recognition removed - triggers permission prompt")]
-    public void Template_ShouldNotContain_PermissionTriggeringApis(string forbidden, string reason)
+    public void Template_should_notContainPermissionTriggeringApis(string forbidden, string reason)
     {
         PiXLScript.Template.Should().NotContain(forbidden, reason);
     }
@@ -80,7 +80,7 @@ public sealed class PiXLScriptTests
     [InlineData("data.mem", "Device memory helps identify device")]
     [InlineData("data.tz", "Timezone is critical for geo-inference")]
     [InlineData("data.lang", "Language helps identify user")]
-    public void Template_ShouldContain_RequiredCollectors(string required, string reason)
+    public void Template_should_containRequiredCollectors(string required, string reason)
     {
         PiXLScript.Template.Should().Contain(required, reason);
     }
@@ -94,7 +94,7 @@ public sealed class PiXLScriptTests
     [InlineData("canvasConsistency", "V-01: Canvas noise injection detection")]
     [InlineData("audioStable", "V-02: Audio fingerprint stability check")]
     [InlineData("fontMethodMismatch", "V-09: Font detection dual-method anti-spoof")]
-    public void Template_ShouldContain_EvasionCountermeasures(string field, string reason)
+    public void Template_should_containEvasionCountermeasures(string field, string reason)
     {
         PiXLScript.Template.Should().Contain(field, reason);
     }
@@ -104,7 +104,7 @@ public sealed class PiXLScriptTests
     // ========================================================================
 
     [Fact]
-    public void Template_ContainsSafeAccessor()
+    public void Template_should_containSafeAccessor()
     {
         PiXLScript.Template.Should().Contain("safeGet",
             "safeGet() is required to handle Proxy traps from privacy extensions");
@@ -115,7 +115,7 @@ public sealed class PiXLScriptTests
     // ========================================================================
 
     [Fact]
-    public void Template_CreatesImageRequest()
+    public void Template_should_createImageRequest()
     {
         // The script should create an Image and set src to fire the pixel
         PiXLScript.Template.Should().Contain("new Image()",
@@ -123,7 +123,7 @@ public sealed class PiXLScriptTests
     }
 
     [Fact]
-    public void Template_SendsDataAsQueryString()
+    public void Template_should_sendDataAsQueryString()
     {
         // Data should be sent as query string params on the GIF URL
         PiXLScript.Template.Should().Contain(".src =",
@@ -135,14 +135,14 @@ public sealed class PiXLScriptTests
     // ========================================================================
 
     [Fact]
-    public void Template_IsSelfExecuting()
+    public void Template_should_beSelfExecuting()
     {
         PiXLScript.Template.Should().Contain("(function()",
             "Script must be wrapped in an IIFE to avoid polluting global scope");
     }
 
     [Fact]
-    public void Template_HasErrorHandling()
+    public void Template_should_haveErrorHandling()
     {
         PiXLScript.Template.Should().Contain("try {",
             "Top-level try/catch prevents script errors from breaking the host page");

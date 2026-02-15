@@ -1,20 +1,135 @@
-using System.Buffers;
-using System.Collections.Concurrent;
+# PiXLScript.cs — Full Reference
 
+> **Purpose**: This document is the annotated reference for `Scripts/PiXLScript.cs`, the C# class that serves the SmartPiXL fingerprinting JavaScript to client browsers. Comments were stripped from the production template for payload size; this file preserves them for human reference.
+
+---
+
+## C# Structure
+
+### Class: `PiXLScript` (static)
+
+```
 namespace TrackingPixel.Scripts;
+```
 
-/// <summary>
-/// Contains the SmartPiXL JavaScript template for fingerprint data collection.
-/// Stored as a constant string — allocated once at startup.
-/// Uses string.Create + Span for zero-allocation script generation after first hit.
-/// </summary>
-public static class PiXLScript
+A static class with no instance state. Contains:
+
+| Member | Type | Purpose |
+|--------|------|---------|
+| `Template` | `const string` | The full JavaScript source as a C# verbatim string (`@"..."`). Contains a `{{PIXEL_URL}}` placeholder. |
+| `_cache` | `ConcurrentDictionary<string, string>` | Per-pixelUrl cache of the final script (Template with placeholder replaced). |
+| `MaxCacheEntries` | `const int` (10,000) | Hard cap on cache size. If exceeded, the entire cache is cleared (nuclear eviction). |
+| `GetScript(string pixelUrl)` | `static string` | Returns the cached script with `{{PIXEL_URL}}` replaced. One allocation per unique pixelUrl, then zero-alloc thereafter. |
+
+### How `GetScript` works
+
+```csharp
+public static string GetScript(string pixelUrl)
 {
-    /// <summary>
-    /// JavaScript template with {{PIXEL_URL}} placeholder for pixel URL.
-    /// Use GetScript(pixelUrl) for cached, zero-alloc generation per companyId/pixlId.
-    /// </summary>
-    public const string Template = @"
+    if (_cache.Count >= MaxCacheEntries)
+        _cache.Clear(); // Nuclear eviction — acceptable since warm-up is cheap
+    return _cache.GetOrAdd(pixelUrl, url => Template.Replace("{{PIXEL_URL}}", url));
+}
+```
+
+- Called by `TrackingEndpoints` when a browser requests `/js/{companyId}/{pixlId}.js`.
+- The pixelUrl is constructed from the request (e.g., `https://smartpixl.info/ACME/campaign1_SMART.GIF`).
+- `ConcurrentDictionary.GetOrAdd` ensures thread-safe, lock-free reads on cache hit.
+- The 10K cap prevents memory exhaustion from malicious URL enumeration.
+
+---
+
+## JavaScript Template — Annotated
+
+Below is the full JavaScript template with all original comments preserved. The production version in `PiXLScript.cs` has comments stripped for smaller payload.
+
+### Execution Flow
+
+1. **IIFE wraps everything** — `(function() { ... })()` — no global namespace pollution.
+2. **Synchronous collectors** run first (screen, navigator, canvas, WebGL, fonts, bot detection, etc.).
+3. **Async collectors** fire in parallel (audio fingerprint, battery, storage, media devices, Client Hints).
+4. **Behavioral listeners** (mouse movement, scroll) start recording immediately.
+5. **After 500ms** (or when async collectors finish), `sendPixel()` fires:
+   - Calculates mouse entropy from collected movement data.
+   - Builds a query string from all `data.*` properties.
+   - Sends a 1x1 GIF request to `{{PIXEL_URL}}?key=val&key=val&...`.
+
+### Safe Accessor Pattern
+
+```javascript
+var safeGet = function(obj, prop, fallback) {
+    try {
+        var val = obj[prop];
+        if (typeof val === 'function') {
+            try { return val.call(obj); } catch(e) { return fallback; }
+        }
+        return val !== undefined ? val : fallback;
+    } catch(e) {
+        data._proxyBlocked = (data._proxyBlocked || '') + prop + ',';
+        return fallback;
+    }
+};
+```
+
+**Why**: Privacy extensions (JShelter, Trace, CanvasBlocker) wrap `navigator` in a `Proxy`. Accessing any property on a Proxy can throw if the extension's handler rejects it. `safeGet` catches those throws and records which properties were blocked (in `_proxyBlocked`), which itself is a fingerprinting signal.
+
+### Data Collection Sections
+
+| Section | Key Fields | Notes |
+|---------|-----------|-------|
+| **Canvas Fingerprint** | `canvasFP`, `canvasEvasion` | Draws text/shapes, hashes the pixel data. Checks variance to detect blocking. |
+| **V-01: Canvas Noise Detection** | `canvasConsistency` | Draws identical content on 2 canvases. Noise injection makes them differ. |
+| **WebGL Fingerprint** | `webglFP`, `gpu`, `gpuVendor`, `webglParams`, `webglExt`, `webglEvasion` | 23 GL parameters + extension list. Detects software renderers (SwiftShader, llvmpipe). |
+| **V-02: Audio Fingerprint** | `audioFP`, `audioHash`, `audioStable`, `audioNoiseDetected` | OfflineAudioContext triangle wave. Runs twice for stability check. |
+| **V-09: Font Detection** | `fonts`, `fontMethodMismatch` | Tests 30 fonts via offsetWidth AND getBoundingClientRect. Mismatch = spoofing. |
+| **Speech Synthesis** | `voices` | Up to 20 voice name/lang pairs. Varies by OS and installed TTS engines. |
+| **WebRTC Local IP** | `localIp` | ICE candidate harvesting. Often blocked by extensions. |
+| **Storage Estimation** | `storageQuota`, `storageUsed` | navigator.storage.estimate(). Disk quota varies by device. |
+| **Gamepad** | `gamepads` | Rare but high-entropy when present. |
+| **Battery** | `batteryLevel`, `batteryCharging` | Mobile/laptop detection signal. |
+| **Media Devices** | `audioInputs`, `videoInputs` | Count of audio/video input devices. |
+| **Screen & Window** | `sw`, `sh`, `saw`, `sah`, `cd`, `pd`, `ori`, `vw`, `vh`, `ow`, `oh`, `sx`, `sy` | Full screen geometry including DPR and orientation. |
+| **Time & Locale** | `tz`, `tzo`, `ts`, `lang`, `langs`, `tzLocale`, `dateFormat`, `numberFormat`, `relativeTime` | Intl API formatting reveals locale-specific rendering. |
+| **Device & Browser** | `plt`, `vnd`, `ua`, `cores`, `mem`, `touch`, `product`, `productSub`, `vendorSub` | Standard navigator properties via safeGet. |
+| **Firefox Signals** | `oscpu`, `buildID` | Firefox-only properties. |
+| **Chrome Signals** | `chromeObj`, `chromeRuntime`, `jsHeapLimit`, `jsHeapTotal`, `jsHeapUsed` | Chrome-only. Heap size is a strong fingerprint (varies by tab count, extensions). |
+| **Client Hints** | `uaArch`, `uaBitness`, `uaModel`, `uaPlatformVersion`, `uaWow64`, `uaFormFactor`, `uaFullVersion`, `uaMobile`, `uaPlatform`, `uaBrands` | High-entropy UA-CH from Chromium. Requires `Accept-CH` response header. |
+| **Plugins & MIME Types** | `pluginList`, `mimeList`, `appName`, `appVersion`, `appCodeName` | Detailed plugin enumeration (up to 20 plugins, 30 MIME types). |
+| **Browser Capabilities** | `ck`, `dnt`, `pdf`, `webdr`, `online`, `java`, `plugins`, `mimeTypes` | Boolean feature flags. `webdr` (webdriver) is the #1 bot signal. |
+| **Bot Detection** | `botSignals`, `botScore` | 29 checks: webdriver, headless, PhantomJS, Selenium, Puppeteer, CDP, permissions, screen, plugins, automation flags, fn tampering, Playwright globals, viewport, HeadlessChrome UA, chrome.runtime, fullscreen match, connection API, script exec time, eval tampering, getter overrides, cross-realm toString, getter .name/.prototype validation, heap spoofing. |
+| **Evasion Detection** | `evasionDetected` | Tor screen size, Brave, WebRTC blocked, UA/platform mismatch, mobile UA on desktop, touch mismatch, NoScript, Client Hints mismatch. |
+| **Cross-Signal Analysis** | `crossSignals`, `anomalyScore` | CS-01 through CS-09: Font/platform mismatch, Safari-on-Chromium, GPU anomalies, heap limits, navigation timing, connection realism, WebGL2 on old Safari, GPU/platform cross-ref. |
+| **Combined Threat Score** | `combinedThreatScore` | `botScore + min(anomalyScore, 25)`. The cap prevents cross-signal false positives from inflating the score. |
+| **Connection** | `conn`, `dl`, `dlMax`, `rtt`, `save`, `connType` | Network Information API. |
+| **Page & Session** | `url`, `ref`, `hist`, `title`, `domain`, `path`, `hash`, `protocol` | Standard page context. |
+| **Performance Timing** | `loadTime`, `domTime`, `dnsTime`, `tcpTime`, `ttfb` | Navigation Timing API Level 1. |
+| **Storage Available** | `ls`, `ss`, `idb`, `caches` | Which storage APIs are available (boolean). |
+| **Feature Detection** | `ww`, `swk`, `wasm`, `webgl`, `webgl2`, `canvas`, `touchEvent`, `pointerEvent`, `mediaDevices`, `clipboard`, `speechSynth` | API availability fingerprint. |
+| **CSS/Media Preferences** | `darkMode`, `lightMode`, `reducedMotion`, `reducedData`, `contrast`, `forcedColors`, `invertedColors`, `hover`, `pointer`, `standalone` | OS-level preferences via matchMedia. |
+| **Document Info** | `docCharset`, `docCompat`, `docReady`, `docHidden`, `docVisibility` | Document state at script execution time. |
+| **Math Fingerprint** | `mathFP` | 8 math function results. Varies by JS engine (V8 vs SpiderMonkey vs JSC). |
+| **CSS Font-Variant** | `cssFontVariant` | Computed font property values + rendered width. Varies by engine and OS. |
+| **Error Handling** | `errorFP` | Error message length + stack trace length from a forced error. Engine-specific. |
+| **Tier ID** | `tier` | Hardcoded to `5` (current script version). |
+| **V-04: Stealth Detection** | `stealthSignals` | Timing-based detection of puppeteer-extra-plugin-stealth. Spoofed getters are slower than native ones. Also checks toString spoofing, prototype chain, Proxy modification. |
+| **V-10: Enhanced Evasion** | `evasionSignalsV2` | Tor letterbox viewport/screen rounding, minimal fonts, canvas/audio noise, font spoofing, stealth presence. |
+| **V-03: Behavioral Analysis** | `mouseMoves`, `scrolled`, `scrollY`, `mouseEntropy`, `behavioralFlags`, `moveTimingCV`, `moveSpeedCV`, `moveCountBucket`, `scrollContradiction` | Mouse movement entropy (angle variance), timing/speed coefficient of variation, scroll depth. Single-pass variance: `Var(X) = E[X²] - E[X]²`. |
+| **Pixel Fire** | — | Builds query string from all `data.*` properties, fires `new Image().src = '{{PIXEL_URL}}?...'`. |
+
+### Intentionally Excluded APIs
+
+The following are **not** collected because they add near-zero entropy, trigger permission prompts, or look alarming to users:
+
+> bluetooth, usb, serial, hid, midi, xr, share, credentials, geolocation, notifications, push, payment, speechRecog
+
+The MIDI popup ("control and reprogram your MIDI devices") is specifically called out as looking "black-hat."
+
+---
+
+## Full JavaScript Source (with comments)
+
+```javascript
+// SmartPiXL Tracking Script — Fingerprint Data Collection
 (function() {
     try {
         var s = screen;
@@ -24,9 +139,16 @@ public static class PiXLScript
         var perf = w.performance || {};
         var data = {};
         
+        // ============================================
+        // SAFE ACCESSOR - Handles privacy extension Proxy traps
+        // Privacy extensions (JShelter, Trace, etc.) wrap navigator in Proxy
+        // which can throw on property access. This helper catches those.
+        // MUST be defined early before any navigator property access!
+        // ============================================
         var safeGet = function(obj, prop, fallback) {
             try {
                 var val = obj[prop];
+                // If it's a function, try to call it
                 if (typeof val === 'function') {
                     try { return val.call(obj); } catch(e) { return fallback; }
                 }
@@ -37,8 +159,12 @@ public static class PiXLScript
             }
         };
         
+        // Connection object - use safeGet since this is navigator property
         var c = safeGet(n, 'connection', {}) || {};
         
+        // ============================================
+        // SHARED HASH FUNCTION (optimized - single allocation)
+        // ============================================
         var hashStr = (function() {
             var h = 0;
             return function(str) {
@@ -51,6 +177,9 @@ public static class PiXLScript
             };
         })();
         
+        // ============================================
+        // CANVAS FINGERPRINT
+        // ============================================
         var canvasResult = (function() {
             try {
                 var canvas = document.createElement('canvas');
@@ -71,8 +200,11 @@ public static class PiXLScript
                 var dataUrl = canvas.toDataURL();
                 var hash = hashStr(dataUrl);
                 
+                // Evasion detection: Check if canvas returns suspiciously uniform data
                 var imgData = ctx.getImageData(0, 0, 280, 60).data;
                 var variance = 0, sum = 0, samples = 100;
+                // BUG FIX: Sample from y=25 (center of drawn content: rect, text, arc)
+                // Previously sampled y=0 (blank top row) → variance=0 for ALL visitors
                 var sampleOffset = 25 * 280 * 4;
                 for (var i = sampleOffset; i < sampleOffset + samples * 4; i += 4) {
                     sum += imgData[i] + imgData[i+1] + imgData[i+2];
@@ -84,6 +216,7 @@ public static class PiXLScript
                 }
                 variance = variance / samples;
                 
+                // If variance is 0, canvas was likely blocked/spoofed
                 var evasion = (variance < 1 || dataUrl.length < 1000) ? 1 : 0;
                 
                 return { fp: hash, evasion: evasion };
@@ -92,6 +225,12 @@ public static class PiXLScript
         data.canvasFP = canvasResult.fp;
         data.canvasEvasion = canvasResult.evasion;
         
+        // ============================================
+        // V-01: CANVAS NOISE INJECTION DETECTION
+        // Draws identical content on 2 canvases. Noise injection extensions
+        // (Canvas Blocker, JShelter, Trace) add random per-canvas noise,
+        // making identical draws produce different hashes.
+        // ============================================
         data.canvasConsistency = (function() {
             try {
                 var c1 = document.createElement('canvas');
@@ -110,6 +249,9 @@ public static class PiXLScript
             } catch(e) { return 'error'; }
         })();
         
+        // ============================================
+        // WEBGL FINGERPRINT
+        // ============================================
         var webglData = (function() {
             try {
                 var canvas = document.createElement('canvas');
@@ -144,6 +286,7 @@ public static class PiXLScript
                 var extensions = gl.getSupportedExtensions() || [];
                 var str = params.join('|') + extensions.join(',');
                 
+                // Evasion detection: Check for suspiciously generic values
                 var gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
                 var gpuVendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '';
                 var evasion = 0;
@@ -168,6 +311,11 @@ public static class PiXLScript
         data.webglExt = webglData.extensions;
         data.webglEvasion = webglData.evasion;
         
+        // ============================================
+        // V-02: AUDIO FINGERPRINT WITH STABILITY CHECK
+        // Runs the audio fingerprint twice. Real audio hardware produces
+        // identical results; noise injection extensions differ each run.
+        // ============================================
         var audioPromise = (function() {
             try {
                 var AudioCtx = w.OfflineAudioContext || w.webkitOfflineAudioContext;
@@ -186,6 +334,7 @@ public static class PiXLScript
                                 var cd = buffer.getChannelData(0);
                                 var sum = 0;
                                 for (var i = 4500; i < 5000; i++) sum += Math.abs(cd[i]);
+                                // Also hash full sample for extra entropy
                                 var sampleStr = '';
                                 for (var j = 0; j < cd.length; j += 100) sampleStr += cd[j].toFixed(4);
                                 resolve({ fp: sum.toFixed(6), hash: hashStr(sampleStr) });
@@ -202,6 +351,11 @@ public static class PiXLScript
             } catch(e) { data.audioFP = ''; return Promise.resolve(); }
         })();
         
+        // ============================================
+        // V-09: FONT DETECTION (Dual-Method Anti-Spoof)
+        // Uses both offsetWidth AND getBoundingClientRect. If an extension
+        // spoofs one but not the other, we detect the mismatch.
+        // ============================================
         data.fonts = (function() {
             try {
                 if (!document.body) return '';
@@ -245,6 +399,9 @@ public static class PiXLScript
             } catch(e) { return ''; }
         })();
         
+        // ============================================
+        // SPEECH SYNTHESIS VOICES
+        // ============================================
         data.voices = (function() {
             try {
                 var v = speechSynthesis.getVoices();
@@ -253,6 +410,9 @@ public static class PiXLScript
             } catch(e) { return ''; }
         })();
         
+        // ============================================
+        // WEBRTC LOCAL IP
+        // ============================================
         (function() {
             try {
                 var rtc = new RTCPeerConnection({iceServers: []});
@@ -269,6 +429,9 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
+        // ============================================
+        // STORAGE ESTIMATION (wrapped in try-catch + safeGet)
+        // ============================================
         (function() {
             try {
                 var storage = safeGet(n, 'storage', null);
@@ -281,6 +444,9 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
+        // ============================================
+        // GAMEPAD DETECTION (wrapped in try-catch + safeGet)
+        // ============================================
         data.gamepads = (function() {
             try {
                 var getGP = safeGet(n, 'getGamepads', null);
@@ -293,6 +459,9 @@ public static class PiXLScript
             } catch(e) { return ''; }
         })();
         
+        // ============================================
+        // BATTERY STATUS (wrapped in try-catch + safeGet)
+        // ============================================
         (function() {
             try {
                 var getBat = safeGet(n, 'getBattery', null);
@@ -305,6 +474,9 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
+        // ============================================
+        // MEDIA DEVICES COUNT (wrapped in try-catch + safeGet)
+        // ============================================
         (function() {
             try {
                 var mediaDevices = safeGet(n, 'mediaDevices', null);
@@ -322,6 +494,9 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
+        // ============================================
+        // SCREEN & WINDOW
+        // ============================================
         data.sw = s.width;
         data.sh = s.height;
         data.saw = s.availWidth;
@@ -336,12 +511,18 @@ public static class PiXLScript
         data.sx = w.screenX || w.screenLeft || 0;
         data.sy = w.screenY || w.screenTop || 0;
         
+        // ============================================
+        // TIME & LOCALE (using safeGet for language properties)
+        // ============================================
         data.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         data.tzo = d.getTimezoneOffset();
         data.ts = d.getTime();
         data.lang = safeGet(n, 'language', '');
         data.langs = (safeGet(n, 'languages', []) || []).join(',');
         
+        // ============================================
+        // TIMEZONE LOCALE FORMATTING (High Entropy)
+        // ============================================
         data.tzLocale = (function() {
             try {
                 var opts = Intl.DateTimeFormat().resolvedOptions();
@@ -372,6 +553,9 @@ public static class PiXLScript
             return '';
         })();
         
+        // ============================================
+        // DEVICE & BROWSER (using safeGet for Proxy protection)
+        // ============================================
         data.plt = safeGet(n, 'platform', '');
         data.vnd = safeGet(n, 'vendor', '');
         data.ua = safeGet(n, 'userAgent', '');
@@ -382,18 +566,28 @@ public static class PiXLScript
         data.productSub = safeGet(n, 'productSub', '');
         data.vendorSub = safeGet(n, 'vendorSub', '');
         
+        // ============================================
+        // FIREFOX-SPECIFIC SIGNALS (using safeGet)
+        // ============================================
         data.oscpu = safeGet(n, 'oscpu', '');  // Firefox only
         data.buildID = safeGet(n, 'buildID', '');  // Firefox only (version fingerprint)
         
+        // ============================================
+        // CHROME-SPECIFIC SIGNALS
+        // ============================================
         data.chromeObj = w.chrome ? 1 : 0;
         data.chromeRuntime = (w.chrome && w.chrome.runtime) ? 1 : 0;
         
+        // Performance.memory (Chrome only - heap size fingerprint)
         if (perf.memory) {
             data.jsHeapLimit = perf.memory.jsHeapSizeLimit || '';
             data.jsHeapTotal = perf.memory.totalJSHeapSize || '';
             data.jsHeapUsed = perf.memory.usedJSHeapSize || '';
         }
         
+        // ============================================
+        // HIGH-ENTROPY CLIENT HINTS (async) - using safeGet for userAgentData
+        // ============================================
         var userAgentData = safeGet(n, 'userAgentData', null);
         (function() {
             try {
@@ -418,6 +612,7 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
+        // Low-entropy client hints (sync) - using cached userAgentData
         if (userAgentData) {
             data.uaMobile = userAgentData.mobile ? 1 : 0;
             data.uaPlatform = userAgentData.platform || '';
@@ -426,6 +621,9 @@ public static class PiXLScript
             }).join('|');
         }
         
+        // ============================================
+        // DETAILED PLUGIN ENUMERATION (using safeGet for Proxy protection)
+        // ============================================
         var pluginsArray = safeGet(n, 'plugins', null);
         var mimeTypesArray = safeGet(n, 'mimeTypes', null);
         
@@ -458,46 +656,60 @@ public static class PiXLScript
         data.appVersion = safeGet(n, 'appVersion', '');
         data.appCodeName = safeGet(n, 'appCodeName', '');
         
+        // ============================================
+        // BROWSER CAPABILITIES (using safeGet for Proxy-protected properties)
+        // ============================================
         data.ck = safeGet(n, 'cookieEnabled', false) ? 1 : 0;
         data.dnt = safeGet(n, 'doNotTrack', '');
         data.pdf = safeGet(n, 'pdfViewerEnabled', false) ? 1 : 0;
         data.webdr = safeGet(n, 'webdriver', false) ? 1 : 0;
         data.online = safeGet(n, 'onLine', true) ? 1 : 0;
-        data.java = safeGet(n, 'javaEnabled', 0) ? 1 : 0;  // safeGet handles function call
+        data.java = safeGet(n, 'javaEnabled', 0) ? 1 : 0;
         data.plugins = pluginsArray ? pluginsArray.length : 0;
         data.mimeTypes = mimeTypesArray ? mimeTypesArray.length : 0;
         
+        // ============================================
+        // BOT DETECTION (Comprehensive)
+        // ============================================
         var botSignals = (function() {
             var signals = [];
             var score = 0;
             
+            // 1. WebDriver detection (most common)
             if (data.webdr) { signals.push('webdriver'); score += 10; }
             
+            // 2. Headless Chrome detection
             if (!w.chrome && /Chrome/.test(data.ua)) {
                 signals.push('headless-no-chrome-obj');
                 score += 8;
             }
             
+            // 2b. Minimal/Fake User-Agent detection
+            // Real browsers have UA strings 50+ chars, bots often set minimal strings
             var ua = data.ua || '';
             if (ua.length < 30) {
                 signals.push('minimal-ua');
                 score += 15;
             }
+            // Known fake UA patterns
             if (/^(desktop|mobile|bot|crawler|spider|scraper)$/i.test(ua)) {
                 signals.push('fake-ua');
                 score += 20;
             }
             
+            // 3. PhantomJS detection
             if (w._phantom || w.phantom || w.callPhantom) {
                 signals.push('phantomjs');
                 score += 10;
             }
             
+            // 4. Nightmare.js detection
             if (w.__nightmare) {
                 signals.push('nightmare');
                 score += 10;
             }
             
+            // 5. Selenium detection
             if (w.document.__selenium_unwrapped || w.document.__webdriver_evaluate ||
                 w.document.__driver_evaluate || w.document.__webdriver_unwrapped ||
                 w.document.__fxdriver_evaluate || w.document.__driver_unwrapped) {
@@ -505,12 +717,14 @@ public static class PiXLScript
                 score += 10;
             }
             
+            // 6. Puppeteer/Playwright detection
             var langs = safeGet(n, 'languages', null);
             if (langs && langs.length === 0) {
                 signals.push('empty-languages');
                 score += 5;
             }
             
+            // 7. Chrome DevTools Protocol (CDP) detection
             if (w.cdc_adoQpoasnfa76pfcZLmcfl_Array ||
                 w.cdc_adoQpoasnfa76pfcZLmcfl_Promise ||
                 w.cdc_adoQpoasnfa76pfcZLmcfl_Symbol) {
@@ -518,6 +732,7 @@ public static class PiXLScript
                 score += 10;
             }
             
+            // 8. Permission inconsistencies (bots often have weird permission states)
             var permissions = safeGet(n, 'permissions', null);
             try {
                 if (permissions) {
@@ -530,31 +745,38 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 9. Plugin/mimeType inconsistencies
             if (pluginsArray && pluginsArray.length === 0 && mimeTypesArray && mimeTypesArray.length > 0) {
                 signals.push('plugin-mime-mismatch');
                 score += 3;
             }
             
+            // 10. Suspicious screen dimensions
             if (s.width === 0 || s.height === 0 || s.availHeight === 0) {
                 signals.push('zero-screen');
                 score += 8;
             }
             
+            // 11. No browser plugins (very rare for real users)
             if ((!pluginsArray || pluginsArray.length === 0) && !/Firefox/.test(data.ua)) {
                 signals.push('no-plugins');
                 score += 2;
             }
             
+            // 12. Automation-specific properties
             if (w.domAutomation || w.domAutomationController) {
                 signals.push('dom-automation');
                 score += 10;
             }
             
+            // 13. Inconsistent outerWidth/innerWidth (headless often has issues)
             if (w.outerWidth === 0 && w.innerWidth > 0) {
                 signals.push('outer-zero');
                 score += 5;
             }
             
+            // 14. Check for automation flags in navigator
+            // Wrapped in try/catch: privacy extensions wrap navigator in Proxy.
             try {
                 for (var key in n) {
                     if (/webdriver|selenium|puppeteer|playwright/i.test(key)) {
@@ -562,8 +784,9 @@ public static class PiXLScript
                         score += 10;
                     }
                 }
-            } catch(e) { /* Proxy enumeration blocked - non-critical, other checks cover this */ }
+            } catch(e) {}
             
+            // 15. Function.toString tampering (bots often patch native functions)
             try {
                 if (permissions) {
                     var fnStr = Function.prototype.toString.call(permissions.query);
@@ -574,45 +797,59 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 16. Playwright injects __playwright into window in some modes
             if (w.__playwright || w.__pw_manual) {
                 signals.push('playwright-global');
                 score += 10;
             }
             
+            // 17. Playwright default viewport sizes (common defaults)
             if ((w.innerWidth === 1280 && w.innerHeight === 720) ||
                 (w.innerWidth === 800 && w.innerHeight === 600)) {
                 signals.push('default-viewport');
-                score += 2; // Low score - could be legitimate
+                score += 2;
             }
             
+            // 18. Headless detection via missing plugins in Chromium
             if (/HeadlessChrome/.test(data.ua)) {
                 signals.push('headless-ua');
                 score += 10;
             }
             
+            // 19. Notification permission in headless
             try {
                 if (w.Notification && Notification.permission === 'denied' && 
                     permissions) {
                 }
             } catch(e) {}
             
+            // 20. Chrome runtime inconsistency (Playwright/Puppeteer headless)
+            // NOTE: chrome.runtime is only accessible in extension contexts,
+            // so this fires on ALL normal Chrome page visits. Weight reduced
+            // from 3→1 pending further research with real traffic data.
             if (w.chrome && !w.chrome.runtime) {
                 signals.push('chrome-no-runtime');
                 score += 1;
             }
             
+            // 21. Automated browsers often have identical screen and viewport
             if (s.width === w.outerWidth && s.height === w.outerHeight && s.availHeight === s.height) {
                 signals.push('fullscreen-match');
                 score += 2;
             }
             
+            // 22. Missing connection info (common in headless)
             if (!c && /Chrome/.test(data.ua)) {
                 signals.push('no-connection-api');
                 score += 3;
             }
             
+            // 23. Script Execution Time (BOT DETECTION - HIGH VALUE)
+            // scriptExecTime = milliseconds from page load to this point
+            // < 10ms = almost certainly bot, 50-200ms = normal, > 200ms = slow/human
             data.scriptExecTime = Date.now() - d.getTime();
             
+            // 24. Check if eval is native (some bots override it)
             try {
                 if (eval.toString().indexOf('[native code]') === -1) {
                     signals.push('eval-tampered');
@@ -620,6 +857,7 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 25. Check for Playwright's browser context fingerprint override
             try {
                 var descGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
                 if (descGetter && descGetter.get && descGetter.get.toString().indexOf('[native code]') === -1) {
@@ -628,6 +866,10 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 26. Cross-realm Function.prototype.toString validation
+            // Stealth tools replace toString with a WeakMap-backed version.
+            // Each frame gets its own WeakMap, so an iframe's pristine
+            // toString reveals the main frame's fake via cross-realm call.
             try {
                 var _ifr = document.createElement('iframe');
                 _ifr.style.display = 'none';
@@ -643,6 +885,9 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 27. Navigator getter .name validation
+            // Native V8 getters have .name === 'get propertyName'.
+            // JS function replacements have .name === '' or wrong name.
             try {
                 var _gnChecks = ['webdriver','hardwareConcurrency','platform','languages','deviceMemory','vendor'];
                 var _badNames = [];
@@ -658,6 +903,9 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 28. Native getter .prototype absence check
+            // Native V8 interface getters do NOT have a .prototype property.
+            // JS functions created via function(){} DO have .prototype.
             try {
                 var _gpChecks = ['webdriver','platform','vendor','hardwareConcurrency','deviceMemory','pdfViewerEnabled'];
                 var _hasProto = [];
@@ -673,6 +921,10 @@ public static class PiXLScript
                 }
             } catch(e) {}
             
+            // 29. Heap size spoofing detection
+            // Real browsers report messy heap numbers like 8103568.
+            // Spoofed environments report perfectly round numbers like 10000000.
+            // Also: totalHeap === usedHeap is physically impossible in real V8.
             if (perf.memory) {
                 var _ht = perf.memory.totalJSHeapSize | 0;
                 var _hu = perf.memory.usedJSHeapSize | 0;
@@ -694,9 +946,13 @@ public static class PiXLScript
         data.botSignals = botSignals.signals;
         data.botScore = botSignals.score;
         
+        // ============================================
+        // PRIVACY/EVASION TOOL DETECTION
+        // ============================================
         var evasionResult = (function() {
             var detected = [];
             
+            // 1. Tor Browser (standardized values)
             if (s.width === 1000 && s.height === 1000) {
                 detected.push('tor-screen');
             }
@@ -704,15 +960,18 @@ public static class PiXLScript
                 detected.push('tor-likely');
             }
             
+            // 2. Brave Browser (randomizes fingerprints)
             var braveNav = safeGet(n, 'brave', null);
             if (braveNav && typeof braveNav.isBrave === 'function') {
                 detected.push('brave');
             }
             
+            // 3. Privacy Badger / uBlock patterns
             if (typeof RTCPeerConnection === 'undefined') {
                 detected.push('webrtc-blocked');
             }
             
+            // 5. User Agent spoofing detection
             var platform = (data.plt || '').toLowerCase();
             var ua = (data.ua || '').toLowerCase();
             if ((platform.indexOf('win') > -1 && ua.indexOf('mac') > -1) ||
@@ -721,18 +980,22 @@ public static class PiXLScript
                 detected.push('ua-platform-mismatch');
             }
             
+            // 6. Screen resolution vs. User Agent mismatch
             if (/Mobile|Android|iPhone/.test(data.ua) && s.width > 1024) {
                 detected.push('mobile-ua-desktop-screen');
             }
             
+            // 7. Touch capability mismatch
             if (data.touch > 0 && !/Mobile|Android|iPhone|iPad|Touch/.test(data.ua) && s.width > 1024) {
                 detected.push('touch-mismatch');
             }
             
+            // 8. NoScript detection
             if (typeof w.Worker === 'undefined' && typeof w.fetch !== 'undefined') {
                 detected.push('partial-js-block');
             }
             
+            // 9. Client Hints vs Navigator.platform mismatch
             var uaData = safeGet(n, 'userAgentData', null);
             if (uaData && uaData.platform) {
                 var chPlatform = uaData.platform.toLowerCase();
@@ -749,6 +1012,10 @@ public static class PiXLScript
         
         data.evasionDetected = evasionResult;
         
+        // ============================================
+        // CROSS-SIGNAL CONSISTENCY ANALYSIS
+        // Inline — no IIFE, no arrays, direct string concat
+        // ============================================
         var flags = '', anomalyScore = 0;
         var platform = (data.plt || '').toLowerCase();
         var ua = (data.ua || '').toLowerCase();
@@ -756,6 +1023,7 @@ public static class PiXLScript
         var vendor = (data.vnd || '');
         var fonts = (data.fonts || '');
         
+        // CS-01: Cross-platform font inconsistency
         var hasWinFont = fonts.indexOf('Segoe UI') > -1 | fonts.indexOf('Calibri') > -1 |
                   fonts.indexOf('Consolas') > -1 | fonts.indexOf('MS Gothic') > -1 |
                   fonts.indexOf('Microsoft YaHei') > -1;
@@ -771,6 +1039,7 @@ public static class PiXLScript
             flags += (flags ? ',' : '') + 'mac-fonts-on-win'; anomalyScore += 10;
         }
         
+        // CS-02: Safari-on-Chromium
         var isSafariUA = ua.indexOf('safari') > -1 && ua.indexOf('chrome') < 0 && ua.indexOf('chromium') < 0;
         if (isSafariUA) {
             if (vendor === 'Google Inc.') {
@@ -787,6 +1056,7 @@ public static class PiXLScript
             }
         }
         
+        // CS-03: GPU / Platform cross-reference
         if (gpu.indexOf('swiftshader') > -1) {
             flags += (flags ? ',' : '') + 'swiftshader-gpu'; anomalyScore += 5;
             if (platform.indexOf('mac') > -1) {
@@ -800,6 +1070,13 @@ public static class PiXLScript
             flags += (flags ? ',' : '') + 'llvmpipe-on-mac'; anomalyScore += 20;
         }
         
+        // CS-04: Audio/Canvas correlation
+        if (data.canvasEvasion && !data.audioFP) {
+            flags += (flags ? ',' : '') + 'canvas-evasion-no-audio'; anomalyScore += 8;
+        }
+        
+        // CS-05: Heap size — PROMOTED to bot scoring (signal 29).
+        // Cross-signal still checks for heap limit anomaly.
         if (perf.memory) {
             var heapLimit = perf.memory.jsHeapSizeLimit | 0;
             if (heapLimit === 3760000000 || heapLimit === 2330000000 ||
@@ -808,6 +1085,7 @@ public static class PiXLScript
             }
         }
         
+        // CS-06: Navigation timing anomaly
         if (perf.timing) {
             var t = perf.timing;
             var pageLoad = (t.loadEventEnd - t.navigationStart) | 0;
@@ -821,10 +1099,12 @@ public static class PiXLScript
             }
         }
         
+        // CS-07: Connection API realism
         if ((c.effectiveType || '') === '4g' && (c.downlink || 0) > 5 && !(c.rtt > 0)) {
             flags += (flags ? ',' : '') + 'connection-missing-rtt'; anomalyScore += 5;
         }
         
+        // CS-08: WebGL2 on old Safari
         if (data.webgl2 && isSafariUA) {
             var safariMatch = ua.match(/version\/(\d+)/);
             if (safariMatch && (safariMatch[1] | 0) < 15) {
@@ -832,6 +1112,7 @@ public static class PiXLScript
             }
         }
         
+        // CS-09: GPU/Platform mismatch — macOS-only GPU strings on non-Mac
         var isMacGPU = gpu.indexOf('intel iris') > -1 || gpu.indexOf('apple m') > -1 ||
                        gpu.indexOf('apple gpu') > -1;
         var isMacPlatform = platform.indexOf('mac') > -1;
@@ -848,8 +1129,17 @@ public static class PiXLScript
         data.crossSignals = flags;
         data.anomalyScore = anomalyScore;
         
+        // ============================================
+        // COMBINED THREAT SCORE
+        // botScore catches automation signals (webdriver, headless, etc.)
+        // anomalyScore catches cross-signal inconsistencies
+        // Cap anomaly contribution at 25 to limit false positives.
+        // ============================================
         data.combinedThreatScore = (data.botScore || 0) + Math.min(anomalyScore, 25);
         
+        // ============================================
+        // CONNECTION
+        // ============================================
         data.conn = c.effectiveType || '';
         data.dl = c.downlink || '';
         data.dlMax = c.downlinkMax || '';
@@ -857,6 +1147,9 @@ public static class PiXLScript
         data.save = c.saveData ? 1 : 0;
         data.connType = c.type || '';
         
+        // ============================================
+        // PAGE & SESSION
+        // ============================================
         data.url = location.href;
         data.ref = document.referrer;
         data.hist = history.length;
@@ -866,6 +1159,9 @@ public static class PiXLScript
         data.hash = location.hash;
         data.protocol = location.protocol;
         
+        // ============================================
+        // PERFORMANCE TIMING
+        // ============================================
         if (perf.timing) {
             var t = perf.timing;
             data.loadTime = t.loadEventEnd - t.navigationStart;
@@ -875,11 +1171,17 @@ public static class PiXLScript
             data.ttfb = t.responseStart - t.requestStart;
         }
         
+        // ============================================
+        // STORAGE AVAILABLE
+        // ============================================
         data.ls = (function() { try { return !!w.localStorage; } catch(e) { return 0; } })() ? 1 : 0;
         data.ss = (function() { try { return !!w.sessionStorage; } catch(e) { return 0; } })() ? 1 : 0;
         data.idb = !!w.indexedDB ? 1 : 0;
         data.caches = !!w.caches ? 1 : 0;
         
+        // ============================================
+        // FEATURE DETECTION (using safeGet for navigator properties)
+        // ============================================
         data.ww = !!w.Worker ? 1 : 0;
         data.swk = !!safeGet(n, 'serviceWorker', null) ? 1 : 0;
         data.wasm = typeof WebAssembly === 'object' ? 1 : 0;
@@ -889,10 +1191,19 @@ public static class PiXLScript
         data.touchEvent = 'ontouchstart' in w ? 1 : 0;
         data.pointerEvent = !!w.PointerEvent ? 1 : 0;
         data.mediaDevices = !!safeGet(n, 'mediaDevices', null) ? 1 : 0;
+        // ============================================
+        // INTENTIONALLY EXCLUDED APIS
+        // ============================================
+        // Not checked: bluetooth, usb, serial, hid, midi, xr, share, credentials,
+        // geolocation, notifications, push, payment, speechRecog
+        // Reason: near-zero entropy, trigger permission prompts, look alarming
         var clipboardObj = safeGet(n, 'clipboard', null);
         data.clipboard = !!(clipboardObj && clipboardObj.writeText) ? 1 : 0;
         data.speechSynth = !!w.speechSynthesis ? 1 : 0;
         
+        // ============================================
+        // CSS/MEDIA PREFERENCES
+        // ============================================
         data.darkMode = w.matchMedia && w.matchMedia('(prefers-color-scheme: dark)').matches ? 1 : 0;
         data.lightMode = w.matchMedia && w.matchMedia('(prefers-color-scheme: light)').matches ? 1 : 0;
         data.reducedMotion = w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
@@ -904,12 +1215,18 @@ public static class PiXLScript
         data.pointer = w.matchMedia && w.matchMedia('(pointer: fine)').matches ? 'fine' : (w.matchMedia && w.matchMedia('(pointer: coarse)').matches ? 'coarse' : '');
         data.standalone = w.matchMedia && w.matchMedia('(display-mode: standalone)').matches ? 1 : 0;
         
+        // ============================================
+        // DOCUMENT INFO
+        // ============================================
         data.docCharset = document.characterSet || '';
         data.docCompat = document.compatMode || '';
         data.docReady = document.readyState || '';
         data.docHidden = document.hidden ? 1 : 0;
         data.docVisibility = document.visibilityState || '';
         
+        // ============================================
+        // MATH FINGERPRINT
+        // ============================================
         data.mathFP = (function() {
             var m = Math;
             return [
@@ -924,6 +1241,9 @@ public static class PiXLScript
             ].map(function(x) { return x.toString().slice(0, 10); }).join(',');
         })();
         
+        // ============================================
+        // CSS FONT-VARIANT FINGERPRINT
+        // ============================================
         data.cssFontVariant = (function() {
             try {
                 var el = document.createElement('span');
@@ -956,13 +1276,20 @@ public static class PiXLScript
             } catch(e) { return ''; }
         })();
         
+        // ============================================
+        // ERROR HANDLING FINGERPRINT
+        // ============================================
         data.errorFP = (function() {
             try { null[0](); } catch(e) { return e.message.length + (e.stack ? e.stack.length : 0); }
             return '';
         })();
         
+        // TIER ID
         data.tier = 5;
         
+        // ============================================
+        // V-04: STEALTH PLUGIN DETECTION
+        // ============================================
         data.stealthSignals = (function() {
             var signals = [];
             try {
@@ -993,6 +1320,9 @@ public static class PiXLScript
             return signals.join(',');
         })();
         
+        // ============================================
+        // V-10: ENHANCED EVASION / TOR DETECTION
+        // ============================================
         data.evasionSignalsV2 = (function() {
             var det = [];
             var iW = w.innerWidth, iH = w.innerHeight;
@@ -1009,6 +1339,9 @@ public static class PiXLScript
             return det.join(',');
         })();
         
+        // ============================================
+        // V-03: BEHAVIORAL ANALYSIS (Mouse/Scroll)
+        // ============================================
         var mouseData = { moves: [], startTime: Date.now(), scrolled: 0, scrollY: 0 };
         var mouseHandler = function(e) {
             if (mouseData.moves.length < 50)
@@ -1028,6 +1361,7 @@ public static class PiXLScript
             data.scrolled = mouseData.scrolled;
             data.scrollY = mouseData.scrollY;
             
+            // CS-04: Scroll depth contradiction
             if (mouseData.scrolled && mouseData.scrollY === 0) {
                 data.scrollContradiction = 1;
                 var cs = data.crossSignals || '';
@@ -1039,6 +1373,7 @@ public static class PiXLScript
             
             if (mLen < 5) { data.mouseEntropy = 0; data.behavioralFlags = ''; return; }
             
+            // Single-pass variance: Var(X) = E[X^2] - E[X]^2
             var aSum = 0, aSq = 0, tSum = 0, tSq = 0, sSum = 0, sSq = 0, n = 0;
             for (var i = 1; i < mLen; i++) {
                 var dx = moves[i].x - moves[i-1].x;
@@ -1097,6 +1432,11 @@ public static class PiXLScript
             document.removeEventListener('scroll', scrollHandler);
         };
         
+        // ============================================
+        // V-06: FIRE PIXEL (Promise-based async + behavioral data)
+        // Waits for async collectors (audio, battery, storage) and
+        // 500ms for behavioral mouse/scroll data before firing.
+        // ============================================
         var sendPixel = function() {
             calculateMouseEntropy();
             var params = [];
@@ -1123,24 +1463,4 @@ public static class PiXLScript
         new Image().src = '{{PIXEL_URL}}?error=1&msg=' + encodeURIComponent(e.message);
     }
 })();
-";
-
-    // Cache per pixel URL — zero allocation after first hit per companyId/pixlId combo.
-    // Capped at 10,000 entries to prevent memory exhaustion from malicious URL generation.
-    private static readonly ConcurrentDictionary<string, string> _cache = new();
-    private const int MaxCacheEntries = 10_000;
-
-    /// <summary>
-    /// Returns script with pixel URL injected. Cached per URL.
-    /// Uses simple Replace for correctness — cached so only runs once per URL.
-    /// Evicts the entire cache if it grows beyond MaxCacheEntries to bound memory.
-    /// </summary>
-    public static string GetScript(string pixelUrl)
-    {
-        if (_cache.Count >= MaxCacheEntries)
-        {
-            _cache.Clear(); // Nuclear eviction — acceptable since warm-up is cheap
-        }
-        return _cache.GetOrAdd(pixelUrl, url => Template.Replace("{{PIXEL_URL}}", url));
-    }
-}
+```

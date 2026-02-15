@@ -9,7 +9,7 @@ namespace TrackingPixel.Tests;
 public sealed class TrackingDataTests
 {
     [Fact]
-    public void TrackingData_DefaultValues_AllNull()
+    public void DefaultValues_should_allBeNull()
     {
         var data = new TrackingData();
 
@@ -24,7 +24,7 @@ public sealed class TrackingDataTests
     }
 
     [Fact]
-    public void TrackingData_WithInit_SetsAllValues()
+    public void WithInit_should_setAllValues()
     {
         var now = DateTime.UtcNow;
         var data = new TrackingData
@@ -49,7 +49,7 @@ public sealed class TrackingDataTests
     }
 
     [Fact]
-    public void TrackingData_RecordEquality_SameValues_AreEqual()
+    public void RecordEquality_should_beEqual_when_sameValues()
     {
         var now = DateTime.UtcNow;
         var data1 = new TrackingData { ReceivedAt = now, CompanyID = "A", PiXLID = "1" };
@@ -59,7 +59,7 @@ public sealed class TrackingDataTests
     }
 
     [Fact]
-    public void TrackingData_RecordEquality_DifferentValues_NotEqual()
+    public void RecordEquality_should_notBeEqual_when_differentValues()
     {
         var data1 = new TrackingData { CompanyID = "A" };
         var data2 = new TrackingData { CompanyID = "B" };
@@ -68,7 +68,7 @@ public sealed class TrackingDataTests
     }
 
     [Fact]
-    public void TrackingData_RecordWith_CreatesModifiedCopy()
+    public void RecordWith_should_createModifiedCopy()
     {
         var original = new TrackingData
         {

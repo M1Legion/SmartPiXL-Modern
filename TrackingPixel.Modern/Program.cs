@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.ResponseCompression;
 using TrackingPixel.Configuration;
 using TrackingPixel.Endpoints;
 using TrackingPixel.Services;
@@ -88,8 +90,10 @@ builder.Services.AddHostedService<EtlBackgroundService>();
 
 // GeoCacheService: Non-blocking in-memory IP geolocation lookups backed by IPAPI.IP.
 // Used on the hot path for timezone mismatch signals and _srv_geo* enrichment params.
-// On cache miss, fires async SQL lookup — next hit from that IP will be cached.
+// On cache miss, writes to a bounded Channel<string>; background reader task performs
+// SQL lookups and populates the two-tier cache for the next hit.
 builder.Services.AddSingleton<GeoCacheService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GeoCacheService>());
 
 // IpApiSyncService: Daily incremental sync from Xavier (IPGEO.dbo.IP_Location_New)
 // to local IPAPI.IP. Pulls delta by Last_Seen watermark, MERGEs via staging table.
@@ -103,6 +107,26 @@ builder.Services.AddSingleton<InfraHealthService>();
 
 // CORS: Wide-open for tracking pixel — any origin can embed our script/GIF.
 builder.Services.AddCors();
+
+// Response Compression: Gzip + Brotli for text responses (JS, JSON, HTML).
+// The 43-byte GIF pixel is excluded by MIME type (image/gif is not compressible).
+// Brotli preferred (better ratio), gzip as fallback for older clients.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+    [
+        "application/javascript",
+        "text/html",
+        "application/json"
+    ]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
 
 // ---------------------------------------------------------------------------
 // WINDOWS SERVICE SUPPORT — Allows the app to run as a Windows Service
@@ -151,10 +175,15 @@ forwardedOptions.KnownIPNetworks.Clear();
 forwardedOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedOptions);
 
-// 2. CORS — Tracking pixels are embedded on third-party sites; must allow all origins.
+// 2. Response Compression — Brotli/Gzip for text responses (JS, JSON, HTML).
+//    Must be before StaticFiles and endpoints so compressed responses flow through.
+//    Does NOT compress the 43-byte GIF (image/gif is not in the MIME list).
+app.UseResponseCompression();
+
+// 3. CORS — Tracking pixels are embedded on third-party sites; must allow all origins.
 app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 
-// 3. Response Headers — Injected on every response. The static lambda avoids
+// 4. Response Headers — Injected on every response. The static lambda avoids
 //    closure capture, so no delegate allocation per request. Accept-CH requests
 //    high-entropy Client Hints (architecture, bitness, model, platform version)
 //    from Chromium browsers, which the pixel JS then reads for fingerprinting.
@@ -175,7 +204,7 @@ app.Use(static (context, next) =>
     return next();
 });
 
-// 4. Static Files — Serves wwwroot/ assets (index.html, tron.html, images, CSS).
+// 5. Static Files — Serves wwwroot/ assets (index.html, tron.html, images, CSS).
 //    HTML files: no-cache so browser always fetches latest after deploys.
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -233,6 +262,6 @@ _ = Task.Run(async () =>
     }
 });
 
-Console.WriteLine("SmartPiXL Tracking Server running — Ctrl+C to stop");
+logger.Info("SmartPiXL Tracking Server running — Ctrl+C to stop");
 
 app.Run();

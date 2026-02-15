@@ -1488,7 +1488,7 @@ function drillPipeline(stage) {
     html += di('Last ETL Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
     html += di('Synthetic Hits', num(health?.syntheticHits));
     html += '</div>';
-    html += sug('ETL runs every 60 seconds via EtlBackgroundService, calling usp_ParseNewHits. If lag is high, run manually:<br><code style="color:var(--cyan)">EXEC usp_ParseNewHits</code><br>If watermark is ahead of max Test ID, reset with:<br><code style="color:var(--cyan)">UPDATE ETL_Watermark SET LastProcessedId = 0</code>');
+    html += sug('ETL runs every 60 seconds via EtlBackgroundService, calling ETL.usp_ParseNewHits. If lag is high, run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_ParseNewHits</code><br>If watermark is ahead of max Test ID, reset with:<br><code style="color:var(--cyan)">UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = \'ParseNewHits\'</code>');
     openModal('ETL PARSE STAGE', html);
   }
   else if (stage === 'dash') {
@@ -1726,9 +1726,9 @@ function getFixSuggestion(issue) {
   if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
   if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
   if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
-  if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC usp_ParseNewHits"</code>';
+  if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
   if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
-  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits @BatchSize=500"</code>';
+  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
   if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
   return null;
 }

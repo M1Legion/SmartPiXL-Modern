@@ -25,7 +25,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void FirstObservation_ShouldBeStable()
+    public void RecordAndCheck_should_beStable_when_firstObservation()
     {
         var result = _service.RecordAndCheck("1.2.3.4", "canvas1", "webgl1", "audio1");
 
@@ -40,7 +40,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void SameFingerprint_Repeated_ShouldRemainStable()
+    public void RecordAndCheck_should_remainStable_when_sameFingerprintRepeated()
     {
         for (int i = 0; i < 10; i++)
         {
@@ -57,7 +57,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void TwoFingerprints_ShouldNotBeSuspicious()
+    public void RecordAndCheck_should_notBeSuspicious_when_twoFingerprints()
     {
         _service.RecordAndCheck("1.2.3.4", "canvas1", "webgl1", "audio1");
         var result = _service.RecordAndCheck("1.2.3.4", "canvas2", "webgl2", "audio2");
@@ -72,7 +72,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void ThreeUniqueFingerprints_WithEnoughObservations_ShouldBeSuspicious()
+    public void RecordAndCheck_should_beSuspicious_when_threeOrMoreUnique()
     {
         // Simulate anti-detect browser: each "profile" has unique fingerprints from same IP
         _service.RecordAndCheck("1.2.3.4", "canvas1", "webgl1", "audio1");
@@ -91,7 +91,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void DifferentIps_ShouldBeIndependent()
+    public void RecordAndCheck_should_trackIndependently_when_differentIps()
     {
         _service.RecordAndCheck("1.2.3.4", "canvas1", "webgl1", "audio1");
         _service.RecordAndCheck("5.6.7.8", "canvas2", "webgl2", "audio2");
@@ -111,7 +111,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void NullComponents_ShouldHandleGracefully()
+    public void RecordAndCheck_should_handleGracefully_when_nullComponents()
     {
         var result = _service.RecordAndCheck("1.2.3.4", null, null, null);
 
@@ -120,7 +120,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     }
 
     [Fact]
-    public void MixedNullAndValue_ShouldTrackCorrectly()
+    public void RecordAndCheck_should_trackCorrectly_when_mixedNullAndValue()
     {
         _service.RecordAndCheck("1.2.3.4", "canvas1", null, null);
         var result = _service.RecordAndCheck("1.2.3.4", "canvas1", "webgl1", null);
@@ -135,7 +135,7 @@ public sealed class FingerprintStabilityServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public async Task ConcurrentObservations_ShouldNotThrow()
+    public async Task RecordAndCheck_should_notThrow_when_concurrentObservations()
     {
         var tasks = Enumerable.Range(0, 100).Select(i =>
             Task.Run(() => _service.RecordAndCheck(

@@ -12,7 +12,7 @@ namespace TrackingPixel.Endpoints;
 //
 // ARCHITECTURE:
 //   /api/dash/* routes  →  QueryAsync/QuerySingleRowAsync  →  vw_Dash_* views
-//   (HTTP GET)              (ADO.NET SqlDataReader)              (PiXL_Parsed materialized data)
+//   (HTTP GET)              (ADO.NET SqlDataReader)              (PiXL.Parsed materialized data)
 //
 // All endpoints are restricted to localhost + DashboardAllowedIPs from config.
 // External requests receive a 404 (not 403) to avoid revealing the API exists.
@@ -39,7 +39,7 @@ namespace TrackingPixel.Endpoints;
 /// Dashboard API endpoints — exposes SQL views as JSON for the Tron operations dashboard.
 /// <para>
 /// All endpoints are read-only SELECT queries against <c>vw_Dash_*</c> views
-/// (materialized from <c>PiXL_Parsed</c>). Access is restricted to loopback
+/// (materialized from <c>PiXL.Parsed</c>). Access is restricted to loopback
 /// addresses and explicitly allowed IPs from <c>Tracking:DashboardAllowedIPs</c>.
 /// </para>
 /// </summary>
@@ -65,6 +65,9 @@ public static class DashboardEndpoints
     /// Built once at endpoint registration time. Empty = localhost only.
     /// </summary>
     private static HashSet<IPAddress> _allowedIps = new();
+
+    /// <summary>Logger resolved once at endpoint registration time.</summary>
+    private static ITrackingLogger _logger = null!;
 
     /// <summary>
     /// Returns true if the request originates from this machine or an allowed IP.
@@ -106,6 +109,7 @@ public static class DashboardEndpoints
     public static void MapDashboardEndpoints(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
+        _logger = app.Services.GetRequiredService<ITrackingLogger>();
         
         // Parse allowed dashboard IPs from config into a HashSet for O(1) lookup.
         // Runs once at startup — config changes require app restart.
@@ -115,16 +119,16 @@ public static class DashboardEndpoints
             if (IPAddress.TryParse(ipStr.Trim(), out var parsed))
             {
                 _allowedIps.Add(parsed);
-                Console.WriteLine($"[Dashboard] Allowed remote IP: {parsed}");
+                _logger.Info($"[Dashboard] Allowed remote IP: {parsed}");
             }
             else
             {
-                Console.WriteLine($"[Dashboard] WARNING: Could not parse allowed IP: '{ipStr}'");
+                _logger.Warning($"[Dashboard] Could not parse allowed IP: '{ipStr}'");
             }
         }
         
         // ============================================================================
-        // MATERIALIZED VIEWS — PiXL_Parsed (instant reads, powers Tron dashboard)
+        // MATERIALIZED TABLE — PiXL.Parsed (instant reads, powers Tron dashboard)
         // Each endpoint maps 1:1 to a SQL view. The views do all the heavy lifting;
         // the C# code just serializes the rows to JSON and enforces access control.
         // ============================================================================
@@ -352,6 +356,8 @@ public static class DashboardEndpoints
     {
         ctx.Response.ContentType = "application/json";
         ctx.Response.Headers.CacheControl = "no-cache";
-        await ctx.Response.WriteAsync(JsonSerializer.Serialize(data, JsonOptions));
+        // Stream directly to response body — avoids intermediate string allocation.
+        // For /api/dash/recent (~60KB), this eliminates a 60KB string alloc.
+        await JsonSerializer.SerializeAsync(ctx.Response.Body, data, JsonOptions);
     }
 }

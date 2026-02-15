@@ -14,7 +14,7 @@ namespace TrackingPixel.Models;
 //
 // QueryString carries ALL client-side fingerprint data (~90 parameters from
 // the pixel JavaScript). These are parsed server-side by the SQL view
-// vw_Dash_* and the ETL proc usp_ParseNewHits into PiXL_Parsed (~175 columns).
+// vw_Dash_* and the ETL proc ETL.usp_ParseNewHits into PiXL.Parsed (~175 columns).
 // ============================================================================
 
 /// <summary>

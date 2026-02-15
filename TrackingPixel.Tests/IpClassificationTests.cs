@@ -10,7 +10,7 @@ namespace TrackingPixel.Tests;
 public sealed class IpClassificationTests
 {
     [Fact]
-    public void IpClassification_Constructor_SetsAllProperties()
+    public void Constructor_should_setAllProperties()
     {
         var result = new IpClassification(IpType.Public, true, "Routable");
 
@@ -20,7 +20,7 @@ public sealed class IpClassificationTests
     }
 
     [Fact]
-    public void IpClassification_DefaultRangeNote_IsNull()
+    public void Constructor_should_defaultRangeNoteToNull()
     {
         var result = new IpClassification(IpType.Private, false);
 
@@ -28,7 +28,7 @@ public sealed class IpClassificationTests
     }
 
     [Fact]
-    public void IpClassification_ValueEquality_SameValues_AreEqual()
+    public void ValueEquality_should_beEqual_when_sameValues()
     {
         var a = new IpClassification(IpType.Public, true, "Test");
         var b = new IpClassification(IpType.Public, true, "Test");
@@ -37,7 +37,7 @@ public sealed class IpClassificationTests
     }
 
     [Fact]
-    public void IpClassification_ValueEquality_DifferentType_NotEqual()
+    public void ValueEquality_should_notBeEqual_when_differentType()
     {
         var a = new IpClassification(IpType.Public, true);
         var b = new IpClassification(IpType.Private, false);
@@ -58,13 +58,13 @@ public sealed class IpClassificationTests
     [InlineData(IpType.Unspecified, (byte)9)]
     [InlineData(IpType.Benchmark, (byte)10)]
     [InlineData(IpType.Invalid, (byte)255)]
-    public void IpType_EnumValues_AreCorrect(IpType type, byte expected)
+    public void IpType_should_haveCorrectEnumValues(IpType type, byte expected)
     {
         ((byte)type).Should().Be(expected);
     }
 
     [Fact]
-    public void IpType_AllValuesAccountedFor()
+    public void IpType_should_haveAllExpectedValues()
     {
         // Ensure we have all expected enum values
         var values = Enum.GetValues<IpType>();

@@ -87,7 +87,7 @@ public sealed class ServiceHealthItem
 
 /// <summary>
 /// SQL Server connectivity probe result. Tests the connection string,
-/// checks basic row counts in PiXL.Test and PiXL_Parsed, and reads
+/// checks basic row counts in PiXL.Test and PiXL.Parsed, and reads
 /// the ETL watermark.
 /// </summary>
 public sealed class SqlHealthItem
@@ -107,13 +107,13 @@ public sealed class SqlHealthItem
     /// <summary>Row count in <c>PiXL.Test</c> (raw ingest table).</summary>
     public int TestRows { get; set; }
     
-    /// <summary>Row count in <c>PiXL_Parsed</c> (materialized warehouse).</summary>
+    /// <summary>Row count in <c>PiXL.Parsed</c> (materialized warehouse).</summary>
     public int ParsedRows { get; set; }
     
-    /// <summary>Current <c>ETL_Watermark.LastProcessedId</c> for ParseNewHits.</summary>
+    /// <summary>Current <c>ETL.Watermark.LastProcessedId</c> for ParseNewHits.</summary>
     public long Watermark { get; set; }
     
-    /// <summary>UTC timestamp of the last ETL run (from <c>ETL_Watermark.LastRunAt</c>).</summary>
+    /// <summary>UTC timestamp of the last ETL run (from <c>ETL.Watermark.LastRunAt</c>).</summary>
     public DateTime? LastEtlRun { get; set; }
     
     /// <summary>SQL Server version string (e.g., "Microsoft SQL Server 2025 Developer").</summary>
@@ -220,10 +220,10 @@ public sealed class DataFlowHealthItem
     /// <summary>MAX(Id) in <c>PiXL.Test</c> — the latest raw ingest row.</summary>
     public long MaxTestId { get; set; }
     
-    /// <summary>Current <c>ETL_Watermark.LastProcessedId</c> for ParseNewHits.</summary>
+    /// <summary>Current <c>ETL.Watermark.LastProcessedId</c> for ParseNewHits.</summary>
     public long WatermarkId { get; set; }
     
-    /// <summary>MAX(OriginalTestId) in <c>PiXL_Parsed</c>.</summary>
+    /// <summary>MAX(OriginalTestId) in <c>PiXL.Parsed</c>.</summary>
     public long MaxParsedId { get; set; }
     
     /// <summary>Rows in <c>PiXL.Test</c> not yet processed by the ETL (MaxTestId - WatermarkId).</summary>
@@ -300,8 +300,8 @@ public sealed class ErrorEntry
 /// <summary>
 /// Full pipeline health snapshot from <c>vw_Dash_PipelineHealth</c>.
 /// <para>
-/// Covers six core tables (PiXL_Test, PiXL_Parsed, PiXL_Device, PiXL_IP,
-/// PiXL_Visit, PiXL_Match) and both ETL watermarks (ParseNewHits, MatchVisits).
+/// Covers six core tables (PiXL.Test, PiXL.Parsed, PiXL.Device, PiXL.IP,
+/// PiXL.Visit, PiXL.Match) and both ETL watermarks (ParseNewHits, MatchVisits).
 /// The dashboard uses this to display row counts, max IDs, watermark positions,
 /// lag indicators, and timestamp freshness in the pipeline health panel.
 /// </para>
@@ -319,46 +319,46 @@ public sealed class PipelineHealthItem
     public string? Error { get; set; }
 
     // ── Table row counts ────────────────────────────────────────────
-    /// <summary>Row count of <c>PiXL_Test</c> (raw ingest table).</summary>
+    /// <summary>Row count of <c>PiXL.Test</c> (raw ingest table).</summary>
     public int TestRows { get; set; }
 
-    /// <summary>Row count of <c>PiXL_Parsed</c> (materialized warehouse table).</summary>
+    /// <summary>Row count of <c>PiXL.Parsed</c> (materialized warehouse table).</summary>
     public int ParsedRows { get; set; }
 
-    /// <summary>Row count of <c>PiXL_Device</c> (device fingerprint dimension table).</summary>
+    /// <summary>Row count of <c>PiXL.Device</c> (device fingerprint dimension table).</summary>
     public int DeviceRows { get; set; }
 
-    /// <summary>Row count of <c>PiXL_IP</c> (IP address dimension table).</summary>
+    /// <summary>Row count of <c>PiXL.IP</c> (IP address dimension table).</summary>
     public int IpRows { get; set; }
 
-    /// <summary>Row count of <c>PiXL_Visit</c> (session/visit fact table).</summary>
+    /// <summary>Row count of <c>PiXL.Visit</c> (session/visit fact table).</summary>
     public int VisitRows { get; set; }
 
-    /// <summary>Row count of <c>PiXL_Match</c> (email-to-visit resolution table).</summary>
+    /// <summary>Row count of <c>PiXL.Match</c> (email-to-visit resolution table).</summary>
     public int MatchRows { get; set; }
 
     // ── Max IDs ─────────────────────────────────────────────────────
-    /// <summary>Maximum identity value in <c>PiXL_Test</c>. Used to calculate parse lag.</summary>
+    /// <summary>Maximum identity value in <c>PiXL.Test</c>. Used to calculate parse lag.</summary>
     public long MaxTestId { get; set; }
 
-    /// <summary>Maximum identity value in <c>PiXL_Visit</c>. Used to calculate match lag.</summary>
+    /// <summary>Maximum identity value in <c>PiXL.Visit</c>. Used to calculate match lag.</summary>
     public long MaxVisitId { get; set; }
 
-    /// <summary>Maximum identity value in <c>PiXL_Match</c>.</summary>
+    /// <summary>Maximum identity value in <c>PiXL.Match</c>.</summary>
     public long MaxMatchId { get; set; }
 
     // ── ParseNewHits watermark ──────────────────────────────────────
-    /// <summary>Last PiXL_Test ID processed by <c>usp_ParseNewHits</c>.</summary>
+    /// <summary>Last PiXL.Test ID processed by <c>ETL.usp_ParseNewHits</c>.</summary>
     public long ParseWatermark { get; set; }
 
     /// <summary>Cumulative rows processed by the parse ETL since watermark reset.</summary>
     public long ParseTotalProcessed { get; set; }
 
-    /// <summary>UTC timestamp of the last successful <c>usp_ParseNewHits</c> run.</summary>
+    /// <summary>UTC timestamp of the last successful <c>ETL.usp_ParseNewHits</c> run.</summary>
     public DateTime? ParseLastRunAt { get; set; }
 
     // ── MatchVisits watermark ───────────────────────────────────────
-    /// <summary>Last PiXL_Visit ID processed by the match ETL.</summary>
+    /// <summary>Last PiXL.Visit ID processed by the match ETL.</summary>
     public long MatchWatermark { get; set; }
 
     /// <summary>Cumulative visits processed by the match ETL.</summary>
@@ -394,28 +394,28 @@ public sealed class PipelineHealthItem
     public int MatchLag { get; set; }
 
     // ── Latest timestamps (freshness indicators) ────────────────────
-    /// <summary>Timestamp of the most recent row in <c>PiXL_Test</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Test</c>.</summary>
     public DateTime? TestLatest { get; set; }
 
-    /// <summary>Timestamp of the most recent row in <c>PiXL_Parsed</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Parsed</c>.</summary>
     public DateTime? ParsedLatest { get; set; }
 
-    /// <summary>Timestamp of the most recent row in <c>PiXL_Device</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Device</c>.</summary>
     public DateTime? DeviceLatest { get; set; }
 
-    /// <summary>Timestamp of the most recent row in <c>PiXL_IP</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.IP</c>.</summary>
     public DateTime? IpLatest { get; set; }
 
-    /// <summary>Timestamp of the most recent row in <c>PiXL_Visit</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Visit</c>.</summary>
     public DateTime? VisitLatest { get; set; }
 
-    /// <summary>Timestamp of the most recent row in <c>PiXL_Match</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Match</c>.</summary>
     public DateTime? MatchLatest { get; set; }
 
     // ── Uniqueness ──────────────────────────────────────────────────
-    /// <summary>Distinct device fingerprint count across <c>PiXL_Visit</c>.</summary>
+    /// <summary>Distinct device fingerprint count across <c>PiXL.Visit</c>.</summary>
     public int UniqueDevicesInVisits { get; set; }
 
-    /// <summary>Distinct IP address count across <c>PiXL_Visit</c>.</summary>
+    /// <summary>Distinct IP address count across <c>PiXL.Visit</c>.</summary>
     public int UniqueIpsInVisits { get; set; }
 }

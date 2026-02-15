@@ -197,7 +197,7 @@ PiXL.Test (raw, 9 columns)
 
 ### Phase 2: SQLCLR Assembly
 
-Create a .NET CLR assembly (`SmartPixl.Clr`) with two scalar functions:
+Create a .NET CLR assembly (`SmartPiXL.Clr`) with two scalar functions:
 
 - **`dbo.fn_ExtractParam(@qs, @key)`** — Extracts a single query-string parameter. Replaces the T-SQL `dbo.GetQueryParam` scalar UDF that causes per-row function calls.
 - **`dbo.fn_ExtractAllParams(@qs, @prefix)`** — Returns all `_cp_*` parameters as a JSON object for `PiXL.Visit.ClientParamsJson`.
@@ -205,7 +205,7 @@ Create a .NET CLR assembly (`SmartPixl.Clr`) with two scalar functions:
 Both must use `PERMISSION_SET = SAFE` (no file/network/registry access). Register via:
 
 ```sql
-CREATE ASSEMBLY SmartPixlClr FROM 'path\SmartPixl.Clr.dll' WITH PERMISSION_SET = SAFE;
+CREATE ASSEMBLY SmartPiXLClr FROM 'path\SmartPiXL.Clr.dll' WITH PERMISSION_SET = SAFE;
 ```
 
 Then swap `ETL.usp_ParseNewHits` to use CLR functions instead of T-SQL scalar UDFs.

@@ -17,7 +17,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_ValidPath_ExtractsCompanyAndPiXLID()
+    public void CaptureFromRequest_should_extractCompanyAndPiXLID_when_validPath()
     {
         var context = CreateHttpContext("/12345/TestCamp_SMART.GIF", "sw=1920&sh=1080");
 
@@ -28,7 +28,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_NumericPiXLID_ParsesCorrectly()
+    public void CaptureFromRequest_should_parseCorrectly_when_numericPiXLID()
     {
         var context = CreateHttpContext("/99/1_SMART.GIF", "sw=1920");
 
@@ -39,7 +39,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_RootPath_NoCompanyOrPiXL()
+    public void CaptureFromRequest_should_haveNullIds_when_rootPath()
     {
         var context = CreateHttpContext("/", "");
 
@@ -50,7 +50,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_NoMatchingPath_NullIds()
+    public void CaptureFromRequest_should_haveNullIds_when_noMatchingPath()
     {
         var context = CreateHttpContext("/health", "");
 
@@ -66,7 +66,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_CloudflareIp_TakesPriority()
+    public void CaptureFromRequest_should_preferCloudflareIp()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["CF-Connecting-IP"] = "203.0.113.50";
@@ -79,7 +79,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_TrueClientIp_SecondPriority()
+    public void CaptureFromRequest_should_useTrueClientIp_when_noCfHeader()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["True-Client-IP"] = "198.51.100.25";
@@ -91,7 +91,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_XRealIp_ThirdPriority()
+    public void CaptureFromRequest_should_useXRealIp_when_noCfOrTrueClient()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["X-Real-IP"] = "93.184.216.34";
@@ -103,7 +103,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_XForwardedFor_TakesFirstIp()
+    public void CaptureFromRequest_should_takeFirstIp_when_xffMultiple()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["X-Forwarded-For"] = "151.101.1.140, 10.0.0.1, 172.16.0.1";
@@ -114,7 +114,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_XForwardedFor_SingleIp_ParsesCorrectly()
+    public void CaptureFromRequest_should_parseCorrectly_when_xffSingleIp()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["X-Forwarded-For"] = "8.8.8.8";
@@ -125,7 +125,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_NoProxyHeaders_FallsBackToConnection()
+    public void CaptureFromRequest_should_fallBackToConnection_when_noProxyHeaders()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         // No proxy headers set - should fall back to connection RemoteIpAddress
@@ -141,7 +141,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_QueryString_TrimmedOfLeadingQuestionMark()
+    public void CaptureFromRequest_should_trimLeadingQuestionMark()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920&sh=1080&cores=8");
 
@@ -152,7 +152,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_EmptyQueryString_ReturnsEmpty()
+    public void CaptureFromRequest_should_returnEmpty_when_emptyQueryString()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "");
 
@@ -162,7 +162,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_LargeQueryString_Preserved()
+    public void CaptureFromRequest_should_preserveLargeQueryString()
     {
         // Simulate a real query string with lots of fingerprint params
         var qs = "sw=1920&sh=1080&saw=1920&sah=1040&vw=1903&vh=969&ow=1920&oh=1040" +
@@ -185,7 +185,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_HeadersJson_CapturesUserAgent()
+    public void CaptureFromRequest_should_captureUserAgent_inHeadersJson()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
@@ -198,7 +198,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_HeadersJson_ValidJsonFormat()
+    public void CaptureFromRequest_should_produceValidJson_inHeadersJson()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["User-Agent"] = "TestAgent";
@@ -211,7 +211,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_HeadersJson_EscapesQuotes()
+    public void CaptureFromRequest_should_escapeQuotes_inHeadersJson()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["User-Agent"] = "Test \"Agent\" v1";
@@ -223,7 +223,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_HeadersJson_SkipsEmptyHeaders()
+    public void CaptureFromRequest_should_returnEmptyJson_when_noHeaders()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         // No headers set at all
@@ -234,7 +234,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_ClientHintHeaders_Captured()
+    public void CaptureFromRequest_should_captureClientHintHeaders()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["Sec-CH-UA"] = "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"";
@@ -253,7 +253,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_LongUserAgent_Truncated()
+    public void CaptureFromRequest_should_truncateLongUserAgent()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["User-Agent"] = new string('A', 5000);
@@ -264,7 +264,7 @@ public sealed class TrackingCaptureServiceTests
     }
 
     [Fact]
-    public void CaptureFromRequest_LongReferer_Truncated()
+    public void CaptureFromRequest_should_truncateLongReferer()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["Referer"] = "https://example.com/" + new string('x', 5000);
@@ -279,7 +279,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_ReceivedAt_IsRecentUtc()
+    public void CaptureFromRequest_should_setRecentUtcTimestamp()
     {
         var before = DateTime.UtcNow;
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
@@ -297,7 +297,7 @@ public sealed class TrackingCaptureServiceTests
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_TlsHeaders_CapturedWhenPresent()
+    public void CaptureFromRequest_should_captureTlsHeaders_when_present()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["CF-JA3-Fingerprint"] = "abc123def456";

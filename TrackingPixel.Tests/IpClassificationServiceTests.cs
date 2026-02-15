@@ -20,7 +20,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("208.67.222.222", IpType.Public)]      // OpenDNS
     [InlineData("93.184.216.34", IpType.Public)]       // example.com
     [InlineData("151.101.1.140", IpType.Public)]       // Reddit CDN
-    public void PublicIpv4_ShouldClassifyAsPublic(string ip, IpType expected)
+    public void Classify_should_returnPublic_when_publicIpv4(string ip, IpType expected)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -36,7 +36,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("10.0.0.1")]
     [InlineData("10.255.255.255")]
     [InlineData("10.100.50.25")]
-    public void PrivateIpv4_10Range_ShouldClassifyAsPrivate(string ip)
+    public void Classify_should_returnPrivate_when_10Range(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -48,7 +48,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("172.16.0.1")]
     [InlineData("172.31.255.255")]
     [InlineData("172.20.10.5")]
-    public void PrivateIpv4_172Range_ShouldClassifyAsPrivate(string ip)
+    public void Classify_should_returnPrivate_when_172Range(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -61,7 +61,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("192.168.255.255")]
     [InlineData("192.168.1.100")]
     [InlineData("192.168.88.176")]   // Our IIS binding
-    public void PrivateIpv4_192Range_ShouldClassifyAsPrivate(string ip)
+    public void Classify_should_returnPrivate_when_192Range(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -77,7 +77,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("127.0.0.1")]
     [InlineData("127.255.255.255")]
     [InlineData("127.0.0.2")]
-    public void Loopback_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnLoopback(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -93,7 +93,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("169.254.0.1")]
     [InlineData("169.254.255.255")]
     [InlineData("169.254.169.254")]   // AWS metadata endpoint
-    public void LinkLocal_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnLinkLocal(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -109,7 +109,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("100.64.0.1")]
     [InlineData("100.127.255.255")]
     [InlineData("100.100.100.100")]
-    public void Cgnat_ShouldGeolocate(string ip)
+    public void Classify_should_returnCgnatAndGeolocate(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -125,7 +125,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("192.0.2.1")]       // TEST-NET-1
     [InlineData("198.51.100.1")]    // TEST-NET-2
     [InlineData("203.0.113.1")]     // TEST-NET-3
-    public void Documentation_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnDocumentation(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -140,7 +140,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("224.0.0.1")]
     [InlineData("239.255.255.255")]
-    public void Multicast_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnMulticast(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -155,7 +155,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("198.18.0.1")]
     [InlineData("198.19.255.255")]
-    public void Benchmark_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnBenchmark(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -168,7 +168,7 @@ public sealed class IpClassificationServiceTests
     // ========================================================================
 
     [Fact]
-    public void Broadcast_MatchesReservedClassE_DueToRangeOrder()
+    public void Classify_should_returnReservedOrBroadcast_when_255Range()
     {
         // 255.255.255.255 matches Reserved Class E (0xF0000000/0xF0000000) before
         // reaching the Broadcast entry, since ranges are checked in order.
@@ -186,7 +186,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("0.0.0.0")]
     [InlineData("0.0.0.1")]
-    public void Unspecified_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnUnspecified(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -199,7 +199,7 @@ public sealed class IpClassificationServiceTests
     // ========================================================================
 
     [Fact]
-    public void Ipv6Loopback_ShouldClassifyCorrectly()
+    public void Classify_should_returnLoopback_when_ipv6()
     {
         var result = IpClassificationService.Classify("::1");
 
@@ -208,7 +208,7 @@ public sealed class IpClassificationServiceTests
     }
 
     [Fact]
-    public void Ipv6Unspecified_ShouldClassifyCorrectly()
+    public void Classify_should_returnUnspecified_when_ipv6()
     {
         var result = IpClassificationService.Classify("::");
 
@@ -219,7 +219,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("fe80::1")]
     [InlineData("fe80::abcd:ef01:2345:6789")]
-    public void Ipv6LinkLocal_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnLinkLocal_when_ipv6(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -230,7 +230,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("fc00::1")]
     [InlineData("fd12:3456:7890::1")]
-    public void Ipv6UniqueLocal_ShouldClassifyAsPrivate(string ip)
+    public void Classify_should_returnPrivate_when_ipv6UniqueLocal(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -239,7 +239,7 @@ public sealed class IpClassificationServiceTests
     }
 
     [Fact]
-    public void Ipv6Documentation_ShouldClassifyCorrectly()
+    public void Classify_should_returnDocumentation_when_ipv6()
     {
         var result = IpClassificationService.Classify("2001:db8::1");
 
@@ -250,7 +250,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("ff02::1")]
     [InlineData("ff05::2")]
-    public void Ipv6Multicast_ShouldClassifyCorrectly(string ip)
+    public void Classify_should_returnMulticast_when_ipv6(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -261,7 +261,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("2607:f8b0:4004:800::200e")]  // Google
     [InlineData("2606:4700:4700::1111")]        // Cloudflare
-    public void Ipv6Public_ShouldClassifyAsPublic(string ip)
+    public void Classify_should_returnPublic_when_ipv6(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -274,7 +274,7 @@ public sealed class IpClassificationServiceTests
     // ========================================================================
 
     [Fact]
-    public void Ipv4MappedIpv6_Private_ShouldClassifyAsPrivate()
+    public void Classify_should_returnPrivate_when_ipv4MappedIpv6()
     {
         var result = IpClassificationService.Classify("::ffff:192.168.1.1");
 
@@ -283,7 +283,7 @@ public sealed class IpClassificationServiceTests
     }
 
     [Fact]
-    public void Ipv4MappedIpv6_Public_ShouldClassifyAsPublic()
+    public void Classify_should_returnPublic_when_ipv4MappedIpv6()
     {
         var result = IpClassificationService.Classify("::ffff:8.8.8.8");
 
@@ -292,7 +292,7 @@ public sealed class IpClassificationServiceTests
     }
 
     [Fact]
-    public void Ipv4MappedIpv6_Loopback_ShouldClassifyAsLoopback()
+    public void Classify_should_returnLoopback_when_ipv4MappedIpv6()
     {
         var result = IpClassificationService.Classify("::ffff:127.0.0.1");
 
@@ -308,7 +308,7 @@ public sealed class IpClassificationServiceTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData(" ")]
-    public void NullOrEmpty_ShouldClassifyAsInvalid(string? ip)
+    public void Classify_should_returnInvalid_when_nullOrEmpty(string? ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -322,7 +322,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("1.2.3.4.5")]
     [InlineData("1.2.3")]
     [InlineData("abc::xyz::123")]
-    public void Malformed_ShouldClassifyAsInvalid(string ip)
+    public void Classify_should_returnInvalid_when_malformed(string ip)
     {
         var result = IpClassificationService.Classify(ip);
 
@@ -333,7 +333,7 @@ public sealed class IpClassificationServiceTests
     [Theory]
     [InlineData("  8.8.8.8  ", IpType.Public)]       // Leading/trailing whitespace
     [InlineData("  127.0.0.1  ", IpType.Loopback)]
-    public void WhitespaceWrapped_ShouldStillClassify(string ip, IpType expected)
+    public void Classify_should_classifyCorrectly_when_whitespaceWrapped(string ip, IpType expected)
     {
         var result = IpClassificationService.Classify(ip);
         result.Type.Should().Be(expected);
@@ -348,7 +348,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("192.168.1.1", false)]
     [InlineData("100.64.0.1", true)]
     [InlineData(null, false)]
-    public void ShouldGeolocate_ReturnsExpected(string? ip, bool expected)
+    public void ShouldGeolocate_should_returnExpected(string? ip, bool expected)
     {
         IpClassificationService.ShouldGeolocate(ip).Should().Be(expected);
     }
@@ -359,7 +359,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("127.0.0.1", true)]
     [InlineData("8.8.8.8", false)]
     [InlineData(null, false)]
-    public void IsPrivateOrInternal_ReturnsExpected(string? ip, bool expected)
+    public void IsPrivateOrInternal_should_returnExpected(string? ip, bool expected)
     {
         IpClassificationService.IsPrivateOrInternal(ip).Should().Be(expected);
     }
@@ -373,7 +373,7 @@ public sealed class IpClassificationServiceTests
     [InlineData("172.16.0.0", IpType.Private)]       // First of 172.16.0.0/12
     [InlineData("172.31.255.255", IpType.Private)]   // Last of 172.16.0.0/12
     [InlineData("172.32.0.0", IpType.Public)]        // Just above 172.16.0.0/12
-    public void BoundaryConditions_ShouldClassifyCorrectly(string ip, IpType expected)
+    public void Classify_should_classifyCorrectly_when_boundaryIps(string ip, IpType expected)
     {
         var result = IpClassificationService.Classify(ip);
         result.Type.Should().Be(expected);

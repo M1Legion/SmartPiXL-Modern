@@ -82,7 +82,10 @@ public sealed class InfraHealthService : IDisposable
     {
         var sw = Stopwatch.StartNew();
 
-        // Run all probes in parallel
+        // Run all probes in parallel — Task.Run wraps synchronous probe methods
+        // (ProbeWindowsServices, ProbeAppComponents, ProbeIisLogs) so they execute
+        // concurrently via Task.WhenAll. This is NOT the hot path — it's a diagnostic
+        // service cached for 15s, so Task.Run is appropriate here.
         var servicesTask = Task.Run(ProbeWindowsServices);
         var sqlTask = ProbeSqlAsync();
         var websitesTask = ProbeWebsitesAsync();

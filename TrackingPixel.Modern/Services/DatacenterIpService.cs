@@ -20,20 +20,18 @@ namespace TrackingPixel.Services;
 // REFRESH STRATEGY:
 //   • Initial load at startup (StartAsync)
 //   • Weekly refresh via Timer (cloud providers add new ranges regularly)
-//   • Failure tolerance: if refresh fails, the old ranges remain active
+//   • Failure tolerance: if refresh fails, the old trie remains active
 //
 // LOCK-FREE ARCHITECTURE:
-//   The _ranges field is a volatile reference to an immutable array.
-//   Writers build a new array on a background thread, then atomically swap
-//   the reference via volatile write. Readers get a consistent snapshot via
-//   volatile read — no ReaderWriterLockSlim, no locks, no contention.
-//
-//   Writer: _ranges = [.. newList];  // atomic reference assignment
-//   Reader: var snapshot = _ranges;  // single volatile read, then iterate
+//   The _trie field is a volatile reference to an immutable CidrTrie.
+//   Writers build the trie on refresh, then atomically swap the reference.
+//   Readers get a consistent snapshot via volatile read.
 //
 // CIDR MATCHING:
-//   Uses stackalloc + TryWriteBytes for zero-heap-allocation byte comparison.
-//   Prefix length is decomposed via bit shift (div 8) and bitmask (mod 8).
+//   Uses a binary prefix trie (CidrTrie) for O(32) IPv4 / O(128) IPv6 lookups.
+//   The previous linear scan of ~8,500 CIDRs has been replaced with bit-level
+//   traversal: each bit of the IP address follows a trie edge, and the first
+//   terminal node found is the matching CIDR.
 // ============================================================================
 
 /// <summary>
@@ -51,14 +49,13 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
     private Timer? _refreshTimer;
     
     /// <summary>
-    /// Lock-free range array. Readers see a consistent snapshot via volatile read.
-    /// Writers build a new array and atomically swap the reference — no locking needed.
+    /// Lock-free trie. Readers see a consistent snapshot via volatile read.
+    /// Writers build a new CidrTrie on refresh and atomically swap the reference.
     /// <para>
-    /// The array itself is immutable after creation (created from a collection expression
-    /// <c>[.. newRanges]</c>). Only the reference is swapped.
+    /// The trie is fully immutable after construction. Only the reference is swapped.
     /// </para>
     /// </summary>
-    private volatile (string Cidr, string Provider)[] _ranges = [];
+    private volatile CidrTrie _trie = CidrTrie.Empty;
 
     /// <summary>Official AWS IP ranges endpoint (JSON, ~8K CIDRs including IPv4 + IPv6).</summary>
     private const string AwsUrl = "https://ip-ranges.amazonaws.com/ip-ranges.json";
@@ -101,7 +98,8 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
     /// <summary>
     /// Checks whether the given IP address falls within any known cloud provider CIDR range.
     /// <para>
-    /// Zero-lock: reads a single volatile reference (snapshot) and iterates the immutable array.
+    /// Zero-lock: reads a single volatile trie reference and walks it bit-by-bit.
+    /// O(32) for IPv4, O(128) for IPv6 — vs O(8,500) for the old linear scan.
     /// Returns a stack-allocated <see cref="DatacenterCheckResult"/> — no GC pressure.
     /// </para>
     /// </summary>
@@ -113,14 +111,7 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
         if (ipAddress is null || ipAddress.Length == 0 || !IPAddress.TryParse(ipAddress, out var ip))
             return default; // IsDatacenter=false, Provider=null
 
-        var snapshot = _ranges; // Single volatile read — snapshot is immutable from here
-        foreach (var (cidr, provider) in snapshot)
-        {
-            if (IsInCidr(ip, cidr))
-                return new DatacenterCheckResult(true, provider);
-        }
-
-        return default;
+        return _trie.Lookup(ip); // Single volatile read + O(prefix_len) trie walk
     }
 
     /// <summary>
@@ -184,72 +175,14 @@ public sealed class DatacenterIpService : IHostedService, IDisposable
 
         if (newRanges.Count > 0)
         {
-            // Atomic reference swap: collection expression [.. newRanges] creates
-            // a new immutable array. The volatile write makes the new array visible
-            // to all reader threads on the next volatile read.
-            _ranges = [.. newRanges];
-            _logger.Info($"Total datacenter IP ranges loaded: {newRanges.Count}");
+            // Build the immutable trie from the collected ranges.
+            // CidrTrie.Build() parses each CIDR string once and constructs the
+            // bit-level prefix tree. The volatile write makes the new trie
+            // visible to all reader threads on the next volatile read.
+            var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(newRanges);
+            _trie = CidrTrie.Build(span);
+            _logger.Info($"Total datacenter IP ranges loaded: {newRanges.Count} (trie built)");
         }
-    }
-
-    /// <summary>
-    /// Checks whether an <see cref="IPAddress"/> falls within a CIDR range.
-    /// <para>
-    /// ALLOCATION-FREE: Uses <c>stackalloc byte[16]</c> + <c>TryWriteBytes</c> to
-    /// avoid the heap allocation from <c>GetAddressBytes()</c>.
-    /// </para>
-    /// <para>
-    /// Prefix matching algorithm:
-    /// <list type="number">
-    ///   <item><description>Parse CIDR string: "1.2.3.0/24" → network IP + prefix length 24</description></item>
-    ///   <item><description>Decompose prefix length: fullBytes = 24 >> 3 = 3, remainBits = 24 &amp; 7 = 0</description></item>
-    ///   <item><description>Compare first <c>fullBytes</c> bytes for exact equality</description></item>
-    ///   <item><description>If <c>remainBits > 0</c>, mask the next byte and compare</description></item>
-    /// </list>
-    /// Bit-shift division (<c>>> 3</c>) and bitmask modulo (<c>&amp; 7</c>) are single
-    /// CPU instructions — no integer division overhead.
-    /// </para>
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsInCidr(IPAddress ip, string cidr)
-    {
-        // Parse CIDR notation: "10.0.0.0/8" → slash at index 8
-        var span = cidr.AsSpan();
-        var slashIdx = span.IndexOf('/');
-        if (slashIdx < 0) return false;
-
-        if (!IPAddress.TryParse(span[..slashIdx], out var network)) return false;
-        if (!int.TryParse(span[(slashIdx + 1)..], out var prefixLen)) return false;
-
-        // stackalloc both byte buffers — zero heap allocation for the comparison
-        Span<byte> ipBytes = stackalloc byte[16];
-        Span<byte> netBytes = stackalloc byte[16];
-
-        if (!ip.TryWriteBytes(ipBytes, out var ipLen)) return false;
-        if (!network.TryWriteBytes(netBytes, out var netLen)) return false;
-        
-        // IPv4 and IPv6 can't be in the same CIDR range
-        if (ipLen != netLen) return false;
-
-        // Decompose prefix length into full bytes and remaining bits
-        var fullBytes = prefixLen >> 3;  // div 8 via right bit shift (single CPU instruction)
-        var remainBits = prefixLen & 7;  // mod 8 via bitmask (single CPU instruction)
-
-        // Compare the full bytes of the network prefix (byte-for-byte equality)
-        for (var i = 0; i < fullBytes & i < ipLen; i++)
-        {
-            if (ipBytes[i] != netBytes[i]) return false;
-        }
-
-        // Compare remaining bits if the prefix length isn't byte-aligned
-        // Example: /10 → fullBytes=1, remainBits=2 → mask=0b11000000=0xC0
-        if (remainBits > 0 & fullBytes < ipLen)
-        {
-            var mask = (byte)(0xFF << (8 - remainBits));
-            if ((ipBytes[fullBytes] & mask) != (netBytes[fullBytes] & mask)) return false;
-        }
-
-        return true;
     }
 
     /// <summary>

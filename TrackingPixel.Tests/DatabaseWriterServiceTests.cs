@@ -43,7 +43,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void TryQueue_EmptyQueue_ReturnsTrue()
+    public void TryQueue_should_returnTrue_when_emptyQueue()
     {
         var data = CreateSampleData();
 
@@ -53,7 +53,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     }
 
     [Fact]
-    public void TryQueue_MultipleItems_AllQueued()
+    public void TryQueue_should_queueAll_when_multipleItems()
     {
         for (int i = 0; i < 50; i++)
         {
@@ -64,7 +64,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     }
 
     [Fact]
-    public void TryQueue_FullQueue_ReturnsFalse()
+    public void TryQueue_should_returnFalse_when_fullQueue()
     {
         // Fill the queue to capacity
         for (int i = 0; i < _settings.QueueCapacity; i++)
@@ -79,7 +79,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     }
 
     [Fact]
-    public void QueueDepth_ReflectsQueuedItems()
+    public void QueueDepth_should_reflectQueuedItems()
     {
         _service.QueueDepth.Should().Be(0);
 
@@ -95,7 +95,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     // ========================================================================
 
     [Fact]
-    public void TryQueue_PreservesTrackingData()
+    public void TryQueue_should_preserveTrackingData()
     {
         var data = new TrackingData
         {
@@ -115,7 +115,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     }
 
     [Fact]
-    public void TryQueue_NullFields_AcceptedWithoutError()
+    public void TryQueue_should_acceptNullFields()
     {
         var data = new TrackingData
         {

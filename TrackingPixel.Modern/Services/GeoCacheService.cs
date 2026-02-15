@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Threading.Channels;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -28,9 +29,16 @@ namespace TrackingPixel.Services;
 //
 // HOT PATH BEHAVIOR:
 //   TryLookup() is synchronous — returns immediately from cache or NotFound.
-//   It never blocks the HTTP thread. If an IP isn't cached, it queues an
-//   async SQL lookup on a background thread. The NEXT hit from that IP
-//   will find the result in cache.
+//   It never blocks the HTTP thread. If an IP isn't cached, it writes to a
+//   bounded Channel<string>. A dedicated background reader task drains the
+//   channel and performs SQL lookups. The NEXT hit from that IP will find
+//   the result in cache.
+//
+//   CHANNEL vs TASK.RUN:
+//     Task.Run per cache miss → unbounded ThreadPool pressure under burst
+//     Channel<string>(1000) → bounded backpressure, single reader task,
+//     structured lifetime via IHostedService. Matches the DatabaseWriterService
+//     pattern used throughout the project.
 //
 // This means the first hit from a new IP won't have geo data in the
 // _srv_geo* params, but the ETL pipeline will still enrich it via JOIN.
@@ -45,8 +53,12 @@ namespace TrackingPixel.Services;
 /// for zero-contention hot reads, and <see cref="IMemoryCache"/> with
 /// sliding TTL for SQL-backed lookups.
 /// </para>
+/// <para>
+/// Cache misses are queued via a bounded <see cref="Channel{T}"/> and processed
+/// by a dedicated background reader task — no <c>Task.Run</c> fire-and-forget.
+/// </para>
 /// </summary>
-public sealed class GeoCacheService
+public sealed class GeoCacheService : IHostedService, IDisposable
 {
     private readonly IMemoryCache _memoryCache;
     private readonly TrackingSettings _settings;
@@ -58,6 +70,23 @@ public sealed class GeoCacheService
     
     // Set of IPs currently being looked up — prevents duplicate SQL queries
     private readonly ConcurrentDictionary<string, byte> _pendingLookups = new(StringComparer.OrdinalIgnoreCase);
+    
+    // Bounded channel for cache-miss IP lookups.
+    // Writers: TryLookup() on the hot path (non-blocking TryWrite).
+    // Reader: single background task draining and performing SQL lookups.
+    // Capacity 1000 with DropOldest: under extreme burst, the oldest
+    // queued lookup is discarded — acceptable since geo data is best-effort
+    // and the ETL pipeline enriches everything regardless.
+    private readonly Channel<string> _lookupChannel = Channel.CreateBounded<string>(
+        new BoundedChannelOptions(1000)
+        {
+            SingleReader = true,     // One background reader task
+            SingleWriter = false,    // Multiple HTTP threads write
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+    
+    private Task? _readerTask;
+    private CancellationTokenSource? _cts;
     
     // Metrics
     private long _cacheHits;
@@ -141,8 +170,13 @@ public sealed class GeoCacheService
     }
 
     /// <summary>
-    /// Fires an async SQL lookup on a ThreadPool thread. Does NOT block the caller.
-    /// De-duplicated: only one lookup per IP can be in flight at a time.
+    /// Queues an IP for async SQL lookup via the bounded channel.
+    /// Does NOT block the caller. De-duplicated: only one lookup per IP at a time.
+    /// <para>
+    /// Non-allocating on the hot path: TryWrite is a CAS operation on the channel's
+    /// ring buffer. The string reference is the only "allocation", and it already
+    /// exists (it's the IP string from the request).
+    /// </para>
     /// </summary>
     private void QueueAsyncLookup(string ip)
     {
@@ -150,8 +184,23 @@ public sealed class GeoCacheService
         if (!_pendingLookups.TryAdd(ip, 0))
             return;
         
-        // Fire-and-forget on ThreadPool — does NOT block CaptureAndEnqueue
-        _ = Task.Run(async () =>
+        // Non-blocking write to the bounded channel.
+        // If the channel is full (1000 items), DropOldest discards the oldest entry.
+        _lookupChannel.Writer.TryWrite(ip);
+    }
+
+    /// <summary>
+    /// Background reader task that drains IPs from the channel and performs
+    /// SQL lookups against IPAPI.IP. Runs for the lifetime of the service.
+    /// <para>
+    /// Single reader (SingleReader=true on the channel options) eliminates
+    /// contention on the consumer side. Each IP is looked up individually
+    /// with a 5s timeout to avoid blocking under heavy load.
+    /// </para>
+    /// </summary>
+    private async Task ProcessLookupChannelAsync(CancellationToken ct)
+    {
+        await foreach (var ip in _lookupChannel.Reader.ReadAllAsync(ct))
         {
             try
             {
@@ -176,6 +225,10 @@ public sealed class GeoCacheService
                     });
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break; // Graceful shutdown
+            }
             catch (Exception ex)
             {
                 Interlocked.Increment(ref _sqlErrors);
@@ -185,7 +238,40 @@ public sealed class GeoCacheService
             {
                 _pendingLookups.TryRemove(ip, out _);
             }
-        });
+        }
+    }
+
+    /// <summary>
+    /// Starts the background channel reader task.
+    /// </summary>
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _readerTask = Task.Run(() => ProcessLookupChannelAsync(_cts.Token), _cts.Token);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Signals the channel reader to stop and waits for it to drain.
+    /// </summary>
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _lookupChannel.Writer.TryComplete();
+        if (_cts is not null)
+            await _cts.CancelAsync();
+        if (_readerTask is not null)
+        {
+            try { await _readerTask.WaitAsync(cancellationToken); }
+            catch (OperationCanceledException) { /* Expected on shutdown */ }
+        }
+    }
+
+    /// <summary>
+    /// Disposes the cancellation token source.
+    /// </summary>
+    public void Dispose()
+    {
+        _cts?.Dispose();
     }
 
     /// <summary>

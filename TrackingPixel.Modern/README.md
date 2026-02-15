@@ -68,7 +68,7 @@ TrackingPixel.Modern/
 │   ├── IpClassificationService.cs      # Datacenter / residential / reserved classification
 │   ├── InfraHealthService.cs           # Probes Windows services, SQL, IIS health
 │   └── FileTrackingLogger.cs           # Daily rolling log files
-├── SQL/                        # Migration scripts (05–24)
+├── SQL/                        # Migration scripts (05–27)
 ├── wwwroot/
 │   ├── tron.html               # 3D Tron dashboard (Three.js)
 │   └── demo.html               # Live data collection demo
