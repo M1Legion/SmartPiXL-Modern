@@ -87,9 +87,10 @@ public sealed class InfraHealthService : IDisposable
         var websitesTask = ProbeWebsitesAsync();
         var appTask = Task.Run(ProbeAppComponents);
         var dataFlowTask = ProbeDataFlowAsync();
+        var pipelineTask = ProbePipelineAsync();
         var logTask = Task.Run(ProbeIisLogs);
 
-        await Task.WhenAll(servicesTask, sqlTask, websitesTask, appTask, dataFlowTask, logTask);
+        await Task.WhenAll(servicesTask, sqlTask, websitesTask, appTask, dataFlowTask, pipelineTask, logTask);
 
         sw.Stop();
 
@@ -102,6 +103,7 @@ public sealed class InfraHealthService : IDisposable
             Websites = websitesTask.Result,
             App = appTask.Result,
             DataFlow = dataFlowTask.Result,
+            Pipeline = pipelineTask.Result,
             RecentErrors = logTask.Result,
             OverallStatus = ComputeOverallStatus(
                 servicesTask.Result, sqlTask.Result,
@@ -349,6 +351,73 @@ public sealed class InfraHealthService : IDisposable
     }
 
     // ========================================================================
+    // PIPELINE HEALTH PROBE — Device, IP, Visit, Match table metrics
+    // Queries the vw_Dash_PipelineHealth view for a single-row snapshot.
+    // ========================================================================
+    private async Task<PipelineHealthItem> ProbePipelineAsync()
+    {
+        var item = new PipelineHealthItem();
+        try
+        {
+            await using var conn = new SqlConnection(_settings.ConnectionString);
+            await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM vw_Dash_PipelineHealth";
+            cmd.CommandTimeout = 10;
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                item.TestRows = reader.IsDBNull(reader.GetOrdinal("TestRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("TestRows")));
+                item.ParsedRows = reader.IsDBNull(reader.GetOrdinal("ParsedRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParsedRows")));
+                item.DeviceRows = reader.IsDBNull(reader.GetOrdinal("DeviceRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("DeviceRows")));
+                item.IpRows = reader.IsDBNull(reader.GetOrdinal("IpRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("IpRows")));
+                item.VisitRows = reader.IsDBNull(reader.GetOrdinal("VisitRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("VisitRows")));
+                item.MatchRows = reader.IsDBNull(reader.GetOrdinal("MatchRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchRows")));
+
+                item.MaxTestId = reader.IsDBNull(reader.GetOrdinal("MaxTestId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxTestId")));
+                item.MaxVisitId = reader.IsDBNull(reader.GetOrdinal("MaxVisitId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxVisitId")));
+                item.MaxMatchId = reader.IsDBNull(reader.GetOrdinal("MaxMatchId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxMatchId")));
+
+                item.ParseWatermark = reader.IsDBNull(reader.GetOrdinal("ParseWatermark")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("ParseWatermark")));
+                item.ParseTotalProcessed = reader.IsDBNull(reader.GetOrdinal("ParseTotalProcessed")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("ParseTotalProcessed")));
+                item.ParseLastRunAt = reader.IsDBNull(reader.GetOrdinal("ParseLastRunAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ParseLastRunAt"));
+
+                item.MatchWatermark = reader.IsDBNull(reader.GetOrdinal("MatchWatermark")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchWatermark")));
+                item.MatchTotalProcessed = reader.IsDBNull(reader.GetOrdinal("MatchTotalProcessed")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchTotalProcessed")));
+                item.MatchTotalMatched = reader.IsDBNull(reader.GetOrdinal("MatchTotalMatched")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchTotalMatched")));
+                item.MatchLastRunAt = reader.IsDBNull(reader.GetOrdinal("MatchLastRunAt")) ? null : reader.GetDateTime(reader.GetOrdinal("MatchLastRunAt"));
+
+                item.MatchesResolved = reader.IsDBNull(reader.GetOrdinal("MatchesResolved")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchesResolved")));
+                item.MatchesPending = reader.IsDBNull(reader.GetOrdinal("MatchesPending")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchesPending")));
+                item.VisitsWithEmail = reader.IsDBNull(reader.GetOrdinal("VisitsWithEmail")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("VisitsWithEmail")));
+
+                item.ParseLag = reader.IsDBNull(reader.GetOrdinal("ParseLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParseLag")));
+                item.MatchLag = reader.IsDBNull(reader.GetOrdinal("MatchLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchLag")));
+
+                item.TestLatest = reader.IsDBNull(reader.GetOrdinal("TestLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("TestLatest"));
+                item.ParsedLatest = reader.IsDBNull(reader.GetOrdinal("ParsedLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("ParsedLatest"));
+                item.DeviceLatest = reader.IsDBNull(reader.GetOrdinal("DeviceLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("DeviceLatest"));
+                item.IpLatest = reader.IsDBNull(reader.GetOrdinal("IpLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("IpLatest"));
+                item.VisitLatest = reader.IsDBNull(reader.GetOrdinal("VisitLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("VisitLatest"));
+                item.MatchLatest = reader.IsDBNull(reader.GetOrdinal("MatchLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("MatchLatest"));
+
+                item.UniqueDevicesInVisits = reader.IsDBNull(reader.GetOrdinal("UniqueDevicesInVisits")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("UniqueDevicesInVisits")));
+                item.UniqueIpsInVisits = reader.IsDBNull(reader.GetOrdinal("UniqueIpsInVisits")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("UniqueIpsInVisits")));
+            }
+            item.IsAvailable = true;
+        }
+        catch (Exception ex)
+        {
+            item.IsAvailable = false;
+            item.Error = ex.Message;
+        }
+
+        return item;
+    }
+
+    // ========================================================================
     // IIS PRODUCTION LOG PROBE — Scan for recent errors in the log file
     // This is what would have caught "Cannot access destination table"
     // ========================================================================
@@ -527,6 +596,7 @@ public sealed class InfraHealthSnapshot
     public List<WebsiteHealthItem> Websites { get; set; } = [];
     public AppHealthItem App { get; set; } = new();
     public DataFlowHealthItem DataFlow { get; set; } = new();
+    public PipelineHealthItem Pipeline { get; set; } = new();
     public RecentErrorsItem RecentErrors { get; set; } = new();
 }
 
@@ -623,4 +693,59 @@ public sealed class ErrorEntry
     public bool IsRecent { get; set; }
     /// <summary>True if all occurrences are older than 2 hours — likely already resolved.</summary>
     public bool IsStale { get; set; }
+}
+
+/// <summary>
+/// Full pipeline health snapshot from vw_Dash_PipelineHealth.
+/// Covers Device, IP, Visit, Match tables and both ETL watermarks.
+/// </summary>
+public sealed class PipelineHealthItem
+{
+    public bool IsAvailable { get; set; }
+    public string? Error { get; set; }
+
+    // Table row counts
+    public int TestRows { get; set; }
+    public int ParsedRows { get; set; }
+    public int DeviceRows { get; set; }
+    public int IpRows { get; set; }
+    public int VisitRows { get; set; }
+    public int MatchRows { get; set; }
+
+    // Max IDs
+    public long MaxTestId { get; set; }
+    public long MaxVisitId { get; set; }
+    public long MaxMatchId { get; set; }
+
+    // ParseNewHits watermark
+    public long ParseWatermark { get; set; }
+    public long ParseTotalProcessed { get; set; }
+    public DateTime? ParseLastRunAt { get; set; }
+
+    // MatchVisits watermark
+    public long MatchWatermark { get; set; }
+    public long MatchTotalProcessed { get; set; }
+    public long MatchTotalMatched { get; set; }
+    public DateTime? MatchLastRunAt { get; set; }
+
+    // Match resolution
+    public int MatchesResolved { get; set; }
+    public int MatchesPending { get; set; }
+    public int VisitsWithEmail { get; set; }
+
+    // Lags
+    public int ParseLag { get; set; }
+    public int MatchLag { get; set; }
+
+    // Latest timestamps
+    public DateTime? TestLatest { get; set; }
+    public DateTime? ParsedLatest { get; set; }
+    public DateTime? DeviceLatest { get; set; }
+    public DateTime? IpLatest { get; set; }
+    public DateTime? VisitLatest { get; set; }
+    public DateTime? MatchLatest { get; set; }
+
+    // Uniqueness
+    public int UniqueDevicesInVisits { get; set; }
+    public int UniqueIpsInVisits { get; set; }
 }

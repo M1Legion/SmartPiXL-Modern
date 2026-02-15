@@ -10,7 +10,7 @@ namespace TrackingPixel.Endpoints;
 /// <summary>
 /// Dashboard API endpoints - exposes SQL views as JSON for the DevOps dashboard.
 /// All endpoints are read-only SELECT queries against views.
-/// Restricted to loopback (localhost) — invisible to external clients.
+/// Restricted to loopback + explicitly allowed IPs from config.
 /// </summary>
 public static class DashboardEndpoints
 {
@@ -22,9 +22,15 @@ public static class DashboardEndpoints
     };
 
     /// <summary>
-    /// Returns true if the request originates from this machine.
-    /// Checks loopback (127.0.0.1/::1) OR same-machine (remote == local IP).
-    /// The latter handles RDP users browsing to the server's own NIC IP.
+    /// Parsed set of allowed remote IPs (from Tracking:DashboardAllowedIPs in appsettings.json).
+    /// Built once at endpoint registration time. Empty = localhost only.
+    /// </summary>
+    private static HashSet<IPAddress> _allowedIps = new();
+
+    /// <summary>
+    /// Returns true if the request originates from this machine or an allowed IP.
+    /// Checks loopback (127.0.0.1/::1), same-machine (remote == local IP),
+    /// then the DashboardAllowedIPs allow-list from config.
     /// Rejects external requests with 404 to avoid revealing the API exists.
     /// </summary>
     private static bool RequireLoopback(HttpContext ctx)
@@ -38,6 +44,11 @@ public static class DashboardEndpoints
         var localIp = ctx.Connection.LocalIpAddress;
         if (localIp != null && remoteIp.Equals(localIp)) return true;
         
+        // Allowed remote IPs from config (e.g. developer workstation)
+        // Handle IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+        var checkIp = remoteIp.IsIPv4MappedToIPv6 ? remoteIp.MapToIPv4() : remoteIp;
+        if (_allowedIps.Contains(checkIp)) return true;
+        
         // 404 — don't reveal the endpoint exists to outsiders
         ctx.Response.StatusCode = 404;
         return false;
@@ -45,11 +56,26 @@ public static class DashboardEndpoints
 
     /// <summary>
     /// Maps all dashboard API endpoints under /api/dashboard/*
-    /// All endpoints are localhost-only.
+    /// Restricted to localhost + DashboardAllowedIPs from config.
     /// </summary>
     public static void MapDashboardEndpoints(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
+        
+        // Parse allowed dashboard IPs from config
+        _allowedIps.Clear();
+        foreach (var ipStr in settings.DashboardAllowedIPs)
+        {
+            if (IPAddress.TryParse(ipStr.Trim(), out var parsed))
+            {
+                _allowedIps.Add(parsed);
+                Console.WriteLine($"[Dashboard] Allowed remote IP: {parsed}");
+            }
+            else
+            {
+                Console.WriteLine($"[Dashboard] WARNING: Could not parse allowed IP: '{ipStr}'");
+            }
+        }
         
         // ============================================================================
         // KPIs - Main summary cards
@@ -330,6 +356,17 @@ public static class DashboardEndpoints
         });
         
         // ============================================================================
+        // PIPELINE HEALTH — Device, IP, Visit, Match tables & watermarks
+        // ============================================================================
+        app.MapGet("/api/dash/pipeline", async (HttpContext ctx) =>
+        {
+            if (!RequireLoopback(ctx)) return;
+            var data = await QuerySingleRowAsync(settings.ConnectionString,
+                "SELECT * FROM vw_Dash_PipelineHealth");
+            await WriteJsonAsync(ctx, data);
+        });
+        
+        // ============================================================================
         // DASHBOARD HTML PAGES
         // ============================================================================
         app.MapGet("/dashboard", async (HttpContext ctx, IWebHostEnvironment env) =>
@@ -362,6 +399,8 @@ public static class DashboardEndpoints
             if (File.Exists(path))
             {
                 ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+                ctx.Response.Headers.Pragma = "no-cache";
                 await ctx.Response.SendFileAsync(path);
             }
             else
@@ -382,6 +421,8 @@ public static class DashboardEndpoints
             if (File.Exists(path))
             {
                 ctx.Response.ContentType = "text/html; charset=utf-8";
+                ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+                ctx.Response.Headers.Pragma = "no-cache";
                 await ctx.Response.SendFileAsync(path);
             }
             else

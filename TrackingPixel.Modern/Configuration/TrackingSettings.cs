@@ -30,6 +30,13 @@ public sealed class TrackingSettings
     public string ConnectionString { get; set; } = "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True";
     
     /// <summary>
+    /// IP addresses allowed to access the /tron dashboard and /api/dash/* endpoints
+    /// in addition to localhost/loopback. These are external workstation IPs that
+    /// can reach the dashboard remotely. Empty = localhost only (original behavior).
+    /// </summary>
+    public string[] DashboardAllowedIPs { get; set; } = Array.Empty<string>();
+    
+    /// <summary>
     /// Maximum number of <see cref="Models.TrackingData"/> items the bounded
     /// Channel&lt;T&gt; can hold before <c>TryQueue()</c> starts returning false.
     /// Set high enough to absorb traffic spikes without dropping requests.

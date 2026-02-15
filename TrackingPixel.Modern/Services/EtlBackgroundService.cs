@@ -59,15 +59,16 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
         
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "ETL.usp_ParseNewHits";
-        cmd.CommandType = System.Data.CommandType.StoredProcedure;
-        cmd.CommandTimeout = 300; // 5 minutes max for large batches
+        // Phase 1: Parse new hits (PiXL.Test → PiXL.Parsed + Device/IP/Visit)
+        await using var parseCmd = conn.CreateCommand();
+        parseCmd.CommandText = "ETL.usp_ParseNewHits";
+        parseCmd.CommandType = System.Data.CommandType.StoredProcedure;
+        parseCmd.CommandTimeout = 300; // 5 minutes max for large batches
         
         // Use ExecuteReader to consume the proc's result set (RowsParsed, FromId, ToId).
         // ExecuteNonQuery ignores result sets and returns -1 with SET NOCOUNT ON,
         // which silently swallows errors that arrive after the first result batch.
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var reader = await parseCmd.ExecuteReaderAsync(ct);
         if (await reader.ReadAsync(ct))
         {
             var rowsParsed = reader.GetInt32(0);    // RowsParsed
@@ -76,6 +77,24 @@ public sealed class EtlBackgroundService : BackgroundService
             
             if (rowsParsed > 0)
                 _logger.Info($"ETL parsed {rowsParsed} rows (Id {fromId}–{toId})");
+        }
+        await reader.CloseAsync();
+        
+        // Phase 2: Match visits against AutoConsumer for identity resolution
+        await using var matchCmd = conn.CreateCommand();
+        matchCmd.CommandText = "ETL.usp_MatchVisits";
+        matchCmd.CommandType = System.Data.CommandType.StoredProcedure;
+        matchCmd.Parameters.AddWithValue("@BatchSize", 1000);
+        matchCmd.CommandTimeout = 300;
+        
+        await using var matchReader = await matchCmd.ExecuteReaderAsync(ct);
+        if (await matchReader.ReadAsync(ct))
+        {
+            var rowsProcessed = matchReader.GetInt32(0); // RowsProcessed
+            var rowsMatched = matchReader.GetInt32(1);   // RowsMatched
+            
+            if (rowsProcessed > 0)
+                _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched");
         }
     }
 }

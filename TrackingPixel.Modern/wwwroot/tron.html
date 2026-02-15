@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SmartPiXL // TRON</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
 <style>
 /* ============================================================================
    TRON AESTHETIC — Single-Page App: Operations + Analytics
@@ -54,6 +62,7 @@ body::after {
   background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.018) 2px, rgba(0,243,255,0.018) 4px);
   pointer-events: none;
   z-index: 9999;
+  will-change: transform;
 }
 
 /* Grid background */
@@ -67,6 +76,7 @@ body::before {
   background-size: 60px 60px;
   pointer-events: none;
   z-index: 0;
+  will-change: transform;
 }
 
 #grid-canvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
@@ -222,6 +232,7 @@ body::before {
   position: relative;
   overflow: hidden;
   transition: border-color 0.3s, box-shadow 0.3s;
+  contain: layout style paint;
 }
 
 .panel::before {
@@ -1115,6 +1126,7 @@ body::before {
       <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">SQL</div><div class="chip-value">--</div></div>
       <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">IIS</div><div class="chip-value">--</div></div>
       <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">ETL</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">MATCH</div><div class="chip-value">--</div></div>
       <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">LAST HIT</div><div class="chip-value">--</div></div>
     </div>
 
@@ -1141,10 +1153,22 @@ body::before {
             <div class="pipe-node-sub" id="pipe-etl-sub">parsed</div>
           </div>
           <div class="pipe-arrow" id="pipe-arrow-3"></div>
-          <div class="pipe-node" id="pipe-dash" onclick="drillPipeline('dash')">
-            <div class="pipe-node-label">DASHBOARD</div>
-            <div class="pipe-node-value" id="pipe-dash-val" style="font-size:0.7rem;">--</div>
-            <div class="pipe-node-sub" id="pipe-dash-sub">lag</div>
+          <div class="pipe-node" id="pipe-dim" onclick="drillPipeline('dim')">
+            <div class="pipe-node-label">DIMENSIONS</div>
+            <div class="pipe-node-value" id="pipe-dim-val">--</div>
+            <div class="pipe-node-sub" id="pipe-dim-sub">Device · IP</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-4"></div>
+          <div class="pipe-node" id="pipe-visit" onclick="drillPipeline('visit')">
+            <div class="pipe-node-label">VISITS</div>
+            <div class="pipe-node-value" id="pipe-visit-val">--</div>
+            <div class="pipe-node-sub" id="pipe-visit-sub">linked</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-5"></div>
+          <div class="pipe-node" id="pipe-match" onclick="drillPipeline('match')">
+            <div class="pipe-node-label">MATCH</div>
+            <div class="pipe-node-value" id="pipe-match-val">--</div>
+            <div class="pipe-node-sub" id="pipe-match-sub">resolved</div>
           </div>
         </div>
         <div class="etl-grid" style="margin-top:12px;">
@@ -1155,8 +1179,8 @@ body::before {
       </div>
     </div>
 
-    <!-- Errors + ETL -->
-    <div class="panel-grid half">
+    <!-- Errors + ETL + Pipeline -->
+    <div class="panel-grid triple">
       <div class="panel">
         <div class="panel-title">ERROR LOG</div>
         <div class="error-log" id="error-log"><div style="color:var(--text-dim); font-size:0.78rem; padding: 20px; text-align:center;">Waiting for data...</div></div>
@@ -1164,6 +1188,10 @@ body::before {
       <div class="panel">
         <div class="panel-title">ETL HEALTH</div>
         <div id="etl-details"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">PIPELINE TABLES</div>
+        <div id="pipeline-tables"><div class="loading">LOADING</div></div>
       </div>
     </div>
 
@@ -1199,15 +1227,17 @@ body::before {
       <div class="hero-card" onclick="drillHero('evasion')"><div class="hero-label">EVASION</div><div class="hero-value" id="h-evasion">--</div><div class="hero-sub" id="h-evasion-sub"></div></div>
     </div>
 
-    <!-- Pipeline (simple) -->
+    <!-- Pipeline (full) -->
     <div class="pipeline" id="a-pipeline" style="margin-bottom:24px;">
       <div class="pipe-node"><div class="pipe-node-label">RAW HITS</div><div class="pipe-node-value" id="a-pipe-raw">--</div></div>
       <div class="pipe-arrow"></div>
       <div class="pipe-node"><div class="pipe-node-label">ETL PARSE</div><div class="pipe-node-value" id="a-pipe-parsed">--</div></div>
       <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">167 SIGNALS</div><div class="pipe-node-value" style="color:var(--cyan); font-size:0.72rem;">PER HIT</div></div>
+      <div class="pipe-node"><div class="pipe-node-label">VISITS</div><div class="pipe-node-value" id="a-pipe-visits">--</div></div>
       <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">DASHBOARD</div><div class="pipe-node-value" style="color:var(--green);">LIVE</div></div>
+      <div class="pipe-node"><div class="pipe-node-label">MATCH</div><div class="pipe-node-value" id="a-pipe-match">--</div></div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-node"><div class="pipe-node-label">RESOLVED</div><div class="pipe-node-value" id="a-pipe-resolved" style="color:var(--green);">--</div></div>
     </div>
 
     <!-- Hourly + Risk -->
@@ -1296,6 +1326,8 @@ const API = {
 };
 
 let lastData = {};
+let isRefreshing = false;
+let refreshAbort = false;
 
 async function fetchJson(url) {
   try {
@@ -1309,105 +1341,11 @@ async function fetchJson(url) {
 }
 
 // ============================================================================
-// GRID PULSE CANVAS — Light beams race along grid lines (persistent)
+// GRID — Three.js Tron Arena (WebGL + Bloom)
+// Loaded via ES module below. Stub API until module initializes.
+// Contestant light-cycles race the grid, bounded by arena walls.
 // ============================================================================
-(function initGridPulse() {
-  const canvas = document.getElementById('grid-canvas');
-  const ctx = canvas.getContext('2d');
-  let pulses = [];
-  const GRID = 60;
-
-  function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }
-
-  function spawnPulse() {
-    if (pulses.length >= 4) return;
-    const isH = Math.random() > 0.5;
-    if (isH) {
-      const y = Math.floor(Math.random() * (canvas.height / GRID)) * GRID;
-      const goRight = Math.random() > 0.5;
-      pulses.push({
-        x: goRight ? -50 : canvas.width + 50,
-        y: y,
-        dx: goRight ? (2.5 + Math.random() * 2) : -(2.5 + Math.random() * 2),
-        dy: 0, life: 1, len: 150 + Math.random() * 250,
-        hue: Math.random() > 0.85 ? 140 : 188
-      });
-    } else {
-      const x = Math.floor(Math.random() * (canvas.width / GRID)) * GRID;
-      const goDown = Math.random() > 0.5;
-      pulses.push({
-        x: x,
-        y: goDown ? -50 : canvas.height + 50,
-        dx: 0,
-        dy: goDown ? (2.5 + Math.random() * 2) : -(2.5 + Math.random() * 2),
-        life: 1, len: 150 + Math.random() * 250,
-        hue: Math.random() > 0.85 ? 140 : 188
-      });
-    }
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (let i = pulses.length - 1; i >= 0; i--) {
-      const p = pulses[i];
-      const tailX = p.x - (p.dx ? p.dx / Math.abs(p.dx) * p.len : 0);
-      const tailY = p.y - (p.dy ? p.dy / Math.abs(p.dy) * p.len : 0);
-
-      const grad = ctx.createLinearGradient(tailX, tailY, p.x, p.y);
-      grad.addColorStop(0, `hsla(${p.hue}, 100%, 50%, 0)`);
-      grad.addColorStop(0.6, `hsla(${p.hue}, 100%, 50%, ${0.08 * p.life})`);
-      grad.addColorStop(1, `hsla(${p.hue}, 100%, 50%, ${0.35 * p.life})`);
-
-      ctx.beginPath();
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.5;
-      ctx.moveTo(tailX, tailY);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.fillStyle = `hsla(${p.hue}, 100%, 70%, ${0.8 * p.life})`;
-      ctx.shadowColor = `hsl(${p.hue}, 100%, 50%)`;
-      ctx.shadowBlur = 20;
-      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      const nearGridX = Math.abs(p.x % GRID) < 5 || Math.abs(p.x % GRID - GRID) < 5;
-      const nearGridY = Math.abs(p.y % GRID) < 5 || Math.abs(p.y % GRID - GRID) < 5;
-      if (nearGridX && nearGridY) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.fillStyle = `hsla(${p.hue}, 100%, 60%, ${0.4 * p.life})`;
-        ctx.shadowColor = `hsl(${p.hue}, 100%, 50%)`;
-        ctx.shadowBlur = 30;
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      p.x += p.dx;
-      p.y += p.dy;
-      const margin = p.len + 100;
-      if (p.x > canvas.width + margin || p.x < -margin ||
-          p.y > canvas.height + margin || p.y < -margin) {
-        pulses.splice(i, 1);
-      }
-    }
-    requestAnimationFrame(draw);
-  }
-
-  window.addEventListener('resize', resize);
-  resize();
-  draw();
-  function scheduleSpawn() { spawnPulse(); setTimeout(scheduleSpawn, 2500 + Math.random() * 4000); }
-  setTimeout(scheduleSpawn, 800);
-  setTimeout(spawnPulse, 300);
-})();
+var Grid = { spawnOrb() {}, derezzAll() {} };
 
 // ============================================================================
 // MODAL SYSTEM (shared)
@@ -1440,6 +1378,7 @@ let currentView = 'ops';
 function switchView(view) {
   if (view === currentView) return;
   closeModal();
+  refreshAbort = true;
   currentView = view;
 
   document.getElementById('view-ops').className = 'view-content' + (view === 'ops' ? ' active' : '');
@@ -1563,6 +1502,92 @@ function drillPipeline(stage) {
     html += sug('Dashboard reads from materialized views on PiXL.Parsed. If showing stale, ensure ETL is processing and that the views are querying PiXL.Parsed (not the old dbo schema).');
     openModal('DASHBOARD STAGE', html);
   }
+  else if (stage === 'dim') {
+    const pipe = infra?.pipeline;
+    html += di('Devices', num(pipe?.deviceRows), 'cyan');
+    html += di('IPs', num(pipe?.ipRows), 'cyan');
+    html += di('Unique Devices in Visits', num(pipe?.uniqueDevicesInVisits));
+    html += di('Unique IPs in Visits', num(pipe?.uniqueIpsInVisits));
+    html += di('Last Device Activity', pipe?.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
+    html += di('Last IP Activity', pipe?.ipLatest ? timeAgo(pipe.ipLatest) : '--');
+    html += '</div>';
+    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by usp_ParseNewHits (Phases 9-10). Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
+    openModal('DIMENSION TABLES', html);
+  }
+  else if (stage === 'visit') {
+    const pipe = infra?.pipeline;
+    html += di('Total Visits', num(pipe?.visitRows), 'cyan');
+    html += di('With Email', num(pipe?.visitsWithEmail), pipe?.visitsWithEmail > 0 ? 'ok' : '');
+    html += di('Max Visit ID', num(pipe?.maxVisitId));
+    html += di('Last Visit', pipe?.visitLatest ? timeAgo(pipe.visitLatest) : '--');
+    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += '</div>';
+    html += sug('PiXL.Visit is the fact table linking Device + IP per parsed hit. Visits with a MatchEmail are eligible for identity resolution via usp_MatchVisits. Match lag shows how many visits haven\'t been checked yet.');
+    openModal('VISIT TABLE', html);
+  }
+  else if (stage === 'match') {
+    const pipe = infra?.pipeline;
+    html += di('Total Matches', num(pipe?.matchRows));
+    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
+    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Match Watermark', num(pipe?.matchWatermark));
+    html += di('Processed by Match', num(pipe?.matchTotalProcessed));
+    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
+    html += '</div>';
+    html += sug('PiXL.Match stores identity resolution results from usp_MatchVisits. Resolved matches have an IndividualKey + AddressKey from the AutoConsumer lookup. Pending matches had email but no AutoConsumer hit. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
+    openModal('MATCH / IDENTITY', html);
+  }
+}
+
+// ─── Drill-Down: Pipeline Table cell ───
+function drillPipelineTable(table) {
+  const pipe = lastData.infra?.pipeline;
+  if (!pipe) return;
+  let html = '<div class="detail-grid">';
+  if (table === 'test') {
+    html += di('Rows', num(pipe.testRows));
+    html += di('Max ID', num(pipe.maxTestId));
+    html += di('Latest', pipe.testLatest ? timeAgo(pipe.testLatest) : '--');
+    html += di('Parse Watermark', num(pipe.parseWatermark));
+    html += '</div>';
+    openModal('PiXL.Test', html);
+  } else if (table === 'parsed') {
+    html += di('Rows', num(pipe.parsedRows));
+    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Latest', pipe.parsedLatest ? timeAgo(pipe.parsedLatest) : '--');
+    html += di('Total Processed', num(pipe.parseTotalProcessed));
+    html += '</div>';
+    openModal('PiXL.Parsed', html);
+  } else if (table === 'device') {
+    html += di('Rows', num(pipe.deviceRows), 'cyan');
+    html += di('In Visits', num(pipe.uniqueDevicesInVisits));
+    html += di('Latest', pipe.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Device', html);
+  } else if (table === 'ip') {
+    html += di('Rows', num(pipe.ipRows), 'cyan');
+    html += di('In Visits', num(pipe.uniqueIpsInVisits));
+    html += di('Latest', pipe.ipLatest ? timeAgo(pipe.ipLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.IP', html);
+  } else if (table === 'visit') {
+    html += di('Rows', num(pipe.visitRows));
+    html += di('Max Visit ID', num(pipe.maxVisitId));
+    html += di('With Email', num(pipe.visitsWithEmail));
+    html += di('Latest', pipe.visitLatest ? timeAgo(pipe.visitLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Visit', html);
+  } else if (table === 'match') {
+    html += di('Rows', num(pipe.matchRows));
+    html += di('Resolved', num(pipe.matchesResolved), 'ok');
+    html += di('Pending', num(pipe.matchesPending), pipe.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Latest', pipe.matchLatest ? timeAgo(pipe.matchLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Match', html);
+  }
 }
 
 // ─── Drill-Down: Status Chips ───
@@ -1638,6 +1663,20 @@ function drillStatus(type) {
     html += '</div>';
     openModal('ETL DETAIL', html);
   }
+  else if (type === 'match') {
+    const pipe = infra?.pipeline;
+    html += di('Total Matches', num(pipe?.matchRows), 'cyan');
+    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
+    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Match Watermark', num(pipe?.matchWatermark));
+    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += di('Visits With Email', num(pipe?.visitsWithEmail));
+    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
+    html += '</div>';
+    html += sug('Identity resolution matches Visit emails against the AutoConsumer database (421M rows). Resolved = IndividualKey found. Pending = email present but no AutoConsumer match. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
+    openModal('MATCH / IDENTITY', html);
+  }
   else if (type === 'lasthit') {
     html += di('Time Since Last', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) : '--');
     html += di('24h Hits', num(health?.hits_24h));
@@ -1688,6 +1727,8 @@ function getFixSuggestion(issue) {
   if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
   if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
   if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC usp_ParseNewHits"</code>';
+  if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
+  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits @BatchSize=500"</code>';
   if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
   return null;
 }
@@ -1718,6 +1759,12 @@ function buildIssues(health, infra) {
       issues.push({ severity: 'warning', title: 'ETL Lag High', detail: `Watermark is ${infra.dataFlow.etlLag} rows behind. Parsed data may be stale.`, time: infra.checkedAt });
     if (infra.dataFlow && infra.dataFlow.queueDepth > 100)
       issues.push({ severity: 'warning', title: 'Write Queue Backing Up', detail: `Queue depth: ${infra.dataFlow.queueDepth}. Writes may be slow.`, time: infra.checkedAt });
+    if (infra.pipeline && infra.pipeline.isAvailable) {
+      if (infra.pipeline.matchLag > 100)
+        issues.push({ severity: 'warning', title: 'Match Lag High', detail: `Match watermark is ${infra.pipeline.matchLag} visits behind. Identity resolution may be delayed.`, time: infra.checkedAt });
+      if (infra.pipeline.parseLag > 100)
+        issues.push({ severity: 'warning', title: 'Parse Lag High (Pipeline)', detail: `Parse watermark is ${infra.pipeline.parseLag} rows behind. Device/IP/Visit tables may be stale.`, time: infra.checkedAt });
+    }
   }
   if (health) {
     const secSince = health.secondsSinceLastHit || 9999;
@@ -1801,6 +1848,18 @@ function renderStatusStrip(health, infra) {
   const etlLag = df?.etlLag ?? null;
   chips.push(`<div class="status-chip ${etlLag > 50 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 50 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 50 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
 
+  // Match chip — shows resolved/total
+  const pipe = infra?.pipeline;
+  const matchOk = pipe?.isAvailable && pipe?.matchRows > 0;
+  const matchResolved = pipe?.matchesResolved ?? 0;
+  const matchTotal = pipe?.matchRows ?? 0;
+  const matchLag = pipe?.matchLag ?? null;
+  const matchDot = !pipe?.isAvailable ? 'idle' : matchLag > 50 ? 'warn' : matchResolved > 0 ? 'up' : 'idle';
+  const matchChipCls = !pipe?.isAvailable ? '' : matchLag > 50 ? 'degraded' : 'healthy';
+  const matchValCls = !pipe?.isAvailable ? '' : matchResolved > 0 ? 'ok' : matchTotal > 0 ? 'warn' : '';
+  const matchText = !pipe?.isAvailable ? '--' : `${matchResolved}/${matchTotal}`;
+  chips.push(`<div class="status-chip ${matchChipCls}" onclick="drillStatus('match')"><div class="chip-dot ${matchDot}"></div><div class="chip-label">MATCH</div><div class="chip-value ${matchValCls}">${matchText}</div></div>`);
+
   const secSince = health?.secondsSinceLastHit ?? null;
   const hitDot = secSince === null ? 'idle' : secSince < 300 ? 'up' : secSince < 3600 ? 'warn' : 'down';
   const hitVal = secSince === null ? '--' : secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago';
@@ -1815,31 +1874,55 @@ function renderStatusStrip(health, infra) {
 function renderPipeline(health, infra) {
   const df = infra?.dataFlow;
   const sql = infra?.sql;
+  const pipe = infra?.pipeline;
 
+  // Node 1: INGEST
   const queueDepth = df?.queueDepth ?? (infra?.app?.queueDepth ?? '--');
   document.getElementById('pipe-ingest-val').textContent = queueDepth;
   document.getElementById('pipe-ingest-sub').textContent = 'in queue';
   document.getElementById('pipe-ingest').className = 'pipe-node' + (queueDepth > 100 ? ' stale' : queueDepth !== '--' ? ' healthy' : '');
 
-  const maxTestId = df?.maxTestId ?? (sql?.testRows ?? '--');
+  // Node 2: SQL WRITE
+  const maxTestId = pipe?.maxTestId ?? (df?.maxTestId ?? (sql?.testRows ?? '--'));
   document.getElementById('pipe-sql-val').textContent = typeof maxTestId === 'number' ? num(maxTestId) : maxTestId;
   document.getElementById('pipe-sql-sub').textContent = 'PiXL.Test';
   document.getElementById('pipe-sql').className = 'pipe-node' + (sql?.isConnected === false ? ' down' : sql?.isConnected ? ' healthy' : '');
   document.getElementById('pipe-arrow-1').className = 'pipe-arrow' + (sql?.isConnected === false ? ' dead' : '');
 
-  const parsedRows = sql?.parsedRows ?? (health?.totalHits ?? '--');
+  // Node 3: ETL PARSE
+  const parsedRows = pipe?.parsedRows ?? (sql?.parsedRows ?? (health?.totalHits ?? '--'));
   document.getElementById('pipe-etl-val').textContent = typeof parsedRows === 'number' ? num(parsedRows) : parsedRows;
-  document.getElementById('pipe-etl-sub').textContent = 'PiXL.Parsed';
-  const etlLag = df?.etlLag ?? null;
-  document.getElementById('pipe-etl').className = 'pipe-node' + (etlLag > 50 ? ' stale' : etlLag !== null ? ' healthy' : '');
-  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (etlLag > 50 ? ' dead' : '');
+  document.getElementById('pipe-etl-sub').textContent = pipe ? `lag ${pipe.parseLag}` : 'PiXL.Parsed';
+  const parseLag = pipe?.parseLag ?? (df?.etlLag ?? null);
+  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 50 ? ' stale' : parseLag !== null ? ' healthy' : '');
+  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 50 ? ' dead' : '');
 
-  document.getElementById('pipe-dash-val').textContent = df?.isFlowing ? 'LIVE' : 'STALE';
-  document.getElementById('pipe-dash-val').style.color = df?.isFlowing ? 'var(--green)' : 'var(--red)';
-  document.getElementById('pipe-dash-sub').textContent = etlLag !== null ? `${etlLag} row lag` : '--';
-  document.getElementById('pipe-dash').className = 'pipe-node' + (df?.isFlowing ? ' healthy' : df ? ' down' : '');
-  document.getElementById('pipe-arrow-3').className = 'pipe-arrow' + (!df?.isFlowing ? ' dead' : '');
+  // Node 4: DIMENSIONS (Device + IP)
+  const devCount = pipe?.deviceRows ?? '--';
+  const ipCount = pipe?.ipRows ?? '--';
+  document.getElementById('pipe-dim-val').textContent = typeof devCount === 'number' ? `${num(devCount)}+${num(ipCount)}` : '--';
+  document.getElementById('pipe-dim-sub').textContent = 'Device · IP';
+  document.getElementById('pipe-dim').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
+  document.getElementById('pipe-arrow-3').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
 
+  // Node 5: VISITS
+  const visitCount = pipe?.visitRows ?? '--';
+  document.getElementById('pipe-visit-val').textContent = typeof visitCount === 'number' ? num(visitCount) : visitCount;
+  document.getElementById('pipe-visit-sub').textContent = pipe ? `${num(pipe.visitsWithEmail||0)} w/email` : 'linked';
+  document.getElementById('pipe-visit').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
+  document.getElementById('pipe-arrow-4').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
+
+  // Node 6: MATCH
+  const matchTotal = pipe?.matchRows ?? '--';
+  const matchResolved = pipe?.matchesResolved ?? 0;
+  document.getElementById('pipe-match-val').textContent = typeof matchTotal === 'number' ? num(matchTotal) : matchTotal;
+  document.getElementById('pipe-match-sub').textContent = pipe ? `${matchResolved} resolved` : 'resolved';
+  const matchLag = pipe?.matchLag ?? null;
+  const matchOk = pipe?.isAvailable && matchLag !== null;
+  document.getElementById('pipe-match').className = 'pipe-node' + (matchLag > 50 ? ' stale' : matchOk ? ' healthy' : '');
+  document.getElementById('pipe-arrow-5').className = 'pipe-arrow' + (matchLag > 50 ? ' dead' : '');
+
+  // Flow stats bar
   if (df) {
     const staleStr = df.secondsSinceLastInsert > 0 ? formatDuration(df.secondsSinceLastInsert) + ' ago' : 'just now';
     document.getElementById('flow-5min').textContent = df.hitsLast5Min;
@@ -1874,18 +1957,73 @@ function renderErrorLog(infra) {
 }
 
 // ─── Ops: ETL Health ───
-function renderOpsETL(health) {
+function renderOpsETL(health, infra) {
   const el = document.getElementById('etl-details');
-  if (!health) { el.innerHTML = '<div style="color:var(--text-dim)">No health data</div>'; return; }
+  const pipe = infra?.pipeline;
+  if (!health && !pipe) { el.innerHTML = '<div style="color:var(--text-dim)">No health data</div>'; return; }
+
+  const parseLag = pipe?.parseLag ?? 0;
+  const matchLag = pipe?.matchLag ?? 0;
+  const parseLagCls = parseLag > 50 ? ' warn' : parseLag > 100 ? ' bad' : '';
+  const matchLagCls = matchLag > 50 ? ' warn' : matchLag > 100 ? ' bad' : '';
+
   el.innerHTML = `
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ParseNewHits)</div>
     <div class="etl-grid">
-      <div class="etl-stat"><div class="etl-val">${num(health.etL_TotalProcessed||0)}</div><div class="etl-lbl">ROWS PROCESSED</div></div>
-      <div class="etl-stat"><div class="etl-val">${num(health.etL_Watermark||0)}</div><div class="etl-lbl">WATERMARK ID</div></div>
-      <div class="etl-stat"><div class="etl-val">${num(health.totalHits)}</div><div class="etl-lbl">PARSED ROWS</div></div>
-      <div class="etl-stat"><div class="etl-val">${num(health.syntheticHits||0)}</div><div class="etl-lbl">SYNTHETIC</div></div>
-      <div class="etl-stat"><div class="etl-val" style="font-size:0.85rem;">${health.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--'}</div><div class="etl-lbl">LAST ETL RUN</div></div>
-      <div class="etl-stat"><div class="etl-val">${num(health.hits_24h||0)}</div><div class="etl-lbl">HITS 24H</div></div>
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseTotalProcessed || health?.etL_TotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseWatermark || health?.etL_Watermark || 0)}</div><div class="etl-lbl">WATERMARK</div></div>
+      <div class="etl-stat"><div class="etl-val${parseLagCls}">${parseLag}</div><div class="etl-lbl">PARSE LAG</div></div>
     </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin:6px 0 14px;">Last run: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--')}</div>
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">MATCH (usp_MatchVisits)</div>
+    <div class="etl-grid">
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.matchTotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
+      <div class="etl-stat"><div class="etl-val" style="color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${num(pipe?.matchTotalMatched || 0)}</div><div class="etl-lbl">MATCHED</div></div>
+      <div class="etl-stat"><div class="etl-val${matchLagCls}">${matchLag}</div><div class="etl-lbl">MATCH LAG</div></div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Last run: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
+  `;
+}
+
+// ─── Ops: Pipeline Tables ───
+function renderPipelineTables(infra) {
+  const el = document.getElementById('pipeline-tables');
+  const pipe = infra?.pipeline;
+  if (!pipe?.isAvailable) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:20px;text-align:center;">Pipeline data unavailable</div>'; return; }
+
+  const tbl = (label, rows, latest, color) => {
+    const age = latest ? timeAgo(latest) : '--';
+    return `<div class="etl-stat" style="cursor:pointer;" onclick="drillPipelineTable('${label.toLowerCase()}')">
+      <div class="etl-val" style="color:${color}">${num(rows)}</div>
+      <div class="etl-lbl">${label}</div>
+      <div style="font-size:0.62rem;color:var(--text-dim);margin-top:2px;">${age}</div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="etl-grid" style="grid-template-columns:repeat(3,1fr);">
+      ${tbl('TEST', pipe.testRows, pipe.testLatest, 'var(--text)')}
+      ${tbl('PARSED', pipe.parsedRows, pipe.parsedLatest, 'var(--cyan)')}
+      ${tbl('DEVICE', pipe.deviceRows, pipe.deviceLatest, 'var(--cyan)')}
+      ${tbl('IP', pipe.ipRows, pipe.ipLatest, 'var(--cyan)')}
+      ${tbl('VISIT', pipe.visitRows, pipe.visitLatest, 'var(--cyan)')}
+      ${tbl('MATCH', pipe.matchRows, pipe.matchLatest, 'var(--green)')}
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:10px;padding:8px 12px;background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);border-radius:4px;">
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${pipe.matchesResolved}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">RESOLVED</div>
+      </div>
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--yellow)">${pipe.matchesPending}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">PENDING</div>
+      </div>
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--cyan)">${num(pipe.visitsWithEmail)}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">W/ EMAIL</div>
+      </div>
+    </div>
+    <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:6px;">${num(pipe.uniqueDevicesInVisits)} unique devices · ${num(pipe.uniqueIpsInVisits)} unique IPs in visits</div>
   `;
 }
 
@@ -2172,6 +2310,15 @@ function renderAnalyticsHero(h) {
 
   document.getElementById('a-pipe-raw').textContent = num(h.etL_TotalProcessed || h.totalHits);
   document.getElementById('a-pipe-parsed').textContent = num(h.totalHits);
+
+  // Pipeline nodes (updated from infra if available)
+  const pipe = lastData.infra?.pipeline;
+  if (pipe?.isAvailable) {
+    document.getElementById('a-pipe-visits').textContent = num(pipe.visitRows);
+    document.getElementById('a-pipe-match').textContent = num(pipe.matchRows);
+    document.getElementById('a-pipe-resolved').textContent = num(pipe.matchesResolved);
+    document.getElementById('a-pipe-resolved').style.color = pipe.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
+  }
 }
 
 // ─── Analytics: Beacon ───
@@ -2199,17 +2346,17 @@ function updateAnalyticsBeacon(h) {
 function renderAnalyticsETL(h) {
   const el = document.getElementById('a-etl-details');
   if (!h) return;
+  const pipe = lastData.infra?.pipeline;
   el.innerHTML = `
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-      <div class="evasion-card"><div class="evasion-val">${num(h.etL_TotalProcessed||0)}</div><div class="evasion-lbl">ROWS PROCESSED</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(h.etL_Watermark||0)}</div><div class="evasion-lbl">WATERMARK ID</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseTotalProcessed || h.etL_TotalProcessed||0)}</div><div class="evasion-lbl">ROWS PROCESSED</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseWatermark || h.etL_Watermark||0)}</div><div class="evasion-lbl">WATERMARK ID</div></div>
       <div class="evasion-card"><div class="evasion-val">${num(h.totalHits)}</div><div class="evasion-lbl">PARSED ROWS</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(h.syntheticHits||0)}</div><div class="evasion-lbl">SYNTHETIC</div></div>
-      <div class="evasion-card" style="grid-column:span 2;">
-        <div class="evasion-val" style="font-size:0.9rem;">${h.etL_LastRunAt ? timeAgo(h.etL_LastRunAt) : '--'}</div>
-        <div class="evasion-lbl">LAST ETL RUN</div>
-      </div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.visitRows||0)}</div><div class="evasion-lbl">VISITS</div></div>
+      <div class="evasion-card"><div class="evasion-val" style="color:var(--green)">${num(pipe?.matchesResolved||0)}</div><div class="evasion-lbl">MATCHED</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.deviceRows||0)}</div><div class="evasion-lbl">DEVICES</div></div>
     </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Parse: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (h.etL_LastRunAt ? timeAgo(h.etL_LastRunAt) : '--')} · Match: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
   `;
 }
 
@@ -2381,72 +2528,710 @@ function renderDevices(data) {
 // ============================================================================
 // REFRESH LOOP — Only active view fetches & renders
 // ============================================================================
+// ============================================================================
+// STAGGERED API ORCHESTRA — Sequential calls, progressive rendering, grid orbs
+// Each API call fires in sequence. On completion its data renders immediately
+// and a named Tron light-cycle orb spawns on the grid background.
+// ============================================================================
 const REFRESH_INTERVAL = 10;
 let countdown = REFRESH_INTERVAL;
 
-async function refreshOps() {
-  const [health, infra, recent] = await Promise.all([
-    API.health(), API.infra(), API.recent()
-  ]);
-  lastData.health = health;
-  lastData.infra = infra;
-  lastData.recent = recent;
+// Ops view: 3 sequential calls
+const OPS_STEPS = [
+  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
+    render() {
+      const h = lastData.health;
+      if (h) document.getElementById('etl-status').textContent = h.etL_Watermark ? `#${num(h.etL_Watermark)}` : '--';
+    }},
+  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
+    render() {
+      const { health, infra } = lastData;
+      renderCriticalZone(buildIssues(health, infra));
+      renderStatusStrip(health, infra);
+      renderPipeline(health, infra);
+      renderErrorLog(infra);
+      renderOpsETL(health, infra);
+      renderPipelineTables(infra);
+      renderInfraDetail(infra);
+      updateOpsBeacon(health, infra);
+    }},
+  { name: 'FEED', contestant: 'QUORRA', fn: API.recent, key: 'recent',
+    render() { renderOpsFeed(lastData.recent); }},
+];
 
-  const issues = buildIssues(health, infra);
-  renderCriticalZone(issues);
-  renderStatusStrip(health, infra);
-  renderPipeline(health, infra);
-  renderErrorLog(infra);
-  renderOpsETL(health);
-  renderInfraDetail(infra);
-  renderOpsFeed(recent);
-  updateOpsBeacon(health, infra);
-}
+// Analytics view: 10 sequential calls — each section pops in as data arrives
+const ANALYTICS_STEPS = [
+  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
+    render() { renderAnalyticsHero(lastData.health); updateAnalyticsBeacon(lastData.health); }},
+  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
+    render() { renderAnalyticsHero(lastData.health); renderAnalyticsETL(lastData.health); }},
+  { name: 'HOURLY', contestant: 'GEM', fn: () => API.hourly(48), key: 'hourly',
+    render() { renderHourlyChart(lastData.hourly); }},
+  { name: 'BOTS', contestant: 'RINZLER', fn: API.bots, key: 'bots',
+    render() { renderRiskList(lastData.bots); }},
+  { name: 'SIGNALS', contestant: 'SARK', fn: API.signals, key: 'signals',
+    render() { renderSignals(lastData.signals); }},
+  { name: 'EVASION', contestant: 'CASTOR', fn: API.evasion, key: 'evasion',
+    render() { renderEvasion(lastData.evasion); }},
+  { name: 'BEHAVIOR', contestant: 'YORI', fn: API.behavior, key: 'behavior',
+    render() { renderBehavior(lastData.behavior); }},
+  { name: 'FEED', contestant: 'QUORRA', fn: API.recent, key: 'recent',
+    render() { renderAnalyticsFeed(lastData.recent); }},
+  { name: 'FP', contestant: 'RAM', fn: API.fingerprints, key: 'fingerprints',
+    render() { renderFingerprints(lastData.fingerprints); }},
+  { name: 'DEVICES', contestant: 'FLYNN', fn: API.devices, key: 'devices',
+    render() { renderDevices(lastData.devices); }},
+];
 
-async function refreshAnalytics() {
-  const [health, hourly, bots, signals, evasion, behavior, recent, fingerprints, devices] =
-    await Promise.all([
-      API.health(), API.hourly(48), API.bots(), API.signals(),
-      API.evasion(), API.behavior(), API.recent(), API.fingerprints(), API.devices()
-    ]);
-
-  lastData.health = health;
-  lastData.hourly = hourly;
-  lastData.bots = bots;
-  lastData.signals = signals;
-  lastData.evasion = evasion;
-  lastData.behavior = behavior;
-  lastData.recent = recent;
-  lastData.fingerprints = fingerprints;
-  lastData.devices = devices;
-
-  renderAnalyticsHero(health);
-  renderHourlyChart(hourly);
-  renderRiskList(bots);
-  renderSignals(signals);
-  renderEvasion(evasion);
-  renderBehavior(behavior);
-  renderAnalyticsFeed(recent);
-  renderFingerprints(fingerprints);
-  renderDevices(devices);
-  renderAnalyticsETL(health);
-  updateAnalyticsBeacon(health);
+async function runPipeline(steps) {
+  isRefreshing = true;
+  refreshAbort = false;
+  Grid.derezzAll();
+  const countdownEl = document.getElementById('countdown');
+  for (let i = 0; i < steps.length; i++) {
+    if (refreshAbort) break;
+    countdownEl.textContent = `${i + 1}/${steps.length}`;
+    countdownEl.style.color = 'var(--cyan)';
+    const step = steps[i];
+    try {
+      const data = await step.fn();
+      if (refreshAbort) break;
+      lastData[step.key] = data;
+      Grid.spawnOrb(step.name, step.contestant);
+      if (step.render) step.render();
+    } catch (e) {
+      console.warn(`Pipeline step ${step.name} failed:`, e);
+    }
+  }
+  countdownEl.style.color = '';
+  isRefreshing = false;
+  countdown = REFRESH_INTERVAL;
+  countdownEl.textContent = countdown;
 }
 
 async function refreshAll() {
-  if (currentView === 'ops') await refreshOps();
-  else await refreshAnalytics();
-  countdown = REFRESH_INTERVAL;
+  if (isRefreshing) return;
+  if (currentView === 'ops') await runPipeline(OPS_STEPS);
+  else await runPipeline(ANALYTICS_STEPS);
 }
 
 setInterval(() => {
   document.getElementById('utc-clock').textContent = new Date().toISOString().substring(11, 19);
-  countdown--;
-  document.getElementById('countdown').textContent = Math.max(0, countdown);
-  if (countdown <= 0) refreshAll();
+  if (!isRefreshing) {
+    countdown--;
+    document.getElementById('countdown').textContent = Math.max(0, countdown);
+    if (countdown <= 0) refreshAll();
+  }
 }, 1000);
 
 refreshAll();
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     THREE.JS 3D TRON ARENA — PerspectiveCamera + Trail Walls + Bloom
+     Full 3D scene: overhead perspective camera, 3D cycle meshes with
+     cone noses, vertical trail wall geometry (the iconic Tron light ribbons),
+     ground glow pools, fog, directional lighting, slow camera drift.
+     Replaces the Canvas 2D Grid stub above when module loads.
+     ════════════════════════════════════════════════════════════════════════ -->
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+(function () {
+  'use strict';
+
+  // ── Config ──────────────────────────────────────────────────────────────
+  const CELL = 50;             // grid cell size in world units
+  const ARENA_X = 1400;        // arena width  (X axis)
+  const ARENA_Z = 900;         // arena depth  (Z axis)
+  const HALF_X = ARENA_X / 2;
+  const HALF_Z = ARENA_Z / 2;
+  const WALL_H = 16;           // trail wall height (vertical ribbons)
+  const MAX_TRAIL = 200;       // trail points per cycle
+  const AMBIENT_MAX = 3;
+
+  // ── Contestant Palette (Tron Grid Players) ─────────────────────────────
+  const COLORS = {
+    TRON:    0x00f3ff,   // Cyan — the hero
+    CLU:     0xffaa00,   // Amber/Gold — the tyrant
+    RINZLER: 0xff4400,   // Orange-Red — the enforcer
+    QUORRA:  0xcc44ff,   // Purple — the ISO
+    GEM:     0x88ddff,   // Ice Blue — the siren
+    SARK:    0xff0044,   // Red — the commander
+    CASTOR:  0xff00ff,   // Magenta — the wildcard
+    YORI:    0x00ff88,   // Green — the architect
+    RAM:     0xff66aa,   // Pink — the believer
+    FLYNN:   0x4488ff,   // Blue — the creator
+  };
+  const AMBIENT_HEX = 0x006677;
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  RENDERER + SCENE — Dark background, atmospheric fog
+  // ══════════════════════════════════════════════════════════════════════
+  const canvas = document.getElementById('grid-canvas');
+  let W = window.innerWidth, H = window.innerHeight;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(W, H);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.setClearColor(0x000308, 1);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000308, 0.00025);
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  PERSPECTIVE CAMERA — Overhead angle looking down at the arena
+  // ══════════════════════════════════════════════════════════════════════
+  const camera = new THREE.PerspectiveCamera(55, W / H, 1, 6000);
+  camera.position.set(0, 750, 600);
+  camera.lookAt(0, 0, -50);
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  LIGHTING — Subtle directional + ambient for surface definition
+  // ══════════════════════════════════════════════════════════════════════
+  scene.add(new THREE.AmbientLight(0x112244, 0.3));
+  const dirLight = new THREE.DirectionalLight(0x446688, 0.4);
+  dirLight.position.set(200, 500, 300);
+  scene.add(dirLight);
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  BLOOM POST-PROCESSING — Only bright/emissive objects glow
+  // ══════════════════════════════════════════════════════════════════════
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(W, H),
+    1.2,   // strength — visible halos on bright objects
+    0.6,   // radius — soft spread
+    0.3    // threshold — grid stays clean, cycles + trails glow
+  );
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  GROUND GRID — Extended grid fading into fog + brighter arena grid
+  // ══════════════════════════════════════════════════════════════════════
+  const extGrid = new THREE.GridHelper(4000, 80, 0x002030, 0x001018);
+  extGrid.material.transparent = true;
+  extGrid.material.opacity = 0.5;
+  scene.add(extGrid);
+
+  // Arena interior grid (brighter)
+  function buildArenaGrid() {
+    const pts = [];
+    for (let x = -HALF_X; x <= HALF_X; x += CELL) {
+      pts.push(new THREE.Vector3(x, 0.1, -HALF_Z));
+      pts.push(new THREE.Vector3(x, 0.1, HALF_Z));
+    }
+    for (let z = -HALF_Z; z <= HALF_Z; z += CELL) {
+      pts.push(new THREE.Vector3(-HALF_X, 0.1, z));
+      pts.push(new THREE.Vector3(HALF_X, 0.1, z));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    return new THREE.LineSegments(geo,
+      new THREE.LineBasicMaterial({ color: 0x003848, transparent: true, opacity: 0.6 })
+    );
+  }
+  scene.add(buildArenaGrid());
+
+  // Arena border — bright, feeds bloom
+  (function () {
+    const y = 0.2;
+    const pts = [
+      new THREE.Vector3(-HALF_X, y, -HALF_Z),
+      new THREE.Vector3( HALF_X, y, -HALF_Z),
+      new THREE.Vector3( HALF_X, y,  HALF_Z),
+      new THREE.Vector3(-HALF_X, y,  HALF_Z),
+      new THREE.Vector3(-HALF_X, y, -HALF_Z),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    scene.add(new THREE.Line(geo,
+      new THREE.LineBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.8 })
+    ));
+  })();
+
+  // Arena border — vertical corner posts + top edge
+  (function () {
+    const corners = [
+      [-HALF_X, -HALF_Z], [HALF_X, -HALF_Z],
+      [HALF_X, HALF_Z], [-HALF_X, HALF_Z]
+    ];
+    for (let i = 0; i < 4; i++) {
+      const [x1, z1] = corners[i];
+      const [x2, z2] = corners[(i + 1) % 4];
+      // Top edge
+      const tGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x1, WALL_H, z1),
+        new THREE.Vector3(x2, WALL_H, z2)
+      ]);
+      scene.add(new THREE.Line(tGeo,
+        new THREE.LineBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.25 })
+      ));
+      // Vertical post at corner
+      const vGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x1, 0, z1),
+        new THREE.Vector3(x1, WALL_H * 1.5, z1)
+      ]);
+      scene.add(new THREE.Line(vGeo,
+        new THREE.LineBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.5 })
+      ));
+    }
+  })();
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  HELPERS
+  // ══════════════════════════════════════════════════════════════════════
+  const snap = v => Math.round(v / CELL) * CELL;
+
+  // Glow texture cache (radial gradient for sprites/planes)
+  const glowCache = {};
+  function getGlowTexture(hex) {
+    if (glowCache[hex]) return glowCache[hex];
+    const sz = 64, c = document.createElement('canvas');
+    c.width = sz; c.height = sz;
+    const ctx = c.getContext('2d');
+    const col = new THREE.Color(hex);
+    const r = Math.round(col.r * 255), g = Math.round(col.g * 255), b = Math.round(col.b * 255);
+    const grad = ctx.createRadialGradient(sz/2,sz/2,0, sz/2,sz/2,sz/2);
+    grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    grad.addColorStop(0.3, `rgba(${r},${g},${b},0.3)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, sz, sz);
+    const tex = new THREE.CanvasTexture(c);
+    glowCache[hex] = tex;
+    return tex;
+  }
+
+  // Label texture
+  function makeLabelTexture(stepName, contestantName, hex) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 48;
+    const ctx = c.getContext('2d');
+    const col = new THREE.Color(hex);
+    const r = Math.round(col.r * 255), g = Math.round(col.g * 255), b = Math.round(col.b * 255);
+    ctx.font = 'bold 18px "Share Tech Mono", monospace';
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillText(`${contestantName} // ${stepName}`, 4, 20);
+    ctx.font = '12px "Share Tech Mono", monospace';
+    ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+    ctx.fillText('\u25A0 ONLINE', 4, 38);
+    return new THREE.CanvasTexture(c);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  3D CYCLE MESH — Box body + cone nose + cockpit accent + ground glow
+  // ══════════════════════════════════════════════════════════════════════
+  function buildCycleMesh(hex, isAmbient) {
+    const grp = new THREE.Group();
+    const s = isAmbient ? 0.8 : 1.3;
+    const bw = 28 * s, bh = 8 * s, bd = 12 * s;
+
+    // Main body — sits on the grid
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(bw, bh, bd),
+      new THREE.MeshBasicMaterial({ color: hex })
+    );
+    body.position.y = bh / 2;
+    grp.add(body);
+
+    // Cockpit accent (white-hot, blooms hard)
+    if (!isAmbient) {
+      const cockpit = new THREE.Mesh(
+        new THREE.BoxGeometry(14 * s, 5 * s, 8 * s),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      cockpit.position.set(2 * s, bh + 2 * s, 0);
+      grp.add(cockpit);
+    }
+
+    // Nose wedge (cone rotated to point forward along +X)
+    const noseGeo = new THREE.ConeGeometry(6 * s, 18 * s, 4);
+    noseGeo.rotateZ(-Math.PI / 2);
+    const nose = new THREE.Mesh(noseGeo,
+      new THREE.MeshBasicMaterial({ color: hex })
+    );
+    nose.position.set(bw / 2 + 7 * s, bh / 2, 0);
+    grp.add(nose);
+
+    // Identity disc ring (contestants only)
+    if (!isAmbient) {
+      const disc = new THREE.Mesh(
+        new THREE.TorusGeometry(20 * s, 0.5, 8, 32),
+        new THREE.MeshBasicMaterial({ color: hex, wireframe: true, transparent: true, opacity: 0.3 })
+      );
+      disc.rotation.x = Math.PI * 0.5;
+      disc.position.y = bh / 2;
+      disc.name = 'disc';
+      grp.add(disc);
+    }
+
+    // Ground glow pool (flat plane on the floor, additive)
+    const glowPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(isAmbient ? 60 : 120, isAmbient ? 60 : 120),
+      new THREE.MeshBasicMaterial({
+        map: getGlowTexture(hex), transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    glowPlane.rotation.x = -Math.PI / 2;
+    glowPlane.position.y = 0.5;
+    grp.add(glowPlane);
+
+    return grp;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  TRAIL WALL MESH — Vertical ribbon geometry (the iconic Tron walls)
+  // ══════════════════════════════════════════════════════════════════════
+  function buildTrail(hex) {
+    const MAX = MAX_TRAIL;
+
+    // Wall mesh — indexed BufferGeometry, 2 verts per point (bottom + top)
+    const wallPos = new Float32Array(MAX * 2 * 3);
+    const wallGeo = new THREE.BufferGeometry();
+    wallGeo.setAttribute('position', new THREE.BufferAttribute(wallPos, 3));
+    const indices = [];
+    for (let i = 0; i < MAX - 1; i++) {
+      const b0 = i * 2, t0 = i * 2 + 1;
+      const b1 = (i + 1) * 2, t1 = (i + 1) * 2 + 1;
+      indices.push(b0, b1, t1, b0, t1, t0);
+    }
+    wallGeo.setIndex(indices);
+    wallGeo.setDrawRange(0, 0);
+
+    const wallMesh = new THREE.Mesh(wallGeo,
+      new THREE.MeshBasicMaterial({
+        color: hex, transparent: true, opacity: 0.5,
+        side: THREE.DoubleSide
+      })
+    );
+    wallMesh.frustumCulled = false;
+
+    // Top edge line (bright, feeds bloom — the glowing ribbon edge)
+    const topPos = new Float32Array(MAX * 3);
+    const topGeo = new THREE.BufferGeometry();
+    topGeo.setAttribute('position', new THREE.BufferAttribute(topPos, 3));
+    topGeo.setDrawRange(0, 0);
+    const topLine = new THREE.Line(topGeo,
+      new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.9 })
+    );
+    topLine.frustumCulled = false;
+
+    // Base glow line (on the floor, additive bloom feeder)
+    const basePos = new Float32Array(MAX * 3);
+    const baseGeo = new THREE.BufferGeometry();
+    baseGeo.setAttribute('position', new THREE.BufferAttribute(basePos, 3));
+    baseGeo.setDrawRange(0, 0);
+    const baseLine = new THREE.Line(baseGeo,
+      new THREE.LineBasicMaterial({
+        color: hex, transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    baseLine.frustumCulled = false;
+
+    return { wallPos, wallGeo, wallMesh, topPos, topGeo, topLine, basePos, baseGeo, baseLine };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  CYCLE POOL + SPAWN
+  // ══════════════════════════════════════════════════════════════════════
+  const cycles = [];
+
+  function spawnCycle(stepName, contestant, isAmbient) {
+    const hex = isAmbient ? AMBIENT_HEX : (COLORS[contestant] || 0x00f3ff);
+    const speed = isAmbient ? (1.5 + Math.random()) : (1.2 + Math.random() * 0.6);
+
+    // Random grid position inside arena (X/Z plane)
+    let x = snap(-HALF_X + CELL + Math.random() * (ARENA_X - 2 * CELL));
+    let z = snap(-HALF_Z + CELL + Math.random() * (ARENA_Z - 2 * CELL));
+    x = Math.max(-HALF_X + CELL, Math.min(HALF_X - CELL, x));
+    z = Math.max(-HALF_Z + CELL, Math.min(HALF_Z - CELL, z));
+
+    // Random cardinal direction
+    const dirs = [[speed,0],[-speed,0],[0,speed],[0,-speed]];
+    const [dx, dz] = dirs[Math.floor(Math.random() * 4)];
+
+    const mesh = buildCycleMesh(hex, isAmbient);
+    mesh.position.set(x, 0, z);
+    mesh.rotation.y = Math.atan2(-dz, dx);  // face direction of travel
+    scene.add(mesh);
+
+    // Label sprite (floats above the cycle)
+    let label = null;
+    if (!isAmbient && stepName) {
+      const tex = makeLabelTexture(stepName, contestant, hex);
+      label = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+      );
+      label.scale.set(80, 15, 1);
+      label.position.set(0, 32, 0);
+      mesh.add(label);
+    }
+
+    const trail = buildTrail(hex);
+    scene.add(trail.wallMesh);
+    scene.add(trail.topLine);
+    scene.add(trail.baseLine);
+
+    cycles.push({
+      stepName, contestant, hex, mesh, trail, label,
+      x, z, dx, dz, speed,
+      life: 1, maxLife: isAmbient ? 30000 : 20000,
+      born: performance.now(),
+      pts: [], turnCD: 0, ambient: isAmbient, derezz: false
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  POOLED PARTICLE SYSTEM — 3D particles with gravity
+  // ══════════════════════════════════════════════════════════════════════
+  const P_MAX = 600;
+  const pPos = new Float32Array(P_MAX * 3);
+  const pCol = new Float32Array(P_MAX * 3);
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+  const pMesh = new THREE.Points(pGeo, new THREE.PointsMaterial({
+    size: 4, vertexColors: true, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+  }));
+  pMesh.frustumCulled = false;
+  scene.add(pMesh);
+
+  const pPool = [];
+  function emit(x, z, vx, vz, hex) {
+    if (pPool.length >= P_MAX) return;
+    const col = new THREE.Color(hex);
+    pPool.push({
+      x, y: WALL_H * 0.5, z,
+      vx, vy: 1 + Math.random() * 4, vz,  // fly upward
+      r: col.r, g: col.g, b: col.b,
+      life: 1, decay: 0.015 + Math.random() * 0.02
+    });
+  }
+
+  function updateParticles() {
+    for (let i = pPool.length - 1; i >= 0; i--) {
+      const p = pPool[i];
+      p.x += p.vx; p.y += p.vy; p.z += p.vz;
+      p.vx *= 0.96; p.vy -= 0.06; p.vz *= 0.96;  // gravity
+      p.life -= p.decay;
+      if (p.life <= 0 || p.y < 0) pPool.splice(i, 1);
+    }
+    const len = pPool.length;
+    for (let i = 0; i < P_MAX; i++) {
+      if (i < len) {
+        const p = pPool[i];
+        pPos[i*3] = p.x; pPos[i*3+1] = Math.max(0, p.y); pPos[i*3+2] = p.z;
+        pCol[i*3] = p.r * p.life; pCol[i*3+1] = p.g * p.life; pCol[i*3+2] = p.b * p.life;
+      } else {
+        pPos[i*3+1] = -9999;
+        pCol[i*3] = pCol[i*3+1] = pCol[i*3+2] = 0;
+      }
+    }
+    pGeo.attributes.position.needsUpdate = true;
+    pGeo.attributes.color.needsUpdate = true;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  DEREZZ + CLEANUP
+  // ══════════════════════════════════════════════════════════════════════
+  function derezzAll() {
+    for (const c of cycles) {
+      if (!c.ambient && c.life > 0 && !c.derezz) {
+        c.derezz = true;
+        for (let i = 0; i < 30; i++) {
+          const a = (i / 30) * Math.PI * 2;
+          const sp = 2 + Math.random() * 5;
+          emit(c.x, c.z, Math.cos(a) * sp, Math.sin(a) * sp, c.hex);
+        }
+      }
+    }
+  }
+
+  function removeCycle(i) {
+    const c = cycles[i];
+    scene.remove(c.mesh);
+    scene.remove(c.trail.wallMesh);
+    scene.remove(c.trail.topLine);
+    scene.remove(c.trail.baseLine);
+    c.mesh.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+    c.trail.wallGeo.dispose(); c.trail.wallMesh.material.dispose();
+    c.trail.topGeo.dispose();  c.trail.topLine.material.dispose();
+    c.trail.baseGeo.dispose(); c.trail.baseLine.material.dispose();
+    cycles.splice(i, 1);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  MAIN UPDATE LOOP
+  // ══════════════════════════════════════════════════════════════════════
+  function update(now) {
+    for (let i = cycles.length - 1; i >= 0; i--) {
+      const c = cycles[i];
+
+      // Derezz animation
+      if (c.derezz) {
+        c.life -= 0.03;
+        c.mesh.scale.setScalar(Math.max(0.01, c.life));
+        // Fade trail walls during derezz
+        c.trail.wallMesh.material.opacity = 0.5 * c.life;
+        c.trail.topLine.material.opacity = 0.9 * c.life;
+        if (c.life <= 0) { removeCycle(i); continue; }
+        continue;
+      }
+
+      // Age out
+      if (now - c.born > c.maxLife) {
+        c.life -= 0.008;
+        if (c.life <= 0) { removeCycle(i); continue; }
+      }
+
+      // Movement (X/Z plane)
+      c.x += c.dx;
+      c.z += c.dz;
+
+      // ── Arena Wall Bounce ──
+      let bounced = false;
+      if (c.x <= -HALF_X) { c.x = -HALF_X; bounced = true; }
+      if (c.x >=  HALF_X) { c.x =  HALF_X; bounced = true; }
+      if (c.z <= -HALF_Z) { c.z = -HALF_Z; bounced = true; }
+      if (c.z >=  HALF_Z) { c.z =  HALF_Z; bounced = true; }
+
+      if (bounced) {
+        if (Math.abs(c.dx) > 0.01) {
+          c.dz = (Math.random() > 0.5 ? 1 : -1) * c.speed;
+          c.dx = 0;
+        } else {
+          c.dx = (Math.random() > 0.5 ? 1 : -1) * c.speed;
+          c.dz = 0;
+        }
+        c.turnCD = Math.ceil(CELL / c.speed) + 10;
+        // Wall-impact spark burst (3D particles fly upward)
+        for (let j = 0; j < 12; j++) {
+          const a = Math.random() * Math.PI * 2;
+          emit(c.x, c.z, Math.cos(a) * 3, Math.sin(a) * 3, c.hex);
+        }
+      }
+
+      // ── Grid Intersection Turns (Tron light-cycle behavior) ──
+      c.turnCD--;
+      const sp = Math.max(Math.abs(c.dx), Math.abs(c.dz)) + 0.5;
+      const onX = Math.abs(c.x % CELL) < sp || Math.abs(c.x % CELL - CELL) < sp;
+      const onZ = Math.abs(c.z % CELL) < sp || Math.abs(c.z % CELL - CELL) < sp;
+      if (onX && onZ && c.turnCD <= 0 && Math.random() < (c.ambient ? 0.06 : 0.15)) {
+        c.x = snap(c.x); c.z = snap(c.z);
+        if (Math.abs(c.dx) > 0.01) {
+          c.dz = (Math.random() > 0.5 ? 1 : -1) * c.speed;
+          c.dx = 0;
+        } else {
+          c.dx = (Math.random() > 0.5 ? 1 : -1) * c.speed;
+          c.dz = 0;
+        }
+        c.turnCD = Math.ceil(CELL / c.speed) + 5;
+      }
+
+      // Update mesh position + face direction of travel
+      c.mesh.position.set(c.x, 0, c.z);
+      if (Math.abs(c.dx) > 0.01 || Math.abs(c.dz) > 0.01) {
+        c.mesh.rotation.y = Math.atan2(-c.dz, c.dx);
+      }
+
+      // Spin identity disc
+      const disc = c.mesh.getObjectByName('disc');
+      if (disc) disc.rotation.z += 0.03;
+
+      // ── Trail Wall Update ──
+      c.pts.push([c.x, c.z]);
+      if (c.pts.length > MAX_TRAIL) c.pts.shift();
+
+      const t = c.trail;
+      const n = c.pts.length;
+      for (let j = 0; j < n; j++) {
+        const px = c.pts[j][0], pz = c.pts[j][1];
+        // Wall: bottom vertex (y=0) + top vertex (y=WALL_H)
+        const bi = (j * 2) * 3, ti = (j * 2 + 1) * 3;
+        t.wallPos[bi] = px;   t.wallPos[bi+1] = 0;       t.wallPos[bi+2] = pz;
+        t.wallPos[ti] = px;   t.wallPos[ti+1] = WALL_H;  t.wallPos[ti+2] = pz;
+        // Top edge line
+        t.topPos[j*3] = px;   t.topPos[j*3+1] = WALL_H;  t.topPos[j*3+2] = pz;
+        // Base glow line
+        t.basePos[j*3] = px;  t.basePos[j*3+1] = 0.2;    t.basePos[j*3+2] = pz;
+      }
+      t.wallGeo.setDrawRange(0, Math.max(0, (n - 1) * 6));
+      t.wallGeo.attributes.position.needsUpdate = true;
+      t.topGeo.setDrawRange(0, n);
+      t.topGeo.attributes.position.needsUpdate = true;
+      t.baseGeo.setDrawRange(0, n);
+      t.baseGeo.attributes.position.needsUpdate = true;
+
+      // Fade with life
+      t.wallMesh.material.opacity = (c.ambient ? 0.25 : 0.55) * c.life;
+      t.topLine.material.opacity = (c.ambient ? 0.4 : 0.9) * c.life;
+      t.baseLine.material.opacity = (c.ambient ? 0.2 : 0.4) * c.life;
+    }
+
+    updateParticles();
+
+    // Camera is static — no drift, clean grid lines
+    camera.lookAt(0, 0, -50);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  RENDER LOOP
+  // ══════════════════════════════════════════════════════════════════════
+  function animate() {
+    update(performance.now());
+    composer.render();
+    requestAnimationFrame(animate);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  RESIZE + AMBIENT + START
+  // ══════════════════════════════════════════════════════════════════════
+  function onResize() {
+    W = window.innerWidth; H = window.innerHeight;
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    renderer.setSize(W, H);
+    composer.setSize(W, H);
+    bloom.resolution.set(W, H);
+  }
+  window.addEventListener('resize', onResize);
+
+  function ambientLoop() {
+    if (cycles.filter(c => c.ambient).length < AMBIENT_MAX) {
+      spawnCycle('', '', true);
+    }
+    setTimeout(ambientLoop, 6000 + Math.random() * 8000);
+  }
+  setTimeout(ambientLoop, 1000);
+  spawnCycle('', '', true);
+
+  requestAnimationFrame(animate);
+
+  // ── Expose Public API (replaces the stub from the non-module script) ──
+  window.Grid = {
+    spawnOrb(stepName, contestant) { spawnCycle(stepName, contestant, false); },
+    derezzAll
+  };
+
+  console.log('%c\u26A1 [GRID] Three.js 3D Tron Arena — perspective cam, trail walls, bloom armed', 'color:#00f3ff;font-weight:bold');
+})();
 </script>
 </body>
 </html>

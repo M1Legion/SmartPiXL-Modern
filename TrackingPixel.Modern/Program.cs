@@ -165,7 +165,20 @@ app.Use(static (context, next) =>
 });
 
 // 4. Static Files — Serves wwwroot/ assets (index.html, tron.html, images, CSS).
-app.UseStaticFiles();
+//    HTML files: no-cache so browser always fetches latest after deploys.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.File.Name;
+        if (path.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Context.Response.Headers.Pragma = "no-cache";
+            ctx.Context.Response.Headers.Expires = "0";
+        }
+    }
+});
 
 // ===========================================================================
 // ENDPOINT MAPPING — See Endpoints/ folder for route definitions.

@@ -123,15 +123,18 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
 2. **IndividualKey for email/IP matches, AddressKey for geo** — AutoConsumer uses `IndividualKey` (varchar(35), 343M distinct, ~1.22 AC rows per key) to identify a person and `AddressKey` (varchar(35), 118M distinct, ~3.56 AC rows per key) to identify a household. We match against these — NOT `RecordID`. AC is denormalized with duplicates across email and VIN vectors; IndividualKey groups those duplicates.
 3. **Normalized schema with 4 new tables** — `PiXL.Device` (global device dim), `PiXL.IP` (global IP dim), `PiXL.Visit` (1:1 fact table), `PiXL.Match` (identity resolution with FKs to device/IP/visit). Maximum normalization — same device or IP across companies shares one row.
 4. **Device hash computed in SQL** — SHA-256 of top 5 entropy fields (Canvas + Fonts + GPU + WebGL + Audio) computed in Phase 9 of `ETL.usp_ParseNewHits` via `HASHBYTES`. PiXL.Device is lean (hash + metadata only); join back to PiXL.Parsed for component fields.
-5. **PiXL.Visit as the relational fact table** — 1:1 with PiXL.Parsed (same PK = SourceId), carries FKs to PiXL.Device and PiXL.IP plus ClientParamsJson. PiXL.Parsed stays as the immutable 175-column warehouse; PiXL.Visit is the lightweight relational bridge.
+5. **PiXL.Visit as the relational fact table** — 1:1 with PiXL.Parsed (same PK value = VisitID = PiXL.Parsed.SourceId), carries FKs to PiXL.Device and PiXL.IP plus ClientParamsJson. PiXL.Parsed stays as the immutable 175-column warehouse; PiXL.Visit is the lightweight relational bridge.
 6. **Client params in JS** — extracted from `location.search` on the host page, prefixed with `_cp_` to avoid collisions with our 158 built-in fingerprint param names.
 7. **Config-driven param lists** — stored in the PiXL table per-pixel, cached in memory by a new C# service. Zero DB hits on the hot path.
 8. **Lean new tables** — Company and PiXL tables are purpose-built for the new platform, not copies of the 38-col / 46-col old schemas.
 9. **Email-first matching for this client** — fingerprint-based and geo-based matching are future phases. Email is deterministic and the client provides it.
 10. **No staging tables** — the old platform's 4-table staging rotation was a workaround for blocking IIS writes. Our async `Channel<T>` → `SqlBulkCopy` pipeline doesn't need it. `PiXL.Test` IS our raw table.
-11. **No CRM_Match_Dates equivalent** — `PiXL.Visit` is the per-hit fact table. `PiXL.Match` links to visits via `FirstSourceId`/`LatestSourceId`, and all historical hits live in `PiXL.Parsed` (clustered on `ReceivedAt`).
+11. **No CRM_Match_Dates equivalent** — `PiXL.Visit` is the per-hit fact table. `PiXL.Match` links to visits via `FirstVisitID`/`LatestVisitID`, and all historical hits live in `PiXL.Parsed` (clustered on `ReceivedAt`).
 12. **SQLCLR for performance** — `SAFE` permissions where possible, `UNSAFE` only if we go full pointer-math. Assembly signed with a strong name key.
 13. **Test data stays** — the 963 existing rows remain untouched.
+14. **SQL Server 2025 native `json` type** — `ClientParamsJson` on `PiXL.Visit` uses the native `json` data type (not NVARCHAR). Provides pre-parsed binary storage, built-in validation, ~30% smaller footprint, and enables `CREATE JSON INDEX` for indexed JSON path queries. ETL Phase 12 uses `JSON_OBJECTAGG` to build JSON from extracted `_cp_*` params.
+15. **MatchEmail as regular column (not computed)** — SQL Server prohibits filtered indexes on computed columns (`Msg 10609`). Making `MatchEmail` a regular `NVARCHAR(200)` column (populated by ETL Phase 12) enables the filtered index the match proc depends on.
+16. **PiXL.Visit PK must be CLUSTERED** — `CREATE JSON INDEX` requires a clustered primary key on the table (`Msg 13672`). VisitID is monotonically increasing (same identity chain as PiXL.Test.Id), so a clustered PK on VisitID provides inherent time-ordering. A separate nonclustered index on `(ReceivedAt, VisitID)` covers explicit time-range queries.
 
 ---
 
@@ -241,10 +244,10 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
        │          │  FirstSeen + LastSeen + HitCount
        │          │
        └─────► PiXL.Visit (fact table — 1:1 with PiXL.Parsed)
-                  │  SourceId (PK, same as PiXL.Parsed)
+                  │  VisitID (PK, same value as PiXL.Parsed.SourceId)
                   │  DeviceId FK → PiXL.Device
                   │  IpId FK → PiXL.IP
-                  │  ClientParamsJson + MatchEmail (persisted computed)
+                  │  ClientParamsJson + MatchEmail
                   │
                   │  ETL.usp_MatchVisits (watermark-based, 10K batch)
                   │
@@ -253,7 +256,7 @@ Decision: **Keep test data as-is.** It coexists harmlessly with production data.
                              │  AddressKey → AutoConsumer (geo matches)
                              │  DeviceId FK → PiXL.Device
                              │  IpId FK → PiXL.IP
-                             │  FirstSourceId/LatestSourceId FK → PiXL.Visit
+                             │  FirstVisitID/LatestVisitID FK → PiXL.Visit
                              │
                              │  Cross-DB lookup
                              └─────► AutoUpdate.dbo.AutoConsumer (421M rows)
@@ -463,7 +466,7 @@ Indexes:
   CIX_PiXL_Device        UNIQUE CLUSTERED on (DeviceHash)    — the natural key + MERGE target
 ```
 
-**Lean by design.** Only 5 columns. The component fingerprint fields that form the hash (CanvasFingerprint, DetectedFonts, GPURenderer, WebGLFingerprint, AudioFingerprintHash) live in `PiXL.Parsed`. To see what a device looks like, join `PiXL.Visit.DeviceId → PiXL.Device → PiXL.Visit.SourceId → PiXL.Parsed`.
+**Lean by design.** Only 5 columns. The component fingerprint fields that form the hash (CanvasFingerprint, DetectedFonts, GPURenderer, WebGLFingerprint, AudioFingerprintHash) live in `PiXL.Parsed`. To see what a device looks like, join `PiXL.Visit.DeviceId → PiXL.Device → PiXL.Visit.VisitID → PiXL.Parsed`.
 
 **Why these 5 signals for the hash:**
 From real-world entropy analysis (n=252 pixel records):
@@ -515,36 +518,57 @@ The **relational bridge** between the immutable 175-column warehouse (`PiXL.Pars
 
 ```
 Columns:
-  SourceId          BIGINT          NOT NULL  PRIMARY KEY    (same as PiXL.Parsed.SourceId / PiXL.Test.Id)
+  VisitID           BIGINT          NOT NULL  PRIMARY KEY    (same value as PiXL.Parsed.SourceId / PiXL.Test.Id)
   CompanyID         INT             NOT NULL                  (denormalized for partitioning/querying)
   PiXLID            INT             NOT NULL                  (denormalized)
   DeviceId          BIGINT          NULL                      (FK → PiXL.Device — NULL if device hash couldn't be computed)
   IpId              BIGINT          NULL                      (FK → PiXL.IP — NULL if no IP)
   ReceivedAt        DATETIME2(3)    NOT NULL                  (denormalized for time queries)
-  ClientParamsJson  NVARCHAR(4000)  NULL                      (extracted _cp_* params as JSON — 11 typical params ≈ 500 chars, 50 max ≈ 2000)
-  MatchEmail        AS CAST(JSON_VALUE(ClientParamsJson, '$.email') AS NVARCHAR(200)) PERSISTED
+  ClientParamsJson  JSON            NULL                      (** SQL Server 2025 native json type ** — pre-parsed binary storage, built-in validation, ~30% smaller than NVARCHAR equivalent)
+  MatchEmail        NVARCHAR(200)   NULL                      (populated by ETL Phase 12 via JSON_VALUE(ClientParamsJson, '$.email') — regular column, NOT computed)
   CreatedAt         DATETIME2(3)    NOT NULL  DEFAULT SYSUTCDATETIME()
 
 Indexes:
-  PK_PiXL_Visit           on (SourceId)                       — PK, same grain as PiXL.Parsed
-  CIX_PiXL_Visit          CLUSTERED on (ReceivedAt, SourceId)  — time-series physical sort (matches PiXL.Parsed)
-  IX_PiXL_Visit_Company   NONCLUSTERED on (CompanyID, PiXLID, ReceivedAt)
-  IX_PiXL_Visit_Device    NONCLUSTERED on (DeviceId) WHERE DeviceId IS NOT NULL
-  IX_PiXL_Visit_IP        NONCLUSTERED on (IpId) WHERE IpId IS NOT NULL
-  IX_PiXL_Visit_MatchEmail NONCLUSTERED on (MatchEmail) 
-                           INCLUDE (SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt)
-                           WHERE MatchEmail IS NOT NULL
+  PK_PiXL_Visit              CLUSTERED PK on (VisitID)          — required for CREATE JSON INDEX (must be clustered PK)
+  IX_PiXL_Visit_ReceivedAt   NONCLUSTERED on (ReceivedAt, VisitID) — time-based queries
+  IX_PiXL_Visit_Company      NONCLUSTERED on (CompanyID, PiXLID, ReceivedAt)
+  IX_PiXL_Visit_Device       NONCLUSTERED on (DeviceId) WHERE DeviceId IS NOT NULL
+  IX_PiXL_Visit_IP           NONCLUSTERED on (IpId) WHERE IpId IS NOT NULL
+  IX_PiXL_Visit_MatchEmail   NONCLUSTERED on (MatchEmail) 
+                              INCLUDE (VisitID, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt)
+                              WHERE MatchEmail IS NOT NULL
+  IX_PiXL_Visit_ClientParams CREATE JSON INDEX on (ClientParamsJson)
+                              FOR ('$.email', '$.hid')          — native JSON index, enables indexed seeks on any targeted JSON path
 
-Foreign Keys:
+Foreign Keys (deferred — will be added when Device/IP have proper PK constraints):
   FK_Visit_Device → PiXL.Device(DeviceId)
   FK_Visit_IP → PiXL.IP(IpId)
 ```
 
-**Why SourceId as PK (not IDENTITY):** There's no reason to create a new surrogate key. `PiXL.Visit` is 1:1 with `PiXL.Parsed`, so we reuse the same `SourceId`. This means `PiXL.Visit.SourceId` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — a single chain of identity. Joining is trivial and there's no ambiguity.
+**Why VisitID as PK (not IDENTITY):** There's no reason to create a new surrogate key. `PiXL.Visit` is 1:1 with `PiXL.Parsed`, so we reuse the same value. This means `PiXL.Visit.VisitID` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — a single chain of identity. Joining is trivial and there's no ambiguity.
 
 **Why denormalize CompanyID, PiXLID, ReceivedAt:** These are the most common query filters. Requiring a join to PiXL.Parsed just to filter by company or date would be wasteful. The denormalization is tiny (12 bytes per row) and eliminates constant joins.
 
-**MatchEmail as persisted computed column:** Automatically extracts the `email` value from `ClientParamsJson` and materializes it. SQL Server maintains this on INSERT/UPDATE. The filtered index on `MatchEmail` enables the match proc's watermark scan to be an efficient seek — only rows with emails are indexed.
+**MatchEmail as a regular column (not computed):** Populated by the ETL in Phase 12 via `JSON_VALUE(ClientParamsJson, '$.email')` during the same UPDATE that builds `ClientParamsJson`. This is a deliberate design change:
+- **SQL Server prohibits filtered indexes on computed columns** — the original `PERSISTED` computed column + `WHERE MatchEmail IS NOT NULL` filtered index would fail at DDL time with `Msg 10609`. Making `MatchEmail` a regular column fixes this.
+- The filtered index `IX_PiXL_Visit_MatchEmail` enables the match proc's watermark scan to be an efficient seek — only rows with emails are indexed.
+- The minor tradeoff (one extra line in the ETL Phase 12 UPDATE) is negligible compared to the broken DDL it replaces.
+
+**ClientParamsJson uses the SQL Server 2025 native `json` data type** (not `NVARCHAR`). Benefits verified on our instance (17.0.1050.2 Enterprise Developer RTM):
+- **Pre-parsed binary storage** — `JSON_VALUE()` reads don't re-parse the string on every call
+- **Built-in validation** — malformed JSON is rejected at INSERT, no `CHECK (ISJSON(...))` needed
+- **~30% smaller storage** — binary format is more compact than text for typical payloads
+- **In-place modification** — the `.modify()` method can update individual JSON fields without rewriting the whole document (future use)
+- **Enables `CREATE JSON INDEX`** — native JSON indexing for indexed seeks on any JSON path (see below)
+- **Backward compatible** — all existing JSON functions (`JSON_VALUE`, `JSON_QUERY`, `OPENJSON`) work identically
+
+**`CREATE JSON INDEX` on ClientParamsJson:** SQL Server 2025 introduces native JSON indexes. Instead of adding computed columns for each client param we want to search, a single JSON index covers multiple paths:
+```sql
+CREATE JSON INDEX IX_PiXL_Visit_ClientParams
+    ON PiXL.Visit (ClientParamsJson)
+    FOR ('$.email', '$.hid');
+```
+This enables indexed seeks for queries like `WHERE JSON_VALUE(ClientParamsJson, '$.email') = '...'` and `WHERE JSON_PATH_EXISTS(ClientParamsJson, '$.email') = 1`. The `FOR` clause can be extended with additional paths as needed — no schema changes, no computed columns.
 
 **ClientParamsJson** stores ALL client-specific params as a JSON object. Example:
 ```json
@@ -560,7 +584,7 @@ Foreign Keys:
 }
 ```
 
-**Why JSON:** Each client sends different parameters. Hard-coding columns per client would require schema changes for every new client and leave NULLs everywhere. JSON is flexible, self-describing, and `JSON_VALUE()` is optimized in SQL Server 2019.
+**Why JSON:** Each client sends different parameters. Hard-coding columns per client would require schema changes for every new client and leave NULLs everywhere. JSON is flexible, self-describing, and SQL Server 2025's native `json` type stores it in pre-parsed binary format with built-in validation. Combined with `CREATE JSON INDEX`, any JSON path can be indexed without adding computed columns.
 
 #### Step 1B.4: Create `PiXL.Match` — Identity Resolution
 
@@ -577,8 +601,8 @@ Columns:
   AddressKey          VARCHAR(35)   NULL               (→ AutoConsumer.AddressKey — for geo matches)
   DeviceId            BIGINT        NULL               (FK → PiXL.Device — device at time of first match)
   IpId                BIGINT        NULL               (FK → PiXL.IP — IP at time of first match)
-  FirstSourceId       BIGINT        NOT NULL           (FK → PiXL.Visit.SourceId — first hit)
-  LatestSourceId      BIGINT        NOT NULL           (FK → PiXL.Visit.SourceId — most recent hit)
+  FirstVisitID       BIGINT        NOT NULL           (FK → PiXL.Visit(VisitID) — first hit)
+  LatestVisitID      BIGINT        NOT NULL           (FK → PiXL.Visit(VisitID) — most recent hit)
   FirstSeen           DATETIME2(3)  NOT NULL
   LastSeen            DATETIME2(3)  NOT NULL
   HitCount            INT           NOT NULL  DEFAULT 1
@@ -596,8 +620,8 @@ Indexes:
 Foreign Keys:
   FK_Match_Device → PiXL.Device(DeviceId)
   FK_Match_IP → PiXL.IP(IpId)
-  FK_Match_FirstVisit → PiXL.Visit(SourceId)     — via FirstSourceId
-  FK_Match_LatestVisit → PiXL.Visit(SourceId)    — via LatestSourceId
+  FK_Match_FirstVisit → PiXL.Visit(VisitID)     — via FirstVisitID
+  FK_Match_LatestVisit → PiXL.Visit(VisitID)    — via LatestVisitID
 ```
 
 **Key design change from v1: IndividualKey/AddressKey instead of ReferenceRecordID.**
@@ -714,13 +738,17 @@ We build the CLR assembly before modifying the ETL proc so we can swap the UDF r
 
 This migration is now a **no-op for PiXL.Parsed** but still creates supporting infrastructure:
 
-#### Step 3.1: Verify PiXL.Visit Indexes
+#### Step 3.1: Verify PiXL.Visit Schema and Indexes
 
-Confirm the `IX_PiXL_Visit_MatchEmail` filtered index (created in Phase 1B) is in place. This index enables the match proc to efficiently find visits with email addresses.
+Confirm the following from Phase 1B are in place:
+- `ClientParamsJson JSON NULL` column — native json type, not NVARCHAR
+- `MatchEmail NVARCHAR(200) NULL` column — regular column, populated by ETL Phase 12
+- `IX_PiXL_Visit_MatchEmail` filtered index — `WHERE MatchEmail IS NOT NULL` (works because MatchEmail is a regular column; would fail if computed)
+- `IX_PiXL_Visit_ClientParams` JSON index — `CREATE JSON INDEX ... FOR ('$.email', '$.hid')`
 
 #### Step 3.2: ~~Add `ClientParamsJson` to PiXL.Parsed~~ (MOVED to PiXL.Visit)
 
-**This step is no longer needed.** `ClientParamsJson` and `MatchEmail` (persisted computed column) are defined directly on `PiXL.Visit` in Phase 1B, Step 1B.3.
+**This step is no longer needed.** `ClientParamsJson` (native `json` type) and `MatchEmail` (regular `NVARCHAR(200)` column) are defined directly on `PiXL.Visit` in Phase 1B, Step 1B.3.
 
 **Rationale for the move:** `PiXL.Parsed` is the wide immutable warehouse. Adding client-specific JSON to it would break the pattern (it only has columns parsed from the fingerprint query string). Client params are relational metadata — they belong on the fact table that bridges to the dimension tables.
 
@@ -817,12 +845,18 @@ Extract `_cp_*` prefixed parameters from the QueryString and build a JSON object
 ```
 Logic:
 1. For each row in the current batch:
-   a. Scan the QueryString (from PiXL.Test, joined by SourceId) for params starting with '_cp_'
+   a. Scan the QueryString (from PiXL.Test, joined by VisitID) for params starting with '_cp_'
    b. Extract each _cp_* param using dbo.clr_GetQueryParam
    c. Strip the '_cp_' prefix from the key name
    d. URL-decode all values
-   e. Build a JSON object: {"email":"decoded_value", "hid":"decoded_value", ...}
-   f. Store in #BatchRows.ClientParamsJson
+   e. Build a JSON object using JSON_OBJECTAGG (SQL Server 2025):
+      -- Extract _cp_* params into key-value rows, then aggregate:
+      SELECT JSON_OBJECTAGG(param_name: param_value) 
+      FROM extracted_params
+      -- Results in native json type: {"email":"decoded_value","hid":"decoded_value",...}
+   f. Store in #BatchRows.ClientParamsJson (json type — no CAST needed, JSON_OBJECTAGG returns json)
+   g. Populate #BatchRows.MatchEmail = JSON_VALUE(#BatchRows.ClientParamsJson, '$.email')
+      (MatchEmail is a regular column, not computed — must be populated explicitly)
 
 2. Only process rows from companies with configured ClientParams in PiXL.Pixel
    (JOIN to PiXL to check — this is a batch operation, not per-row)
@@ -830,21 +864,23 @@ Logic:
 
 **Implementation approach: Option A (dynamic `_cp_` scan) recommended.** The `_cp_` prefix convention means we can find ALL client params without knowing what they are. Self-documenting — whatever the JS sends with `_cp_`, the ETL captures.
 
+**Why `JSON_OBJECTAGG` instead of string concatenation:** SQL Server 2025 provides `JSON_OBJECTAGG(key: value)` which aggregates rows into a JSON object with proper escaping, proper typing, and no manual string building. The result is already the native `json` type — no CAST from NVARCHAR needed. Verified working on our instance.
+
 #### Step 4.5: Add Phase 13 — INSERT PiXL.Visit
 
 Insert the fact table rows, connecting everything together.
 
 ```
 Logic:
-INSERT INTO PiXL.Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson)
+INSERT INTO PiXL.Visit (VisitID, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson, MatchEmail)
 SELECT 
-  SourceId, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson
+  VisitID, CompanyID, PiXLID, DeviceId, IpId, ReceivedAt, ClientParamsJson, MatchEmail
 FROM #BatchRows;
 ```
 
-**This is a simple INSERT, not a MERGE.** PiXL.Visit is 1:1 with PiXL.Parsed — each SourceId appears exactly once. The ETL's watermark guarantees rows are processed once. No upsert needed.
+**This is a simple INSERT, not a MERGE.** PiXL.Visit is 1:1 with PiXL.Parsed — each VisitID appears exactly once. The ETL's watermark guarantees rows are processed once. No upsert needed.
 
-**The MatchEmail persisted computed column** auto-populates from `ClientParamsJson` on insert. No additional step required.
+**MatchEmail is populated in Phase 12** (Step 4.4, logic item 1g) alongside `ClientParamsJson`. The INSERT here simply carries the already-extracted value from `#BatchRows`.
 
 #### Step 4.6: Swap `GetQueryParam` References to CLR Version
 
@@ -915,18 +951,18 @@ This is the heart of the new functionality — the procedure that resolves visit
 ```
 1. READ WATERMARK
    Read ETL.MatchWatermark.LastProcessedId for 'MatchVisits'
-   Determine @MaxId = MIN(MAX(SourceId) in PiXL.Visit, @LastId + @BatchSize)
+   Determine @MaxId = MIN(MAX(VisitID) in PiXL.Visit, @LastId + @BatchSize)
    Short-circuit if nothing to process
 
 2. BUILD CANDIDATE SET
    SELECT INTO #Candidates:
-     v.SourceId, v.CompanyID, v.PiXLID, v.DeviceId, v.IpId, v.ReceivedAt,
-     v.MatchEmail (from persisted computed column),
+     v.VisitID, v.CompanyID, v.PiXLID, v.DeviceId, v.IpId, v.ReceivedAt,
+     v.MatchEmail (from regular column populated by Phase 12),
      NormalizedEmail = dbo.clr_NormalizeEmail(v.MatchEmail),
      ip.IPAddress (from PiXL.IP join)
    FROM PiXL.Visit v
    LEFT JOIN PiXL.IP ip ON v.IpId = ip.IpId
-   WHERE v.SourceId > @LastId AND v.SourceId <= @MaxId
+   WHERE v.VisitID > @LastId AND v.VisitID <= @MaxId
      AND v.MatchEmail IS NOT NULL
      AND LEN(v.MatchEmail) > 5          -- basic sanity (a@b.c minimum)
      AND v.MatchEmail LIKE '%_@_%.__%'  -- must look like an email
@@ -963,7 +999,7 @@ This is the heart of the new functionality — the procedure that resolves visit
             NormalizedEmail AS MatchKey,
             IndividualKey, AddressKey,
             DeviceId, IpId,
-            SourceId, ReceivedAt
+            VisitID, ReceivedAt
      FROM #Candidates
      WHERE NormalizedEmail IS NOT NULL
    ) AS source
@@ -973,7 +1009,7 @@ This is the heart of the new functionality — the procedure that resolves visit
       AND target.MatchKey = source.MatchKey
    
    WHEN MATCHED THEN UPDATE SET
-     LatestSourceId = source.SourceId,
+     LatestVisitID = source.VisitID,
      LastSeen = source.ReceivedAt,
      HitCount = target.HitCount + 1,
      -- Only update IndividualKey if we now have a match and didn't before
@@ -988,13 +1024,13 @@ This is the heart of the new functionality — the procedure that resolves visit
    WHEN NOT MATCHED THEN INSERT (
      CompanyID, PiXLID, MatchType, MatchKey, IndividualKey, AddressKey,
      DeviceId, IpId,
-     FirstSourceId, LatestSourceId, FirstSeen, LastSeen,
+     FirstVisitID, LatestVisitID, FirstSeen, LastSeen,
      HitCount, MatchedAt
    ) VALUES (
      source.CompanyID, source.PiXLID, source.MatchType, source.MatchKey,
      source.IndividualKey, source.AddressKey,
      source.DeviceId, source.IpId,
-     source.SourceId, source.SourceId,
+     source.VisitID, source.VisitID,
      source.ReceivedAt, source.ReceivedAt,
      1, CASE WHEN source.IndividualKey IS NOT NULL THEN SYSUTCDATETIME() END
    );
@@ -1425,25 +1461,37 @@ The deployment order for all SQL scripts:
 - Is self-documenting in the raw data
 - Can be efficiently scanned in SQL (`WHERE QueryString LIKE '%_cp_%'`)
 
-### Decision 2: JSON for Client Params Storage
+### Decision 2: JSON for Client Params Storage (Native `json` Type)
 
-**Chose:** Single `ClientParamsJson NVARCHAR(4000)` column with JSON  
-**Over:** Individual typed columns per param, or EAV (entity-attribute-value) table
+**Chose:** Single `ClientParamsJson JSON` column using SQL Server 2025's native json data type  
+**Over:** `NVARCHAR(4000)` with JSON text, individual typed columns per param, or EAV (entity-attribute-value) table
 
-**Why:**
+**Why native `json` over `NVARCHAR(4000)`:**
+- **Pre-parsed binary storage** — `JSON_VALUE()` reads skip the parse step, since the document is already in binary format
+- **Built-in validation** — malformed JSON is rejected at INSERT time; no `CHECK (ISJSON(...))` needed
+- **~30% smaller storage** — binary representation compresses better than text
+- **Enables `CREATE JSON INDEX`** — native JSON indexes require the `json` type; can't be created on NVARCHAR columns
+- **In-place `.modify()` method** — can update individual JSON fields without rewriting the whole document (future use)
+- **Backward compatible** — all JSON functions (`JSON_VALUE`, `JSON_QUERY`, `OPENJSON`, `JSON_OBJECT`, `JSON_OBJECTAGG`) work identically
+- Verified working on our instance (SQL Server 2025 RTM, 17.0.1050.2, Enterprise Developer)
+
+**Why JSON over alternatives:**
 - **vs. individual columns:** Each client sends different params. Adding columns per client pollutes the schema and leaves NULL gaps. JSON is self-describing and query-able via `JSON_VALUE()`.
 - **vs. EAV table:** An EAV child table would multiply row counts (11 params per hit = 11× more rows) and require pivot operations for queries. JSON keeps the data with the row.
-- **The hot-path email value** is extracted via a persisted computed column (`MatchEmail`) with a filtered index, so we get the best of both worlds: flexible storage + fast indexed lookups.
+- **The hot-path email value** is extracted into a regular `MatchEmail NVARCHAR(200)` column by the ETL, with a filtered index. The JSON INDEX covers ad-hoc queries on other params. Best of both worlds: dedicated indexed column for the critical path + flexible native JSON indexing for everything else.
 
-### Decision 3: Persisted Computed Column for MatchEmail
+### Decision 3: Regular Column for MatchEmail (Not Computed)
 
-**Chose:** `MatchEmail AS CAST(JSON_VALUE(ClientParamsJson, '$.email') AS NVARCHAR(200)) PERSISTED` on `PiXL.Visit`  
-**Over:** Manual population in the ETL proc, or non-persisted computed column, or column on PiXL.Parsed
+**Chose:** `MatchEmail NVARCHAR(200) NULL` as a regular column on `PiXL.Visit`, populated by ETL Phase 12  
+**Over:** Persisted computed column (`AS CAST(JSON_VALUE(...)) PERSISTED`), non-persisted computed column, or column on PiXL.Parsed
 
-**Why:**
-- **vs. manual:** A computed column self-maintains. No ETL logic to update it. If we update `ClientParamsJson` (e.g., to fix a value), `MatchEmail` auto-updates.
-- **vs. non-persisted:** Non-persisted means `JSON_VALUE()` runs on every read. Persisted means the value is physically stored and can be indexed. Critical for the match proc's watermark scan.
-- **vs. on PiXL.Parsed:** `PiXL.Parsed` is the immutable 175-column warehouse for fingerprint data. Client params are relational metadata that belong on the fact table (`PiXL.Visit`), where they sit alongside `DeviceId`, `IpId`, and other relational FKs.
+**Why regular column over persisted computed column:**
+- **SQL Server prohibits filtered indexes on computed columns** — `CREATE INDEX ... WHERE MatchEmail IS NOT NULL` fails with `Msg 10609` when `MatchEmail` is a computed column (tested on both `json` and `NVARCHAR` source types). This is a SQL Server limitation that exists regardless of the json type — it blocks the filtered index the match proc depends on.
+- **The filtered index is critical** — the match proc's watermark scan needs `IX_PiXL_Visit_MatchEmail ... WHERE MatchEmail IS NOT NULL` to efficiently seek only rows with email addresses. Without it, the proc would scan the entire table.
+- **Minor tradeoff:** One extra line in ETL Phase 12 (`MatchEmail = JSON_VALUE(ClientParamsJson, '$.email')`) vs. a self-maintaining computed column. The ETL already builds `ClientParamsJson` in the same step — extracting email is trivial.
+- **The `CREATE JSON INDEX` on `ClientParamsJson` provides additional coverage** — ad-hoc queries on `$.email` (and any other path) can use the JSON index even without the dedicated `MatchEmail` column.
+
+**Why not on PiXL.Parsed:** `PiXL.Parsed` is the immutable 175-column warehouse for fingerprint data. Client params are relational metadata that belong on the fact table (`PiXL.Visit`), where they sit alongside `DeviceId`, `IpId`, and other relational FKs.
 
 ### Decision 4: Separate Match Watermark Table
 
@@ -1539,15 +1587,15 @@ Our architecture is fundamentally different:
 - **Smaller tables:** De-duplication means fewer rows. A bot that hits 10 different pixels is one device row with HitCount=10, not 10 rows.
 - **The company relationship** is captured in `PiXL.Visit` (which has CompanyID) and `PiXL.Match` (which has CompanyID). To find "all devices seen by Company X," join `PiXL.Visit` on CompanyID and DeviceId.
 
-### Decision 14: PiXL.Visit as PK=SourceId (Not New IDENTITY)
+### Decision 14: PiXL.Visit PK = VisitID (Not New IDENTITY)
 
-**Chose:** `PiXL.Visit.SourceId` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — reuse the existing chain  
+**Chose:** `PiXL.Visit.VisitID` = `PiXL.Parsed.SourceId` = `PiXL.Test.Id` — reuse the existing chain  
 **Over:** New BIGINT IDENTITY column on PiXL.Visit
 
-**Why:** There's no reason to create a new surrogate key for a 1:1 relationship. Using the same `SourceId` means:
-- Joining PiXL.Visit to PiXL.Parsed is trivial (same PK)
+**Why:** There's no reason to create a new surrogate key for a 1:1 relationship. Using the same value as `VisitID` means:
+- Joining PiXL.Visit to PiXL.Parsed is trivial (same PK value)
 - No ambiguity about which visit corresponds to which parsed row
-- FKs from PiXL.Match (`FirstSourceId`, `LatestSourceId`) point to both tables interchangeably
+- FKs from PiXL.Match (`FirstVisitID`, `LatestVisitID`) point to both tables interchangeably
 - One less IDENTITY to manage
 
 ---
@@ -1618,7 +1666,7 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 | AutoConsumer email index build takes too long or fills tempdb | Medium | High — blocks match functionality | Check tempdb free space before build. Use `ONLINE = ON` + `SORT_IN_TEMPDB = ON`. Monitor during build. |
 | CLR assembly fails to deploy (permission/compatibility) | Low | Medium — falls back to T-SQL UDF | Keep T-SQL `GetQueryParam` as fallback. Can deploy CLR later as a perf optimization. |
 | `URLSearchParams` not available in ancient browsers | Low | Low — silent failure, fingerprints still collected | The `try/catch` around the client param extraction ensures graceful degradation. Only client params are lost. |
-| MERGE statement deadlocks under high concurrency | Low | Medium — match cycle retries next interval | The match proc processes by SourceId range; concurrent runs won't touch the same MatchKey unless the same email appears in different batches. |
+| MERGE statement deadlocks under high concurrency | Low | Medium — match cycle retries next interval | The match proc processes by VisitID range; concurrent runs won't touch the same MatchKey unless the same email appears in different batches. |
 | AutoConsumer has dirty email data (duplicates, bad formats) | High | Medium — match quality degrades | `clr_NormalizeEmail` handles case, whitespace, Gmail aliases. `TOP 1 ORDER BY RecordID DESC` handles duplicates by picking most recent. IndividualKey groups duplicate AC records for the same person. |
 | PiXL config cache serves stale data | Low | Low — client params won't be extracted until next refresh | 5-minute refresh interval is acceptable. For urgent changes, restart the service. |
 | QueryString exceeds NVARCHAR(MAX) with many client params | Very Low | Low — SQL truncation | Each `_cp_*` param adds ~20-50 chars. Even 100 params would add ~5KB. QueryString is NVARCHAR(MAX). Not a concern. |
@@ -1672,9 +1720,10 @@ Instead of the 60-second batch interval, the match could be triggered inline dur
 | `PiXL.Visit` | Table (fact, 1:1 with PiXL.Parsed) | SmartPixl |
 | `PiXL.Match` | Table (identity resolution) | SmartPixl |
 | `ETL.MatchWatermark` | Table | SmartPixl |
-| `PiXL.Visit.ClientParamsJson` | Column | SmartPixl |
-| `PiXL.Visit.MatchEmail` | Computed Column | SmartPixl |
-| `IX_PiXL_Visit_MatchEmail` | Index | SmartPixl |
+| `PiXL.Visit.ClientParamsJson` | Column (json type) | SmartPixl |
+| `PiXL.Visit.MatchEmail` | Column (NVARCHAR(200)) | SmartPixl |
+| `IX_PiXL_Visit_MatchEmail` | Filtered Index | SmartPixl |
+| `IX_PiXL_Visit_ClientParams` | JSON Index | SmartPixl |
 | `SmartPixl.Clr` | Assembly | SmartPixl |
 | `dbo.clr_UrlDecode` | CLR Function | SmartPixl |
 | `dbo.clr_GetQueryParam` | CLR Function | SmartPixl |
@@ -1730,19 +1779,20 @@ SqlBulkCopy inserts into `PiXL.Test`. The QueryString column contains everything
   WHEN MATCHED → UPDATE LastSeenAt, HitCount += 1
   → IpId = 312 (existing IP, seen before across clients)
   ```
-- **Phase 12 — Client Params:** Scan QueryString for `_cp_*` params → build JSON:
+- **Phase 12 — Client Params:** Scan QueryString for `_cp_*` params → build JSON using `JSON_OBJECTAGG`:
   ```json
   {"email":"bpryce6@gmail.com","hid":"2602102158531672553","guess":"Tool Time",...}
   ```
+  Also extract: `MatchEmail = JSON_VALUE(ClientParamsJson, '$.email')` → `bpryce6@gmail.com`
 - **Phase 13 — INSERT PiXL.Visit:**
   ```
-  INSERT PiXL.Visit (SourceId, CompanyID, PiXLID, DeviceId, IpId, ClientParamsJson, VisitedAt)
-  VALUES (964, 12800, 1, 47, 312, '{"email":"bpryce6@gmail.com",...}', '2026-02-13 14:30:00')
+  INSERT PiXL.Visit (VisitID, CompanyID, PiXLID, DeviceId, IpId, ClientParamsJson, MatchEmail, VisitedAt)
+  VALUES (964, 12800, 1, 47, 312, '{"email":"bpryce6@gmail.com",...}', 'bpryce6@gmail.com', '2026-02-13 14:30:00')
   ```
-  → `MatchEmail` computed column auto-populates: `bpryce6@gmail.com` (extracted from ClientParamsJson via CLR)
+  → `MatchEmail` is a regular column populated by Phase 12 (not a computed column)
 
 **Step 5 — MatchBackgroundService runs ETL.usp_MatchVisits:**
-- Reads PiXL.Visit rows where `SourceId > LastProcessedSourceId` and `MatchEmail IS NOT NULL`
+- Reads PiXL.Visit rows where `VisitID > LastProcessedVisitID` and `MatchEmail IS NOT NULL`
 - Normalizes: `clr_NormalizeEmail('bpryce6@gmail.com')` → `bpryce6@gmail.com` (already clean)
 - Looks up: `SELECT TOP 1 IndividualKey, AddressKey FROM AutoUpdate.dbo.AutoConsumer WHERE EMail = 'bpryce6@gmail.com' AND VPN_Flag IS NULL ORDER BY RecordID DESC`
   → Returns `IndividualKey = 'IND00000518234567890123456789012'`, `AddressKey = 'ADD00000098765432101234567890012'`
@@ -1757,8 +1807,8 @@ SqlBulkCopy inserts into `PiXL.Test`. The QueryString column contains everything
   MatchKey: 'bpryce6@gmail.com'
   IndividualKey: 'IND00000518234567890123456789012'
   AddressKey: 'ADD00000098765432101234567890012'
-  FirstSourceId: 964
-  LatestSourceId: 964
+  FirstVisitID: 964
+  LatestVisitID: 964
   FirstSeen: 2026-02-13 14:30:00
   LastSeen: 2026-02-13 14:30:00
   HitCount: 1
@@ -1770,15 +1820,15 @@ User visits another question. The pixel fires again with the same email.
 - **ETL.usp_ParseNewHits:**
   - Phase 10 MERGE on PiXL.Device: MATCHED → `HitCount = 2`, `LastSeenAt` updated
   - Phase 11 MERGE on PiXL.IP: MATCHED → `HitCount` incremented
-  - Phase 13 INSERT PiXL.Visit: New row `SourceId = 965`, same `DeviceId = 47`, same `IpId = 312`
+  - Phase 13 INSERT PiXL.Visit: New row `VisitID = 965`, same `DeviceId = 47`, same `IpId = 312`
 - **ETL.usp_MatchVisits MERGE:**
-  - `WHEN MATCHED THEN UPDATE SET LatestSourceId = 965, LastSeen = 2026-02-13 14:35:00, HitCount = 2`
+  - `WHEN MATCHED THEN UPDATE SET LatestVisitID = 965, LastSeen = 2026-02-13 14:35:00, HitCount = 2`
   - IndividualKey/AddressKey stay as-is — already resolved.
 
 **Resulting Star Schema after 2 visits:**
 ```
-PiXL.Device (DeviceId=47)  ←──  PiXL.Visit (SourceId=964)  ──→  PiXL.IP (IpId=312)
-                                 PiXL.Visit (SourceId=965)
+PiXL.Device (DeviceId=47)  ←──  PiXL.Visit (VisitID=964)  ──→  PiXL.IP (IpId=312)
+                                 PiXL.Visit (VisitID=965)
                                        ↓
                                  PiXL.Match (MatchId=1, IndividualKey='IND...', AddressKey='ADD...')
 ```

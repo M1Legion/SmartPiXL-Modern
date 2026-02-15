@@ -32,6 +32,23 @@ Last Updated: January 26, 2026
 
 **Goal:** Enrich tracking data with geolocation and bot detection signals before SQL insert.
 
+### Phase 3B: SQL Server 2025 Native JSON Features (Implemented)
+
+**Status:** Design complete, migration script ready (`SQL/19_DeviceIpVisitMatchTables.sql`)
+
+Leveraging SQL Server 2025's native `json` data type and `CREATE JSON INDEX` for `PiXL.Visit.ClientParamsJson`:
+
+- **Native `json` type** — pre-parsed binary storage, built-in validation, ~30% smaller than NVARCHAR
+- **`CREATE JSON INDEX`** — indexed seeks on JSON paths (`$.email`, `$.hid`) without computed columns
+- **`JSON_OBJECTAGG`** — ETL Phase 12 builds JSON from `_cp_*` params cleanly (no string concatenation)
+- **`MatchEmail` as regular column** — fixes SQL Server limitation: filtered indexes can't reference computed columns
+- **Bug fix:** Original plan's `MatchEmail AS CAST(JSON_VALUE(...)) PERSISTED` + filtered index was impossible (`Msg 10609`)
+
+**Future JSON enhancements:**
+- **`.modify()` method** — in-place JSON field updates without rewriting the document. Could annotate `ClientParamsJson` with derived data (e.g., `$.match_status`, `$.normalized_email`) directly, avoiding additional columns for ephemeral metadata.
+- **`HeadersJson` migration** — `PiXL.Test.HeadersJson` (currently `NVARCHAR(MAX)`) could be migrated to `json` type for validation and storage efficiency. Low priority since it's never queried in SQL.
+- **Additional JSON INDEX paths** — as new client params become query targets, extend the JSON index `FOR` clause without schema changes.
+
 ---
 
 ## 📋 Backlog - Detailed Next Steps
