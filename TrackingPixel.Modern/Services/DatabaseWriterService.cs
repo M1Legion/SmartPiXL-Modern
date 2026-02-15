@@ -13,7 +13,7 @@ namespace TrackingPixel.Services;
 // DATABASE WRITER SERVICE — Async bulk writer backed by Channel<T>.
 //
 // ARCHITECTURE:
-//   TrackingEndpoints  →  TryQueue()  →  Channel<TrackingData>  →  ExecuteAsync()  →  SqlBulkCopy  →  PiXL.Test
+//   TrackingEndpoints  →  TryQueue()  →  Channel<TrackingData>  →  ExecuteAsync()  →  SqlBulkCopy  →  PiXL.Raw
 //   (HTTP thread)         (CAS write)     (bounded buffer)         (single reader)     (ADO.NET)        (SQL Server)
 //
 // WHY Channel<T>?
@@ -59,7 +59,7 @@ namespace TrackingPixel.Services;
 
 /// <summary>
 /// Background service that consumes <see cref="TrackingData"/> from a bounded channel
-/// and bulk-writes batches to <c>PiXL.Test</c> via <see cref="SqlBulkCopy"/>.
+/// and bulk-writes batches to <c>PiXL.Raw</c> via <see cref="SqlBulkCopy"/>.
 /// <para>
 /// Inherits from <see cref="BackgroundService"/> which handles the hosted service lifecycle
 /// (StartAsync/StopAsync/Dispose). Only <see cref="ExecuteAsync"/> needs to be overridden.
@@ -72,7 +72,7 @@ public sealed class DatabaseWriterService : BackgroundService
     private readonly ITrackingLogger _logger;
     
     /// <summary>
-    /// SQL column names in ordinal order. Must match the column order in <c>PiXL.Test</c>.
+    /// SQL column names in ordinal order. Must match the column order in <c>PiXL.Raw</c>.
     /// <para>
     /// Used for SqlBulkCopy column mapping (ordinal → name).
     /// Stored as a static array to avoid any per-batch allocation.
@@ -223,7 +223,7 @@ public sealed class DatabaseWriterService : BackgroundService
     }
     
     /// <summary>
-    /// Writes a batch of tracking records to <c>PiXL.Test</c> via <see cref="SqlBulkCopy"/>.
+    /// Writes a batch of tracking records to <c>PiXL.Raw</c> via <see cref="SqlBulkCopy"/>.
     /// <para>
     /// Uses <see cref="TrackingDataReader"/> to wrap the <c>List&lt;TrackingData&gt;</c> directly —
     /// SqlBulkCopy reads from it via <c>Read()</c> + <c>GetValue()</c> calls with zero
@@ -243,7 +243,7 @@ public sealed class DatabaseWriterService : BackgroundService
             // SqlBulkCopy with connection string — ADO.NET manages the connection pool.
             // We don't keep a persistent connection; each batch gets a pooled connection.
             using var bulkCopy = new SqlBulkCopy(_settings.ConnectionString);
-            bulkCopy.DestinationTableName = "PiXL.Test";
+            bulkCopy.DestinationTableName = "PiXL.Raw";
             bulkCopy.BatchSize = batch.Count;
             bulkCopy.BulkCopyTimeout = _settings.BulkCopyTimeoutSeconds;
             
@@ -426,7 +426,7 @@ public sealed class DatabaseWriterService : BackgroundService
         
         // ====================================================================
         // ABSTRACT STUBS — Required by DbDataReader but never called by
-        // SqlBulkCopy. PiXL.Test has no bool/byte/decimal/float/guid/int
+        // SqlBulkCopy. PiXL.Raw has no bool/byte/decimal/float/guid/int
         // columns that would trigger these typed accessors.
         // ====================================================================
         public override bool GetBoolean(int ordinal) => throw new NotSupportedException();

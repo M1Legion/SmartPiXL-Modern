@@ -16,9 +16,9 @@ You are an application security expert for SmartPiXL, a cookieless tracking pixe
 |---------|------|-------------------|
 | **Query string input** (100+ params from any origin) | SQL injection, XSS, overflow | SqlBulkCopy (parameterized by design), input truncation, compiled regex |
 | **CORS: AllowAnyOrigin** | Intentional — pixel must accept from any site | No sensitive data in responses, admin endpoints localhost-only |
-| **PiXL.Match** (email, IndividualKey, AddressKey) | PII at rest, subject to GDPR Art. 17 right to erasure | Per-PiXL config gating (MatchEmail/MatchIP/MatchGeo flags) |
+| **PiXL.Match** (email, IndividualKey, AddressKey) | PII at rest | Per-PiXL config gating (MatchEmail/MatchIP/MatchGeo flags); opt-out/erasure handled by M1 data team via AutoConsumer deletion |
 | **PiXL.Visit.ClientParams** (JSON, arbitrary client-supplied) | Injection via `_cp_*` params, stored as `json` type | Extracted server-side, SQL Server json type validates structure |
-| **Xavier sync** (cross-server SQL to `192.168.88.35`) | Network-level PII transfer, credential exposure | Integrated Security, internal network only |
+| **Xavier sync** (cross-server SQL to `192.168.88.35`) | Network-level PII transfer, credential exposure | Integrated Security, internal network only; self-signed cert planned to replace TrustServerCertificate=True |
 | **IPAPI.IP** (342M rows of IP→location) | Geolocation data = personal data under GDPR | Used for enrichment only, no direct user access |
 | **Dashboard endpoints** | Admin data exposure | Localhost + DashboardAllowedIPs restriction, returns 404 to outsiders |
 | **JavaScript served to clients** (`/js/{co}/{px}.js`) | XSS if companyId/pixlId not validated | Path parsed via compiled regex, template substitution only |
@@ -37,29 +37,42 @@ You are an application security expert for SmartPiXL, a cookieless tracking pixe
 
 #### PII in Identity Resolution Pipeline
 
-The strongest PII exposure is in the identity resolution pipeline:
+SmartPiXL is a **web de-anonymization platform**. Collecting and resolving PII is its core function, not a side-effect. The data flow is:
 
 ```
 Client sends _cp_email=user@example.com via pixel URL
-  → Stored in PiXL.Test.QueryString (raw)
+  → Stored in PiXL.Raw.QueryString (permanent raw archive)
   → Parsed to PiXL.Parsed.MatchEmail (materialized)
   → Used in PiXL.Visit.MatchEmail
   → Looked up against AutoConsumer → IndividualKey, AddressKey
   → Stored in PiXL.Match (name, address, email linked to device fingerprint)
 ```
 
-**Risks**:
-- PII stored in multiple tables (Test, Parsed, Visit, Match)
-- No encryption at rest
-- No automatic retention/purge policy
-- Right to erasure requires multi-table delete
-- Email transmitted in URL query string (visible in IIS logs, browser history)
+**Accepted trade-offs** (business decisions, not oversights):
+- PII stored in multiple tables (Raw, Parsed, Visit, Match) — by design for the product
+- No encryption at rest — SQL Server TDE available if needed later; not a priority
+- PiXL.Raw is never deleted — monthly partitioned with tiered compression (NONE/ROW/PAGE)
+- Opt-out and erasure handled by M1 data team via AutoConsumer deletion — not an app-level concern
+- **Email transmitted in URL query string** — accepted risk documented below
+
+#### Accepted Risk: Email in URL Query String
+
+When a site passes `_cp_email=user@example.com` on the pixel URL, the email is visible in:
+- IIS request logs (`C:\inetpub\logs\LogFiles\`)
+- Browser developer tools / network tab on the client side
+- Any upstream proxy logs
+
+This is **accepted by design**: the pixel URL is the only data transport channel, and email is the strongest identity signal. Mitigations:
+- IIS logs are on the server, not publicly accessible
+- The pixel endpoint returns a static 1x1 GIF — no PII in the response
+- Log retention is managed at the OS/IIS level
+- M1 data team handles opt-out/erasure requests via AutoConsumer
 
 #### Cross-Server Data Transfer
 
 The `IpApiSyncService` pulls 342M+ rows daily from Xavier (`192.168.88.35`):
 - Connection uses Integrated Security (Windows auth)
-- Data traverses internal network unencrypted
+- Data traverses internal network — self-signed cert planned to enable encrypted transport
 - 500K-row batches via staging table MERGE
 
 #### Config-Level Controls
@@ -69,7 +82,7 @@ The `IpApiSyncService` pulls 342M+ rows daily from Xavier (`192.168.88.35`):
 - `MatchIP` — enable/disable IP-based matching
 - `MatchGeo` — enable/disable geo-based matching
 
-These are checked in `ETL.usp_MatchVisits`. Verify they default to OFF (opt-in, not opt-out).
+These are checked in `ETL.usp_MatchVisits`. During early development, all three default to **ON** — this is an intentional business decision to enable full-pipeline testing. Per-pixel gating can restrict matching for specific clients when needed.
 
 ## Security Headers
 

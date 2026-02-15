@@ -1,0 +1,9 @@
+vw_Dash_SystemHealth : 9ms, 1 rows
+vw_Dash_HourlyTraffic : 10ms, 0 rows
+vw_Dash_BotSummary : 5ms, 0 rows
+vw_Dash_BotSignalBreakdown : 5ms, 0 rows
+vw_Dash_DeviceBreakdown : 5ms, 46 rows
+vw_Dash_EvasionSummary : 1ms, 1 rows
+vw_Dash_BehavioralAnalysis : 1ms, 2 rows
+vw_Dash_RecentHits : 1ms, 100 rows
+vw_Dash_FingerprintDiversity : 5ms, 0 rows

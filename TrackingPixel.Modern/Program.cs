@@ -22,7 +22,7 @@ using TrackingPixel.Services;
 //   HTTP request → TrackingEndpoints (route match → _SMART.GIF suffix)
 //     → TrackingCaptureService (parse headers, IP extraction, path decomposition)
 //     → FingerprintStabilityService + IpBehaviorService (server-side enrichment)
-//     → DatabaseWriterService (Channel<T> queue → SqlBulkCopy to PiXL.Test)
+//     → DatabaseWriterService (Channel<T> queue → SqlBulkCopy to PiXL.Raw)
 //     → EtlBackgroundService (every 60s, calls ETL.usp_ParseNewHits → PiXL.Parsed)
 //
 // DEPLOYMENT: See .github/copilot-instructions.md for IIS vs dev port assignments.
@@ -85,7 +85,7 @@ builder.Services.AddSingleton<DatacenterIpService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
 
 // EtlBackgroundService: Calls ETL.usp_ParseNewHits every 60 seconds to move
-// raw data from PiXL.Test → PiXL.Parsed (materialized warehouse with ~175 columns).
+// raw data from PiXL.Raw → PiXL.Parsed (materialized warehouse with ~175 columns).
 builder.Services.AddHostedService<EtlBackgroundService>();
 
 // GeoCacheService: Non-blocking in-memory IP geolocation lookups backed by IPAPI.IP.
@@ -163,16 +163,16 @@ var app = builder.Build();
 // ===========================================================================
 
 // 1. Forwarded Headers — Rewrites RemoteIpAddress from X-Forwarded-For.
-//    ForwardLimit=null accepts any chain depth (CDN → LB → IIS → Kestrel).
-//    KnownNetworks/Proxies cleared so all forwarded headers are trusted.
-//    SECURITY NOTE: In this deployment IIS is the only upstream, so this is safe.
+//    ForwardLimit=1: only the immediate upstream (IIS) is trusted.
+//    Loopback is added to KnownProxies so IIS InProcess hosting works.
+//    Client-injected X-Forwarded-For chains beyond the first hop are ignored.
 var forwardedOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-    ForwardLimit = null
+    ForwardLimit = 1
 };
-forwardedOptions.KnownIPNetworks.Clear();
-forwardedOptions.KnownProxies.Clear();
+forwardedOptions.KnownProxies.Add(System.Net.IPAddress.Loopback);      // 127.0.0.1
+forwardedOptions.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);  // ::1
 app.UseForwardedHeaders(forwardedOptions);
 
 // 2. Response Compression — Brotli/Gzip for text responses (JS, JSON, HTML).

@@ -6,7 +6,7 @@ namespace TrackingPixel.Services;
 
 /// <summary>
 /// Background service that runs ETL processing every 60 seconds.
-/// Calls ETL.usp_ParseNewHits to move data from PiXL.Test → PiXL.Parsed
+/// Calls ETL.usp_ParseNewHits to move data from PiXL.Raw → PiXL.Parsed
 /// and populates dimension tables (PiXL_Device, PiXL_IP, PiXL_Visit).
 /// </summary>
 public sealed class EtlBackgroundService : BackgroundService
@@ -59,7 +59,7 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
         
-        // Phase 1: Parse new hits (PiXL.Test → PiXL.Parsed + Device/IP/Visit)
+        // Phase 1: Parse new hits (PiXL.Raw → PiXL.Parsed + Device/IP/Visit)
         await using var parseCmd = conn.CreateCommand();
         parseCmd.CommandText = "ETL.usp_ParseNewHits";
         parseCmd.CommandType = System.Data.CommandType.StoredProcedure;

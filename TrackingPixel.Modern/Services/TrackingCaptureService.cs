@@ -83,8 +83,10 @@ public sealed partial class TrackingCaptureService
         // Standard browser headers — present in virtually all requests
         "User-Agent", "Referer", "Accept-Language", "DNT",
         
-        // Reverse proxy IP identification — checked in priority order by ExtractClientIp()
-        "X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "True-Client-IP",
+        // Reverse proxy IP identification — IIS-set headers only.
+        // CF-Connecting-IP, True-Client-IP, X-Real-IP NOT captured: no CDN in front,
+        // so any client can inject those headers to spoof their identity.
+        "X-Forwarded-For",
         
         // Client Hints (User-Agent) — Chrome 89+, Edge 89+, Opera 75+
         // These replace the User-Agent string with structured, lower-entropy data
@@ -159,7 +161,7 @@ public sealed partial class TrackingCaptureService
             QueryString = request.QueryString.ToString().TrimStart('?'),
             HeadersJson = headersJson,
             // Truncate User-Agent and Referer to 2000 chars to match the SQL column size
-            // (nvarchar(2000) in PiXL.Test). Prevents SqlBulkCopy truncation errors.
+            // (nvarchar(2000) in PiXL.Raw). Prevents SqlBulkCopy truncation errors.
             UserAgent = Truncate(headers.UserAgent.ToString(), 2000),
             Referer = Truncate(headers.Referer.ToString(), 2000)
         };
@@ -170,12 +172,15 @@ public sealed partial class TrackingCaptureService
     /// <para>
     /// Priority chain (first non-empty wins):
     /// <list type="number">
-    ///   <item><description><c>CF-Connecting-IP</c> — Cloudflare (most reliable behind CF)</description></item>
-    ///   <item><description><c>True-Client-IP</c> — Akamai and some CDNs</description></item>
-    ///   <item><description><c>X-Real-IP</c> — nginx / HAProxy convention</description></item>
-    ///   <item><description><c>X-Forwarded-For</c> — Standard proxy header (first IP in chain)</description></item>
+    ///   <item><description><c>X-Forwarded-For</c> — Standard proxy header (first IP in chain, set by IIS)</description></item>
     ///   <item><description><c>RemoteIpAddress</c> — Direct TCP connection IP (fallback)</description></item>
     /// </list>
+    /// </para>
+    /// <para>
+    /// CDN-specific headers (<c>CF-Connecting-IP</c>, <c>True-Client-IP</c>) are NOT trusted
+    /// because there is no CDN in front of IIS — any client could inject those headers
+    /// directly, spoofing their IP address. Only <c>X-Forwarded-For</c> (set by IIS) and
+    /// the TCP <c>RemoteIpAddress</c> are reliable in this deployment.
     /// </para>
     /// <para>
     /// For <c>X-Forwarded-For</c>, which may contain a chain like <c>"client, proxy1, proxy2"</c>,
@@ -186,20 +191,9 @@ public sealed partial class TrackingCaptureService
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string? ExtractClientIp(IHeaderDictionary headers, ConnectionInfo connection)
     {
-        // Cloudflare-specific header — most reliable when behind Cloudflare
-        var cfConnectingIp = headers["CF-Connecting-IP"].ToString();
-        if (cfConnectingIp.Length > 0)
-            return cfConnectingIp.Trim();
-        
-        // Akamai / some CDNs use True-Client-IP (single value, no chain)
-        var trueClientIp = headers["True-Client-IP"].ToString();
-        if (trueClientIp.Length > 0)
-            return trueClientIp.Trim();
-        
-        // nginx/HAProxy typically populate X-Real-IP with the client IP
-        var realIp = headers["X-Real-IP"].ToString();
-        if (realIp.Length > 0)
-            return realIp.Trim();
+        // NOTE: CF-Connecting-IP and True-Client-IP are intentionally NOT checked here.
+        // There is no Cloudflare/Akamai CDN in front of IIS, so those headers could be
+        // injected by any client to spoof their IP. Only IIS-set headers are trusted.
         
         // Standard proxy header — may contain a chain: "client, proxy1, proxy2"
         // Use Span-based first-IP extraction: no substring allocation when no comma present

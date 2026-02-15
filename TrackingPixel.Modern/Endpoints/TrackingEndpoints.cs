@@ -265,7 +265,7 @@ public static partial class TrackingEndpoints
     /// This is the hot path — called for every valid tracking pixel hit.
     /// Enrichment results are appended as <c>&amp;_srv_*</c> query string params
     /// so the ETL pipeline (<c>usp_ParseNewHits</c>) can extract them into
-    /// dedicated columns in <c>PiXL_Parsed</c> without any schema changes to <c>PiXL.Test</c>.
+    /// dedicated columns in <c>PiXL_Parsed</c> without any schema changes to <c>PiXL.Raw</c>.
     /// </para>
     /// <para>
     /// Uses a <see cref="ThreadStaticAttribute">thread-static</see> <see cref="StringBuilder"/>

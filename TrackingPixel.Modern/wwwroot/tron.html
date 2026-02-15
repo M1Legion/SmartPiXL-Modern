@@ -54,15 +54,21 @@ body {
   position: relative;
 }
 
-/* Scan lines */
+/* Scan lines — animated CRT drift */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.018) 2px, rgba(0,243,255,0.018) 4px);
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.025) 2px, rgba(0,243,255,0.025) 4px);
   pointer-events: none;
   z-index: 9999;
   will-change: transform;
+  animation: scanDrift 8s linear infinite;
+}
+
+@keyframes scanDrift {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(4px); }
 }
 
 /* Grid background */
@@ -84,7 +90,7 @@ body::before {
 .vignette {
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 50%, rgba(3,8,16,0.6) 100%);
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(3,8,16,0.5) 65%, rgba(3,8,16,0.85) 100%);
   pointer-events: none;
   z-index: 0;
 }
@@ -95,11 +101,158 @@ body::before {
   max-width: 1800px;
   margin: 0 auto;
   padding: 16px 24px;
+  transition: opacity 0.5s ease, transform 0.5s ease, filter 0.5s ease;
+}
+
+.dashboard.hidden {
+  opacity: 0;
+  transform: translateY(20px) scale(0.98);
+  filter: blur(4px);
+  pointer-events: none;
+}
+
+.dashboard.derezzing {
+  animation: dashboardDerezz 0.6s ease-in forwards;
+}
+
+@keyframes dashboardDerezz {
+  0%   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  40%  { opacity: 0.7; filter: blur(2px) brightness(1.5); }
+  70%  { opacity: 0.3; transform: translateY(10px) scale(0.97); filter: blur(6px) brightness(2); }
+  100% { opacity: 0; transform: translateY(30px) scale(0.95); filter: blur(12px) brightness(0); pointer-events: none; }
+}
+
+.dashboard.rerezzing {
+  animation: dashboardRerezz 0.6s ease-out forwards;
+}
+
+@keyframes dashboardRerezz {
+  0%   { opacity: 0; transform: translateY(30px) scale(0.95); filter: blur(12px) brightness(0); }
+  30%  { opacity: 0.3; filter: blur(6px) brightness(2); }
+  60%  { opacity: 0.7; transform: translateY(5px) scale(0.99); filter: blur(2px) brightness(1.5); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) brightness(1); }
 }
 
 /* View toggle */
 .view-content { display: none; }
 .view-content.active { display: block; }
+
+/* ─── LANDING OVERLAY ─── */
+.landing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6vh;
+  gap: 32px;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.landing-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.landing-logo {
+  font-family: var(--display);
+  font-size: 3.5rem;
+  font-weight: 900;
+  letter-spacing: 14px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 40px var(--cyan-dim), 0 0 80px rgba(0,243,255,0.3), 0 0 160px rgba(0,243,255,0.12);
+  animation: logoGlow 4s ease-in-out infinite;
+  text-align: center;
+}
+
+.landing-sub {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  text-align: center;
+  margin-top: -28px;
+}
+
+.landing-buttons {
+  display: flex;
+  gap: 24px;
+}
+
+.landing-btn {
+  font-family: var(--display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: rgba(0, 243, 255, 0.06);
+  border: 1px solid rgba(0, 243, 255, 0.3);
+  border-radius: 4px;
+  padding: 18px 48px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+.landing-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.6;
+  transition: opacity 0.3s;
+}
+
+.landing-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  transform: scaleX(0);
+  transition: transform 0.4s ease;
+}
+
+.landing-btn:hover {
+  color: #fff;
+  background: rgba(0, 243, 255, 0.15);
+  border-color: var(--cyan);
+  box-shadow: 0 0 30px rgba(0,243,255,0.15), 0 0 60px rgba(0,243,255,0.08), inset 0 0 30px rgba(0,243,255,0.06);
+  transform: translateY(-2px);
+}
+
+.landing-btn:hover::before { opacity: 1; }
+.landing-btn:hover::after { transform: scaleX(1); }
+
+.landing-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 0 50px rgba(0,243,255,0.25), 0 0 100px rgba(0,243,255,0.1), inset 0 0 50px rgba(0,243,255,0.1);
+}
+
+.landing-hint {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 3px;
+  opacity: 0.4;
+  text-align: center;
+  animation: hintPulse 4s ease-in-out infinite;
+}
+
+@keyframes hintPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
 
 /* ─── HEADER ─── */
 .header {
@@ -120,13 +273,13 @@ body::before {
   letter-spacing: 6px;
   text-transform: uppercase;
   color: var(--cyan);
-  text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.2);
+  text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.3), 0 0 120px rgba(0,243,255,0.1);
   animation: logoGlow 4s ease-in-out infinite;
 }
 
 @keyframes logoGlow {
-  0%, 100% { text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.2); }
-  50% { text-shadow: 0 0 30px var(--cyan), 0 0 80px rgba(0,243,255,0.4), 0 0 120px rgba(0,243,255,0.15); }
+  0%, 100% { text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.3), 0 0 120px rgba(0,243,255,0.1); }
+  50% { text-shadow: 0 0 40px var(--cyan), 0 0 80px rgba(0,243,255,0.5), 0 0 150px rgba(0,243,255,0.2), 0 0 250px rgba(0,243,255,0.06); }
 }
 
 .logo-sub {
@@ -210,7 +363,7 @@ body::before {
   color: var(--cyan);
   border-color: var(--cyan);
   background: rgba(0,243,255,0.1);
-  box-shadow: 0 0 15px var(--panel-glow), 0 0 30px rgba(0,243,255,0.03);
+  box-shadow: 0 0 20px rgba(0,243,255,0.1), 0 0 40px rgba(0,243,255,0.05), inset 0 0 20px rgba(0,243,255,0.03);
 }
 
 /* ─── PANELS ─── */
@@ -233,6 +386,8 @@ body::before {
   overflow: hidden;
   transition: border-color 0.3s, box-shadow 0.3s;
   contain: layout style paint;
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
 }
 
 .panel::before {
@@ -246,8 +401,8 @@ body::before {
 }
 
 .panel:hover {
-  border-color: rgba(0,243,255,0.35);
-  box-shadow: 0 0 25px rgba(0,243,255,0.06), inset 0 0 25px rgba(0,243,255,0.02);
+  border-color: rgba(0,243,255,0.45);
+  box-shadow: 0 0 30px rgba(0,243,255,0.12), 0 0 60px rgba(0,243,255,0.04), inset 0 0 30px rgba(0,243,255,0.03);
 }
 
 .panel:hover::before { opacity: 1; }
@@ -295,8 +450,13 @@ body::before {
   box-shadow: 0 0 25px rgba(0,243,255,0.1);
 }
 
-.pipe-node.healthy { border-color: rgba(0,255,136,0.3); }
-.pipe-node.healthy:hover { box-shadow: 0 0 25px rgba(0,255,136,0.1); }
+.pipe-node.healthy { border-color: rgba(0,255,136,0.3); animation: nodeBreath 3s ease-in-out infinite; }
+.pipe-node.healthy:hover { box-shadow: 0 0 25px rgba(0,255,136,0.15); }
+
+@keyframes nodeBreath {
+  0%, 100% { box-shadow: 0 0 10px rgba(0,255,136,0.05); }
+  50% { box-shadow: 0 0 25px rgba(0,255,136,0.15), inset 0 0 15px rgba(0,255,136,0.04); }
+}
 .pipe-node.stale { border-color: rgba(255,225,77,0.3); background: rgba(255,225,77,0.03); }
 .pipe-node.down { border-color: rgba(255,45,85,0.3); background: rgba(255,45,85,0.03); }
 
@@ -314,10 +474,12 @@ body::before {
 
 .pipe-arrow {
   width: 30px;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
   position: relative;
   animation: dataFlow 2s linear infinite;
+  box-shadow: 0 0 8px var(--cyan-dim), 0 0 16px rgba(0,243,255,0.1);
+  border-radius: 1px;
 }
 
 .pipe-arrow.dead {
@@ -389,8 +551,8 @@ body::before {
   max-width: 180px;
 }
 
-.feed-table tr { transition: background 0.2s; cursor: pointer; }
-.feed-table tr:hover { background: rgba(0,243,255,0.08); }
+.feed-table tr { transition: background 0.2s, box-shadow 0.2s; cursor: pointer; }
+.feed-table tr:hover { background: rgba(0,243,255,0.08); box-shadow: inset 0 0 20px rgba(0,243,255,0.04); }
 
 @keyframes rowFlash {
   0% { background: rgba(0,243,255,0.15); }
@@ -426,12 +588,14 @@ body::before {
 
 .loading::after {
   content: '';
-  width: 16px; height: 16px;
+  width: 20px; height: 20px;
   border: 2px solid var(--panel-border);
   border-top-color: var(--cyan);
+  border-right-color: var(--cyan-dim);
   border-radius: 50%;
   margin-left: 12px;
   animation: spin 0.8s linear infinite;
+  box-shadow: 0 0 12px rgba(0,243,255,0.2);
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -463,9 +627,11 @@ body::before {
   max-height: 82vh;
   overflow-y: auto;
   position: relative;
-  box-shadow: 0 0 60px rgba(0,243,255,0.12), 0 0 120px rgba(0,243,255,0.04);
+  box-shadow: 0 0 60px rgba(0,243,255,0.15), 0 0 120px rgba(0,243,255,0.08), 0 0 200px rgba(0,243,255,0.03);
   transform: scale(0.95);
   transition: transform 0.3s;
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
 }
 
 .modal-overlay.active .modal-panel { transform: scale(1); }
@@ -606,6 +772,12 @@ body::before {
   padding: 20px;
   position: relative;
   overflow: hidden;
+  animation: criticalBreath 2s ease-in-out infinite;
+}
+
+@keyframes criticalBreath {
+  0%, 100% { box-shadow: 0 0 20px rgba(255,45,85,0.08), inset 0 0 20px rgba(255,45,85,0.02); }
+  50% { box-shadow: 0 0 40px rgba(255,45,85,0.2), 0 0 80px rgba(255,45,85,0.06), inset 0 0 40px rgba(255,45,85,0.04); }
 }
 
 .critical-panel::before {
@@ -709,6 +881,31 @@ body::before {
   min-width: 140px;
   transition: all 0.3s;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+.status-chip::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  transform: scaleX(0);
+  transition: transform 0.4s ease;
+  pointer-events: none;
+}
+
+.status-chip:hover::after { transform: scaleX(1); }
+.status-chip.healthy::after { background: linear-gradient(90deg, transparent, var(--green), transparent); transform: scaleX(1); opacity: 0.5; }
+.status-chip.degraded::after { background: linear-gradient(90deg, transparent, var(--yellow), transparent); transform: scaleX(1); opacity: 0.5; }
+.status-chip.critical::after { background: linear-gradient(90deg, transparent, var(--red), transparent); transform: scaleX(1); opacity: 0.5; animation: chipPulse 1.5s ease-in-out infinite; }
+
+@keyframes chipPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
 }
 
 .status-chip:hover { border-color: rgba(0,243,255,0.4); box-shadow: 0 0 20px rgba(0,243,255,0.08); }
@@ -844,8 +1041,8 @@ body::before {
 }
 
 @keyframes allClearPulse {
-  0%, 100% { box-shadow: 0 0 30px rgba(0,255,136,0.04); }
-  50% { box-shadow: 0 0 50px rgba(0,255,136,0.08), 0 0 80px rgba(0,255,136,0.03); }
+  0%, 100% { box-shadow: 0 0 30px rgba(0,255,136,0.06); }
+  50% { box-shadow: 0 0 60px rgba(0,255,136,0.15), 0 0 100px rgba(0,255,136,0.06), 0 0 160px rgba(0,255,136,0.02); }
 }
 
 .all-clear-dot {
@@ -895,8 +1092,22 @@ body::before {
   transition: opacity 0.3s;
 }
 
-.hero-card:hover { border-color: var(--cyan-dim); box-shadow: 0 0 30px var(--panel-glow), inset 0 0 30px var(--panel-glow); }
+.hero-card:hover { border-color: var(--cyan-dim); box-shadow: 0 0 40px rgba(0,243,255,0.1), 0 0 80px rgba(0,243,255,0.04), inset 0 0 40px rgba(0,243,255,0.04); }
 .hero-card:hover::before { opacity: 1; }
+
+.hero-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(0,243,255,0.04) 45%, rgba(0,243,255,0.08) 50%, rgba(0,243,255,0.04) 55%, transparent 60%);
+  animation: holoSweep 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes holoSweep {
+  0% { transform: translateX(-100%); }
+  50%, 100% { transform: translateX(200%); }
+}
 
 .hero-label {
   font-family: var(--display);
@@ -915,6 +1126,12 @@ body::before {
   color: var(--cyan);
   text-shadow: 0 0 20px var(--cyan-dim);
   line-height: 1;
+  animation: valueBreath 4s ease-in-out infinite;
+}
+
+@keyframes valueBreath {
+  0%, 100% { text-shadow: 0 0 20px var(--cyan-dim); filter: brightness(1); }
+  50% { text-shadow: 0 0 35px var(--cyan), 0 0 70px var(--cyan-dim), 0 0 120px rgba(0,243,255,0.1); filter: brightness(1.15); }
 }
 
 .hero-value.warn { color: var(--yellow); text-shadow: 0 0 20px rgba(255,225,77,0.3); }
@@ -1073,10 +1290,10 @@ body::before {
   .modal-body .detail-grid { grid-template-columns: 1fr; }
 }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); }
+::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; box-shadow: 0 0 6px rgba(0,243,255,0.1); }
+::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); box-shadow: 0 0 12px rgba(0,243,255,0.25); }
 </style>
 </head>
 <body>
@@ -1084,7 +1301,18 @@ body::before {
 <canvas id="grid-canvas"></canvas>
 <div class="vignette"></div>
 
-<div class="dashboard">
+<!-- LANDING OVERLAY — visible on load, hides when a view activates -->
+<div class="landing-overlay" id="landing-overlay">
+  <div class="landing-logo">SMARTPIXL</div>
+  <div class="landing-sub">DevOps Command Center</div>
+  <div class="landing-buttons">
+    <button class="landing-btn" onclick="enterView('ops')">OPERATIONS</button>
+    <button class="landing-btn" onclick="enterView('analytics')">ANALYTICS</button>
+  </div>
+  <div class="landing-hint">SELECT A VIEW TO ENTER THE GRID</div>
+</div>
+
+<div class="dashboard hidden" id="dashboard">
   <!-- ══════════════════════════════════════════════════════════════════════
        SHARED HEADER (persists across views)
        ══════════════════════════════════════════════════════════════════════ -->
@@ -1108,14 +1336,14 @@ body::before {
 
   <!-- SHARED NAV (JS-driven, no page reload) -->
   <div class="nav-bar">
-    <a class="nav-tab active" id="nav-ops" onclick="switchView('ops')">OPERATIONS</a>
-    <a class="nav-tab" id="nav-analytics" onclick="switchView('analytics')">ANALYTICS</a>
+    <a class="nav-tab" id="nav-ops" onclick="toggleView('ops')">OPERATIONS</a>
+    <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">ANALYTICS</a>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        OPERATIONS VIEW
        ══════════════════════════════════════════════════════════════════════ -->
-  <div id="view-ops" class="view-content active">
+  <div id="view-ops" class="view-content">
     <!-- Critical Issues -->
     <div id="critical-zone"></div>
 
@@ -1345,7 +1573,7 @@ async function fetchJson(url) {
 // Loaded via ES module below. Stub API until module initializes.
 // Contestant light-cycles race the grid, bounded by arena walls.
 // ============================================================================
-var Grid = { spawnOrb() {}, derezzAll() {} };
+var Grid = { spawnOrb() {}, derezzAll() {}, emitPulse() {} };
 
 // ============================================================================
 // MODAL SYSTEM (shared)
@@ -1360,7 +1588,15 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.remove('active');
 }
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('modal-overlay').classList.contains('active')) {
+      closeModal();
+    } else if (currentView !== 'landing') {
+      derezToLanding();
+    }
+  }
+});
 
 function di(label, value, cls) {
   return `<div class="detail-item"><div class="detail-label">${label}</div><div class="detail-value${cls ? ' ' + cls : ''}">${value}</div></div>`;
@@ -1371,51 +1607,148 @@ function sug(text) {
 }
 
 // ============================================================================
-// VIEW SWITCHING (SPA navigation — canvas persists)
+// VIEW SWITCHING — Three states: 'landing', 'ops', 'analytics'
+// Landing = background only + two buttons. Clicking active tab derezzes back.
 // ============================================================================
-let currentView = 'ops';
+let currentView = 'landing';  // start on landing
 
-function switchView(view) {
-  if (view === currentView) return;
+const dashEl   = document.getElementById('dashboard');
+const landingEl = document.getElementById('landing-overlay');
+
+function setViewClasses(view) {
+  document.getElementById('view-ops').className = 'view-content' + (view === 'ops' ? ' active' : '');
+  document.getElementById('view-analytics').className = 'view-content' + (view === 'analytics' ? ' active' : '');
+  document.getElementById('nav-ops').className = 'nav-tab' + (view === 'ops' ? ' active' : '');
+  document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
+  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : view === 'analytics' ? 'Analytics & Intelligence' : '';
+  document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
+  document.title = view === 'ops' ? 'SmartPiXL // TRON — Operations'
+                 : view === 'analytics' ? 'SmartPiXL // TRON — Analytics'
+                 : 'SmartPiXL // TRON';
+}
+
+// Called from landing overlay buttons
+function enterView(view) {
+  if (currentView === view) return;
   closeModal();
   refreshAbort = true;
   currentView = view;
 
-  document.getElementById('view-ops').className = 'view-content' + (view === 'ops' ? ' active' : '');
-  document.getElementById('view-analytics').className = 'view-content' + (view === 'analytics' ? ' active' : '');
-  document.getElementById('nav-ops').className = 'nav-tab' + (view === 'ops' ? ' active' : '');
-  document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
-  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : 'Analytics & Intelligence';
-  document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
-  document.title = view === 'ops' ? 'SmartPiXL // TRON — Operations' : 'SmartPiXL // TRON — Analytics';
+  // Hide landing
+  landingEl.classList.add('hidden');
 
-  history.pushState({ view }, '', view === 'ops' ? '/tron' : '/tron/analytics');
+  // Show + rerezz dashboard
+  dashEl.classList.remove('hidden', 'derezzing');
+  dashEl.classList.add('rerezzing');
+  dashEl.addEventListener('animationend', function onRe() {
+    dashEl.classList.remove('rerezzing');
+    dashEl.removeEventListener('animationend', onRe);
+  });
+
+  setViewClasses(view);
+  const url = view === 'ops' ? '/tron' : '/tron/analytics';
+  history.pushState({ view }, '', url);
   window.scrollTo(0, 0);
-  countdown = 0; // trigger immediate refresh
+
+  // Immediately render from cached pipeline data (cycles have been fetching all along)
+  renderCachedData(view);
+  countdown = 0; // next cycle will refresh with fresh data
 }
 
-function applyView(view) {
-  currentView = view;
-  document.getElementById('view-ops').className = 'view-content' + (view === 'ops' ? ' active' : '');
-  document.getElementById('view-analytics').className = 'view-content' + (view === 'analytics' ? ' active' : '');
-  document.getElementById('nav-ops').className = 'nav-tab' + (view === 'ops' ? ' active' : '');
-  document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
-  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : 'Analytics & Intelligence';
-  document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
-  document.title = view === 'ops' ? 'SmartPiXL // TRON — Operations' : 'SmartPiXL // TRON — Analytics';
+// Render all panels from whatever lastData the pipeline has already cached
+function renderCachedData(view) {
+  const { health, infra, recent } = lastData;
+  if (view === 'ops') {
+    if (health) document.getElementById('etl-status').textContent = health.etL_Watermark ? `#${num(health.etL_Watermark)}` : '--';
+    if (health || infra) {
+      renderCriticalZone(buildIssues(health, infra));
+      renderStatusStrip(health, infra);
+      renderPipeline(health, infra);
+      renderOpsETL(health, infra);
+      updateOpsBeacon(health, infra);
+    }
+    if (infra) { renderErrorLog(infra); renderPipelineTables(infra); renderInfraDetail(infra); }
+    if (recent) renderOpsFeed(recent);
+  } else if (view === 'analytics') {
+    if (health) { renderAnalyticsHero(health); updateAnalyticsBeacon(health); renderAnalyticsETL(health); }
+    if (lastData.hourly) renderHourlyChart(lastData.hourly);
+    if (lastData.bots) renderRiskList(lastData.bots);
+    if (lastData.signals) renderSignals(lastData.signals);
+    if (lastData.evasion) renderEvasion(lastData.evasion);
+    if (lastData.behavior) renderBehavior(lastData.behavior);
+    if (recent) renderAnalyticsFeed(recent);
+    if (lastData.fingerprints) renderFingerprints(lastData.fingerprints);
+    if (lastData.devices) renderDevices(lastData.devices);
+  }
+}
+
+// Called from nav tabs — toggle: same tab = derezz to landing, diff tab = switch
+function toggleView(view) {
+  if (currentView === view) {
+    // Derezz back to landing
+    derezToLanding();
+  } else if (currentView === 'landing') {
+    enterView(view);
+  } else {
+    // Switch between views (ops ↔ analytics)
+    closeModal();
+    refreshAbort = true;
+    currentView = view;
+    setViewClasses(view);
+    const url = view === 'ops' ? '/tron' : '/tron/analytics';
+    history.pushState({ view }, '', url);
+    window.scrollTo(0, 0);
+    renderCachedData(view);
+    countdown = 0;
+  }
+}
+
+function derezToLanding() {
+  closeModal();
+  refreshAbort = true;
+  currentView = 'landing';
+
+  // Derezz animation on dashboard (cycles keep running — they track API health)
+  dashEl.classList.add('derezzing');
+  dashEl.addEventListener('animationend', function onDerez() {
+    dashEl.classList.remove('derezzing');
+    dashEl.classList.add('hidden');
+    dashEl.removeEventListener('animationend', onDerez);
+  });
+
+  // Update nav — no active tab
+  document.getElementById('nav-ops').className = 'nav-tab';
+  document.getElementById('nav-analytics').className = 'nav-tab';
+
+  // Show landing
+  landingEl.classList.remove('hidden');
+
+  document.title = 'SmartPiXL // TRON';
+  history.pushState({ view: 'landing' }, '', '/tron');
 }
 
 window.addEventListener('popstate', (e) => {
-  const view = e.state?.view || (location.pathname.includes('analytics') ? 'analytics' : 'ops');
-  applyView(view);
-  countdown = 0;
+  const view = e.state?.view || 'landing';
+  if (view === 'landing') {
+    currentView = 'landing';
+    dashEl.classList.add('hidden');
+    dashEl.classList.remove('derezzing', 'rerezzing');
+    landingEl.classList.remove('hidden');
+    document.getElementById('nav-ops').className = 'nav-tab';
+    document.getElementById('nav-analytics').className = 'nav-tab';
+    document.title = 'SmartPiXL // TRON';
+  } else {
+    enterView(view);
+  }
 });
 
-// Initial view from URL
+// Start on landing
 (function() {
-  const init = location.pathname.includes('analytics') ? 'analytics' : 'ops';
-  applyView(init);
-  history.replaceState({ view: init }, '', location.pathname);
+  currentView = 'landing';
+  dashEl.classList.add('hidden');
+  landingEl.classList.remove('hidden');
+  document.title = 'SmartPiXL // TRON';
+  history.replaceState({ view: 'landing' }, '', location.pathname);
 })();
 
 // ============================================================================
@@ -2598,7 +2931,8 @@ async function runPipeline(steps) {
       if (refreshAbort) break;
       lastData[step.key] = data;
       Grid.spawnOrb(step.name, step.contestant);
-      if (step.render) step.render();
+      // Only render DOM when dashboard is visible (not on landing)
+      if (currentView !== 'landing' && step.render) step.render();
     } catch (e) {
       console.warn(`Pipeline step ${step.name} failed:`, e);
     }
@@ -2611,8 +2945,11 @@ async function runPipeline(steps) {
 
 async function refreshAll() {
   if (isRefreshing) return;
-  if (currentView === 'ops') await runPipeline(OPS_STEPS);
-  else await runPipeline(ANALYTICS_STEPS);
+  // Always run the pipeline — cycles track API health regardless of view.
+  // On landing or ops, run the ops pipeline (health/infra/recent).
+  // On analytics, run the full analytics pipeline.
+  if (currentView === 'analytics') await runPipeline(ANALYTICS_STEPS);
+  else await runPipeline(OPS_STEPS);
 }
 
 setInterval(() => {
@@ -2624,6 +2961,7 @@ setInterval(() => {
   }
 }, 1000);
 
+// Always start the pipeline — cycles race from the moment the page loads
 refreshAll();
 </script>
 
@@ -2650,9 +2988,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   const ARENA_Z = 900;         // arena depth  (Z axis)
   const HALF_X = ARENA_X / 2;
   const HALF_Z = ARENA_Z / 2;
-  const WALL_H = 16;           // trail wall height (vertical ribbons)
-  const MAX_TRAIL = 200;       // trail points per cycle
-  const AMBIENT_MAX = 3;
+  const WALL_H = 24;           // trail wall height (vertical ribbons)
+  const MAX_TRAIL = 300;       // trail points per cycle
+  const AMBIENT_MAX = 6;       // more ambient traffic — RTX 4090
 
   // ── Contestant Palette (Tron Grid Players) ─────────────────────────────
   const COLORS = {
@@ -2676,7 +3014,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   let W = window.innerWidth, H = window.innerHeight;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(window.devicePixelRatio);  // no cap — RTX 4090
   renderer.setSize(W, H);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
@@ -2707,9 +3045,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(W, H),
-    1.2,   // strength — visible halos on bright objects
-    0.6,   // radius — soft spread
-    0.3    // threshold — grid stays clean, cycles + trails glow
+    1.8,   // strength — intense halos (RTX 4090)
+    0.9,   // radius — wide cinematic spread
+    0.25   // threshold — more objects participate in bloom
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
@@ -2717,9 +3055,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   // ══════════════════════════════════════════════════════════════════════
   //  GROUND GRID — Extended grid fading into fog + brighter arena grid
   // ══════════════════════════════════════════════════════════════════════
-  const extGrid = new THREE.GridHelper(4000, 80, 0x002030, 0x001018);
+  const extGrid = new THREE.GridHelper(4000, 80, 0x003040, 0x001525);
   extGrid.material.transparent = true;
-  extGrid.material.opacity = 0.5;
+  extGrid.material.opacity = 0.6;
   scene.add(extGrid);
 
   // Arena interior grid (brighter)
@@ -2735,7 +3073,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     }
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
     return new THREE.LineSegments(geo,
-      new THREE.LineBasicMaterial({ color: 0x003848, transparent: true, opacity: 0.6 })
+      new THREE.LineBasicMaterial({ color: 0x004858, transparent: true, opacity: 0.7 })
     );
   }
   scene.add(buildArenaGrid());
@@ -2782,6 +3120,67 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         new THREE.LineBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.5 })
       ));
     }
+  })();
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  CORNER LIGHT PILLARS — Dramatic vertical beams at arena corners
+  // ══════════════════════════════════════════════════════════════════════
+  (function () {
+    const beamH = WALL_H * 6;
+    const beamGeo = new THREE.PlaneGeometry(4, beamH);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0x00f3ff, transparent: true, opacity: 0.12,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
+    });
+    const corners = [
+      [-HALF_X, -HALF_Z], [HALF_X, -HALF_Z],
+      [HALF_X, HALF_Z], [-HALF_X, HALF_Z]
+    ];
+    corners.forEach(([x, z]) => {
+      const b1 = new THREE.Mesh(beamGeo, beamMat);
+      b1.position.set(x, beamH / 2, z);
+      scene.add(b1);
+      const b2 = b1.clone();
+      b2.rotation.y = Math.PI / 2;
+      scene.add(b2);
+    });
+  })();
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  ARENA FLOOR GLOW — Subtle illuminated playing field
+  // ══════════════════════════════════════════════════════════════════════
+  (function () {
+    const floorGeo = new THREE.PlaneGeometry(ARENA_X, ARENA_Z);
+    const floorMat = new THREE.MeshBasicMaterial({
+      color: 0x001520, transparent: true, opacity: 0.35,
+      side: THREE.DoubleSide
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.1;
+    scene.add(floor);
+  })();
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  ARENA CENTER MARKER — Hexagonal reticle on the arena floor
+  // ══════════════════════════════════════════════════════════════════════
+  (function () {
+    const addMat = new THREE.MeshBasicMaterial({
+      color: 0x00f3ff, transparent: true, opacity: 0.15,
+      side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(18, 22, 6), addMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.3;
+    scene.add(ring);
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(6, 16),
+      addMat.clone()
+    );
+    dot.material.opacity = 0.2;
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.y = 0.3;
+    scene.add(dot);
   })();
 
   // ══════════════════════════════════════════════════════════════════════
@@ -2889,15 +3288,118 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  TRAIL WALL MESH — Vertical ribbon geometry (the iconic Tron walls)
+  //  TRAIL WALL — Custom GLSL ShaderMaterial (the iconic Tron light walls)
+  //  Animated energy flow, fresnel edge glow, pulse waves, scanlines,
+  //  top-edge corona, trail-length fade. All fed through bloom.
   // ══════════════════════════════════════════════════════════════════════
+
+  // ── Shared shader source (compiled once, instanced per cycle) ──────
+  const TRAIL_VERT = /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main() {
+      vUv = uv;
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const TRAIL_FRAG = /* glsl */`
+    uniform float uTime;
+    uniform vec3  uColor;
+    uniform float uOpacity;
+
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+
+    // ── Pseudo-random hash (cheap noise) ───────────────────────────────
+    float hash(float n) { return fract(sin(n) * 43758.5453); }
+
+    void main() {
+      float u = vUv.x;   // 0 = oldest trail point → 1 = cycle head
+      float v = vUv.y;   // 0 = ground → 1 = top edge
+
+      // ── Trail age fade: old segments go transparent ──────────────────
+      float trailFade = smoothstep(0.0, 0.15, u);
+
+      // ── Vertical energy flow (scrolling upward through the wall) ─────
+      float flowSpeed = 3.0;
+      float flowFreq  = 12.0;
+      float flow = sin((v * flowFreq - uTime * flowSpeed) * 6.2832);
+      flow = pow(clamp(flow, 0.0, 1.0), 4.0);  // sharpen into thin bright lines
+
+      // ── Horizontal pulse waves racing toward the cycle head ──────────
+      float pulseSpeed = 6.0;
+      float pulseFreq  = 8.0;
+      float pulse = sin((u * pulseFreq - uTime * pulseSpeed) * 6.2832);
+      pulse = pow(clamp(pulse, 0.0, 1.0), 10.0);  // ultra-thin bright streaks
+
+      // ── Top-edge corona (bright bloom band at the ribbon crest) ──────
+      float topGlow = pow(v, 3.0) * 1.2;
+
+      // ── Ground-bleed glow (light spilling onto the floor) ────────────
+      float bottomGlow = pow(1.0 - v, 5.0) * 0.25;
+
+      // ── Fresnel edge glow (screen-space normal approximation) ────────
+      vec3 dFdxPos = dFdx(vWorldPos);
+      vec3 dFdyPos = dFdy(vWorldPos);
+      vec3 faceN   = normalize(cross(dFdxPos, dFdyPos));
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      float fresnel = 1.0 - abs(dot(faceN, viewDir));
+      fresnel = pow(fresnel, 2.5) * 0.6;
+
+      // ── Scanline interference (horizontal CRT-like lines) ────────────
+      float scanFreq = 60.0;
+      float scan = sin(v * scanFreq * 6.2832) * 0.5 + 0.5;
+      scan = 0.82 + scan * 0.18;    // subtle, not overpowering
+
+      // ── Micro-circuit pattern (faint grid texture within the wall) ────
+      float circuitH = step(0.97, fract(v * 20.0)) * 0.15;
+      float circuitV = step(0.97, fract(u * 40.0)) * 0.10;
+      float circuit  = circuitH + circuitV;
+
+      // ── Head proximity flare (bright glow near the cycle) ────────────
+      float headFlare = pow(u, 12.0) * 0.8;
+
+      // ── Combine all energy ───────────────────────────────────────────
+      float energy = flow      * 0.30
+                   + pulse     * 0.25
+                   + topGlow   * 0.15
+                   + bottomGlow
+                   + fresnel
+                   + circuit
+                   + headFlare;
+
+      float alpha = (0.25 + energy * 0.75) * trailFade * uOpacity;
+
+      // ── Color with HDR energy boost (drives bloom) ───────────────────
+      vec3 col = uColor * (1.0 + energy * 2.5);
+
+      // Apply scanline modulation
+      col *= scan;
+
+      // ── Hot-white core at the very top edge ──────────────────────────
+      float edgeWhite = pow(v, 8.0) * 0.4;
+      col = mix(col, vec3(1.0), edgeWhite);
+
+      gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
+    }
+  `;
+
+  // Shared uniform clock — updated once per frame, all trail materials read it
+  const trailClock = { value: 0 };
+
   function buildTrail(hex) {
     const MAX = MAX_TRAIL;
+    const col = new THREE.Color(hex);
 
-    // Wall mesh — indexed BufferGeometry, 2 verts per point (bottom + top)
+    // ── Wall mesh: indexed BufferGeometry, 2 verts per point (bottom+top) ──
     const wallPos = new Float32Array(MAX * 2 * 3);
+    const wallUV  = new Float32Array(MAX * 2 * 2);   // new: UV coords
     const wallGeo = new THREE.BufferGeometry();
     wallGeo.setAttribute('position', new THREE.BufferAttribute(wallPos, 3));
+    wallGeo.setAttribute('uv',       new THREE.BufferAttribute(wallUV, 2));
+
     const indices = [];
     for (let i = 0; i < MAX - 1; i++) {
       const b0 = i * 2, t0 = i * 2 + 1;
@@ -2907,38 +3409,48 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     wallGeo.setIndex(indices);
     wallGeo.setDrawRange(0, 0);
 
-    const wallMesh = new THREE.Mesh(wallGeo,
-      new THREE.MeshBasicMaterial({
-        color: hex, transparent: true, opacity: 0.5,
-        side: THREE.DoubleSide
-      })
-    );
+    const wallMat = new THREE.ShaderMaterial({
+      vertexShader:   TRAIL_VERT,
+      fragmentShader: TRAIL_FRAG,
+      uniforms: {
+        uTime:    trailClock,
+        uColor:   { value: new THREE.Vector3(col.r, col.g, col.b) },
+        uOpacity: { value: 0.65 }
+      },
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const wallMesh = new THREE.Mesh(wallGeo, wallMat);
     wallMesh.frustumCulled = false;
 
-    // Top edge line (bright, feeds bloom — the glowing ribbon edge)
+    // ── Top edge line (bright, feeds bloom — the glowing ribbon crest) ──
     const topPos = new Float32Array(MAX * 3);
     const topGeo = new THREE.BufferGeometry();
     topGeo.setAttribute('position', new THREE.BufferAttribute(topPos, 3));
     topGeo.setDrawRange(0, 0);
     const topLine = new THREE.Line(topGeo,
-      new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.9 })
+      new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.95 })
     );
     topLine.frustumCulled = false;
 
-    // Base glow line (on the floor, additive bloom feeder)
+    // ── Base glow line (on the floor, additive bloom feeder) ────────────
     const basePos = new Float32Array(MAX * 3);
     const baseGeo = new THREE.BufferGeometry();
     baseGeo.setAttribute('position', new THREE.BufferAttribute(basePos, 3));
     baseGeo.setDrawRange(0, 0);
     const baseLine = new THREE.Line(baseGeo,
       new THREE.LineBasicMaterial({
-        color: hex, transparent: true, opacity: 0.4,
+        color: hex, transparent: true, opacity: 0.5,
         blending: THREE.AdditiveBlending
       })
     );
     baseLine.frustumCulled = false;
 
-    return { wallPos, wallGeo, wallMesh, topPos, topGeo, topLine, basePos, baseGeo, baseLine };
+    return { wallPos, wallUV, wallGeo, wallMesh, wallMat,
+             topPos, topGeo, topLine, basePos, baseGeo, baseLine };
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -2982,26 +3494,43 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     scene.add(trail.topLine);
     scene.add(trail.baseLine);
 
+    // ── Headlight glow cone (volumetric forward beam) ──────────────────
+    let headlight = null;
+    if (!isAmbient) {
+      const hlGeo = new THREE.ConeGeometry(40, 120, 16, 1, true);
+      hlGeo.rotateZ(-Math.PI / 2);  // point along +X (forward)
+      hlGeo.translate(60, 0, 0);    // offset forward from cycle center
+      const hlMat = new THREE.MeshBasicMaterial({
+        color: hex, transparent: true, opacity: 0.06,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
+      });
+      headlight = new THREE.Mesh(hlGeo, hlMat);
+      headlight.position.set(x, WALL_H * 0.3, z);
+      headlight.rotation.y = Math.atan2(-dz, dx);
+      scene.add(headlight);
+    }
+
     cycles.push({
-      stepName, contestant, hex, mesh, trail, label,
+      stepName, contestant, hex, mesh, trail, label, headlight,
       x, z, dx, dz, speed,
       life: 1, maxLife: isAmbient ? 30000 : 20000,
       born: performance.now(),
       pts: [], turnCD: 0, ambient: isAmbient, derezz: false
     });
+    if (!isAmbient) emitPulse(x, z, hex);
   }
 
   // ══════════════════════════════════════════════════════════════════════
   //  POOLED PARTICLE SYSTEM — 3D particles with gravity
   // ══════════════════════════════════════════════════════════════════════
-  const P_MAX = 600;
+  const P_MAX = 2000;
   const pPos = new Float32Array(P_MAX * 3);
   const pCol = new Float32Array(P_MAX * 3);
   const pGeo = new THREE.BufferGeometry();
   pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
   pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
   const pMesh = new THREE.Points(pGeo, new THREE.PointsMaterial({
-    size: 4, vertexColors: true, transparent: true,
+    size: 5, vertexColors: true, transparent: true,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
   }));
   pMesh.frustumCulled = false;
@@ -3049,9 +3578,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     for (const c of cycles) {
       if (!c.ambient && c.life > 0 && !c.derezz) {
         c.derezz = true;
-        for (let i = 0; i < 30; i++) {
-          const a = (i / 30) * Math.PI * 2;
-          const sp = 2 + Math.random() * 5;
+        for (let i = 0; i < 60; i++) {
+          const a = (i / 60) * Math.PI * 2;
+          const sp = 2 + Math.random() * 7;
           emit(c.x, c.z, Math.cos(a) * sp, Math.sin(a) * sp, c.hex);
         }
       }
@@ -3064,6 +3593,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     scene.remove(c.trail.wallMesh);
     scene.remove(c.trail.topLine);
     scene.remove(c.trail.baseLine);
+    if (c.headlight) scene.remove(c.headlight);
     c.mesh.traverse(o => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
@@ -3071,10 +3601,94 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         o.material.dispose();
       }
     });
-    c.trail.wallGeo.dispose(); c.trail.wallMesh.material.dispose();
+    c.trail.wallGeo.dispose(); c.trail.wallMat.dispose();
     c.trail.topGeo.dispose();  c.trail.topLine.material.dispose();
     c.trail.baseGeo.dispose(); c.trail.baseLine.material.dispose();
+    if (c.headlight) { c.headlight.geometry?.dispose(); c.headlight.material?.dispose(); }
     cycles.splice(i, 1);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  FLOATING DATA MOTES — Atmospheric luminous particles across arena
+  // ══════════════════════════════════════════════════════════════════════
+  const MOTE_COUNT = 150;
+  const motePos = new Float32Array(MOTE_COUNT * 3);
+  const moteCol = new Float32Array(MOTE_COUNT * 3);
+  const moteVel = [];
+  for (let i = 0; i < MOTE_COUNT; i++) {
+    motePos[i * 3]     = (Math.random() - 0.5) * ARENA_X * 1.2;
+    motePos[i * 3 + 1] = 5 + Math.random() * WALL_H * 3;
+    motePos[i * 3 + 2] = (Math.random() - 0.5) * ARENA_Z * 1.2;
+    const brightness = 0.2 + Math.random() * 0.3;
+    moteCol[i * 3]     = 0;
+    moteCol[i * 3 + 1] = 0.95 * brightness;
+    moteCol[i * 3 + 2] = 1.0 * brightness;
+    moteVel.push({
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.1,
+      vz: (Math.random() - 0.5) * 0.3,
+      phase: Math.random() * Math.PI * 2
+    });
+  }
+  const moteGeo = new THREE.BufferGeometry();
+  moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+  moteGeo.setAttribute('color', new THREE.BufferAttribute(moteCol, 3));
+  const moteMesh = new THREE.Points(moteGeo, new THREE.PointsMaterial({
+    size: 3, vertexColors: true, transparent: true, opacity: 0.6,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+  }));
+  moteMesh.frustumCulled = false;
+  scene.add(moteMesh);
+
+  function updateMotes(now) {
+    const t = now * 0.001;
+    for (let i = 0; i < MOTE_COUNT; i++) {
+      const v = moteVel[i];
+      motePos[i * 3]     += v.vx + Math.sin(t * 0.5 + v.phase) * 0.05;
+      motePos[i * 3 + 1] += v.vy + Math.cos(t * 0.3 + v.phase) * 0.02;
+      motePos[i * 3 + 2] += v.vz + Math.cos(t * 0.4 + v.phase) * 0.05;
+      if (motePos[i * 3]     >  HALF_X * 1.2) motePos[i * 3]     = -HALF_X * 1.2;
+      if (motePos[i * 3]     < -HALF_X * 1.2) motePos[i * 3]     =  HALF_X * 1.2;
+      if (motePos[i * 3 + 2] >  HALF_Z * 1.2) motePos[i * 3 + 2] = -HALF_Z * 1.2;
+      if (motePos[i * 3 + 2] < -HALF_Z * 1.2) motePos[i * 3 + 2] =  HALF_Z * 1.2;
+      if (motePos[i * 3 + 1] > WALL_H * 4)    motePos[i * 3 + 1] = 5;
+      if (motePos[i * 3 + 1] < 2)              motePos[i * 3 + 1] = WALL_H * 3;
+    }
+    moteGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  PULSE RINGS — Expanding ground rings on contestant spawn
+  // ══════════════════════════════════════════════════════════════════════
+  const pulseRings = [];
+
+  function emitPulse(x, z, hex) {
+    const geo = new THREE.RingGeometry(2, 5, 64);
+    const mat = new THREE.MeshBasicMaterial({
+      color: hex, transparent: true, opacity: 0.9,
+      side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.5, z);
+    scene.add(ring);
+    pulseRings.push({ mesh: ring, geo, mat, life: 1.0 });
+  }
+
+  function updatePulseRings() {
+    for (let i = pulseRings.length - 1; i >= 0; i--) {
+      const pr = pulseRings[i];
+      pr.life -= 0.012;
+      const scale = 1 + (1 - pr.life) * 40;
+      pr.mesh.scale.set(scale, scale, 1);
+      pr.mat.opacity = pr.life * 0.6;
+      if (pr.life <= 0) {
+        scene.remove(pr.mesh);
+        pr.geo.dispose();
+        pr.mat.dispose();
+        pulseRings.splice(i, 1);
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -3088,9 +3702,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       if (c.derezz) {
         c.life -= 0.03;
         c.mesh.scale.setScalar(Math.max(0.01, c.life));
-        // Fade trail walls during derezz
-        c.trail.wallMesh.material.opacity = 0.5 * c.life;
-        c.trail.topLine.material.opacity = 0.9 * c.life;
+        // Fade trail walls during derezz (shader uniform)
+        c.trail.wallMat.uniforms.uOpacity.value = 0.65 * c.life;
+        c.trail.topLine.material.opacity = 0.95 * c.life;
+        // Fade headlight
+        if (c.headlight) c.headlight.material.opacity = 0.06 * c.life;
         if (c.life <= 0) { removeCycle(i); continue; }
         continue;
       }
@@ -3122,9 +3738,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         }
         c.turnCD = Math.ceil(CELL / c.speed) + 10;
         // Wall-impact spark burst (3D particles fly upward)
-        for (let j = 0; j < 12; j++) {
+        for (let j = 0; j < 24; j++) {
           const a = Math.random() * Math.PI * 2;
-          emit(c.x, c.z, Math.cos(a) * 3, Math.sin(a) * 3, c.hex);
+          const sp = 2 + Math.random() * 4;
+          emit(c.x, c.z, Math.cos(a) * sp, Math.sin(a) * sp, c.hex);
         }
       }
 
@@ -3148,25 +3765,40 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       // Update mesh position + face direction of travel
       c.mesh.position.set(c.x, 0, c.z);
       if (Math.abs(c.dx) > 0.01 || Math.abs(c.dz) > 0.01) {
-        c.mesh.rotation.y = Math.atan2(-c.dz, c.dx);
+        const facing = Math.atan2(-c.dz, c.dx);
+        c.mesh.rotation.y = facing;
+        // Sync headlight cone with cycle position + heading
+        if (c.headlight) {
+          c.headlight.position.set(c.x, WALL_H * 0.3, c.z);
+          c.headlight.rotation.y = facing;
+        }
       }
 
       // Spin identity disc
       const disc = c.mesh.getObjectByName('disc');
       if (disc) disc.rotation.z += 0.03;
 
-      // ── Trail Wall Update ──
+      // ── Trail Wall Update (positions + UVs for shader) ──
       c.pts.push([c.x, c.z]);
       if (c.pts.length > MAX_TRAIL) c.pts.shift();
 
       const t = c.trail;
       const n = c.pts.length;
+      const nMinus1 = Math.max(n - 1, 1);
       for (let j = 0; j < n; j++) {
         const px = c.pts[j][0], pz = c.pts[j][1];
+        const u = j / nMinus1;  // 0 = oldest → 1 = cycle head
+
         // Wall: bottom vertex (y=0) + top vertex (y=WALL_H)
         const bi = (j * 2) * 3, ti = (j * 2 + 1) * 3;
         t.wallPos[bi] = px;   t.wallPos[bi+1] = 0;       t.wallPos[bi+2] = pz;
         t.wallPos[ti] = px;   t.wallPos[ti+1] = WALL_H;  t.wallPos[ti+2] = pz;
+
+        // UVs: bottom (u, 0), top (u, 1)
+        const bUV = (j * 2) * 2, tUV = (j * 2 + 1) * 2;
+        t.wallUV[bUV] = u;   t.wallUV[bUV+1] = 0;
+        t.wallUV[tUV] = u;   t.wallUV[tUV+1] = 1;
+
         // Top edge line
         t.topPos[j*3] = px;   t.topPos[j*3+1] = WALL_H;  t.topPos[j*3+2] = pz;
         // Base glow line
@@ -3174,20 +3806,38 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       }
       t.wallGeo.setDrawRange(0, Math.max(0, (n - 1) * 6));
       t.wallGeo.attributes.position.needsUpdate = true;
+      t.wallGeo.attributes.uv.needsUpdate = true;
       t.topGeo.setDrawRange(0, n);
       t.topGeo.attributes.position.needsUpdate = true;
       t.baseGeo.setDrawRange(0, n);
       t.baseGeo.attributes.position.needsUpdate = true;
 
-      // Fade with life
-      t.wallMesh.material.opacity = (c.ambient ? 0.25 : 0.55) * c.life;
-      t.topLine.material.opacity = (c.ambient ? 0.4 : 0.9) * c.life;
-      t.baseLine.material.opacity = (c.ambient ? 0.2 : 0.4) * c.life;
+      // Fade shader opacity + lines with life
+      t.wallMat.uniforms.uOpacity.value = (c.ambient ? 0.30 : 0.65) * c.life;
+      t.topLine.material.opacity = (c.ambient ? 0.5 : 0.95) * c.life;
+      t.baseLine.material.opacity = (c.ambient ? 0.25 : 0.5) * c.life;
+
+      // ── Continuous head-spark emission (particles trail behind the cycle) ──
+      if (!c.derezz && Math.random() < (c.ambient ? 0.15 : 0.5)) {
+        const sparkSpread = 2;
+        const svx = -c.dx * 0.5 + (Math.random() - 0.5) * sparkSpread;
+        const svz = -c.dz * 0.5 + (Math.random() - 0.5) * sparkSpread;
+        emit(c.x, c.z, svx, svz, c.hex);
+      }
     }
 
-    updateParticles();
+    // ── Update shader clock for all trail walls ──
+    trailClock.value = now * 0.001;
 
-    // Camera is static — no drift, clean grid lines
+    updateParticles();
+    updateMotes(now);
+    updatePulseRings();
+
+    // Cinematic camera drift — slow orbital movement
+    const camT = now * 0.00006;
+    camera.position.x = Math.sin(camT) * 150;
+    camera.position.z = 600 + Math.cos(camT * 0.7) * 100;
+    camera.position.y = 750 + Math.sin(camT * 0.5) * 60;
     camera.lookAt(0, 0, -50);
   }
 
@@ -3217,9 +3867,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     if (cycles.filter(c => c.ambient).length < AMBIENT_MAX) {
       spawnCycle('', '', true);
     }
-    setTimeout(ambientLoop, 6000 + Math.random() * 8000);
+    setTimeout(ambientLoop, 3000 + Math.random() * 5000);
   }
-  setTimeout(ambientLoop, 1000);
+  setTimeout(ambientLoop, 500);
+  spawnCycle('', '', true);
   spawnCycle('', '', true);
 
   requestAnimationFrame(animate);
@@ -3227,7 +3878,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   // ── Expose Public API (replaces the stub from the non-module script) ──
   window.Grid = {
     spawnOrb(stepName, contestant) { spawnCycle(stepName, contestant, false); },
-    derezzAll
+    derezzAll,
+    emitPulse
   };
 
   console.log('%c\u26A1 [GRID] Three.js 3D Tron Arena — perspective cam, trail walls, bloom armed', 'color:#00f3ff;font-weight:bold');

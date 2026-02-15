@@ -6,9 +6,9 @@ namespace TrackingPixel.Models;
 // Created by TrackingCaptureService from an HTTP request, enriched by
 // FingerprintStabilityService and IpBehaviorService (server-side alert
 // params appended to QueryString), then enqueued to DatabaseWriterService
-// which bulk-inserts into PiXL.Test.
+// which bulk-inserts into PiXL.Raw.
 //
-// IMPORTANT: The 9 properties here map 1:1 to the 9 columns of PiXL.Test.
+// IMPORTANT: The 9 properties here map 1:1 to the 9 columns of PiXL.Raw.
 // Column mapping is ordinal-based in DatabaseWriterService.ColumnNames[].
 // If you add/remove/reorder properties, update ColumnNames AND the SQL table.
 //

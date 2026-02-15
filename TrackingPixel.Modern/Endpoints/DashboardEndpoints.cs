@@ -148,7 +148,8 @@ public static class DashboardEndpoints
             if (!RequireLoopback(ctx)) return;
             var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
             var data = await QueryAsync(settings.ConnectionString,
-                $"SELECT TOP {hours} * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC");
+                "SELECT TOP (@N) * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC",
+                new SqlParameter("@N", hours));
             await WriteJsonAsync(ctx, data);
         });
         
@@ -212,7 +213,8 @@ public static class DashboardEndpoints
             if (!RequireLoopback(ctx)) return;
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 50;
             var data = await QueryAsync(settings.ConnectionString,
-                $"SELECT TOP {limit} * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC");
+                "SELECT TOP (@N) * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC",
+                new SqlParameter("@N", limit));
             await WriteJsonAsync(ctx, data);
         });
         

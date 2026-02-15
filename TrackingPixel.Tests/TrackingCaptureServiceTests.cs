@@ -62,11 +62,13 @@ public sealed class TrackingCaptureServiceTests
     }
 
     // ========================================================================
-    // IP EXTRACTION - Priority chain: CF > True-Client > X-Real > XFF > Connection
+    // IP EXTRACTION - Only XFF and RemoteIpAddress are trusted (no CDN)
+    // CDN-specific headers (CF-Connecting-IP, True-Client-IP, X-Real-IP)
+    // are intentionally IGNORED — they can be spoofed without a CDN.
     // ========================================================================
 
     [Fact]
-    public void CaptureFromRequest_should_preferCloudflareIp()
+    public void CaptureFromRequest_should_ignoreCloudflareIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["CF-Connecting-IP"] = "203.0.113.50";
@@ -75,11 +77,12 @@ public sealed class TrackingCaptureServiceTests
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.IPAddress.Should().Be("203.0.113.50");
+        // CF-Connecting-IP is ignored; falls through to XFF first entry
+        result.IPAddress.Should().Be("10.0.0.1");
     }
 
     [Fact]
-    public void CaptureFromRequest_should_useTrueClientIp_when_noCfHeader()
+    public void CaptureFromRequest_should_ignoreTrueClientIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["True-Client-IP"] = "198.51.100.25";
@@ -87,11 +90,12 @@ public sealed class TrackingCaptureServiceTests
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.IPAddress.Should().Be("198.51.100.25");
+        // True-Client-IP is ignored; falls through to XFF
+        result.IPAddress.Should().Be("10.0.0.1");
     }
 
     [Fact]
-    public void CaptureFromRequest_should_useXRealIp_when_noCfOrTrueClient()
+    public void CaptureFromRequest_should_ignoreXRealIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
         context.Request.Headers["X-Real-IP"] = "93.184.216.34";
@@ -99,7 +103,8 @@ public sealed class TrackingCaptureServiceTests
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.IPAddress.Should().Be("93.184.216.34");
+        // X-Real-IP is ignored; falls through to XFF first entry
+        result.IPAddress.Should().Be("10.0.0.1");
     }
 
     [Fact]

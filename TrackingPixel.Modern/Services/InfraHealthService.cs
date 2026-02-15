@@ -177,7 +177,7 @@ public sealed class InfraHealthService : IDisposable
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT 
-                    (SELECT COUNT(*) FROM PiXL.Test) AS TestRows,
+                    (SELECT COUNT(*) FROM PiXL.Raw) AS TestRows,
                     (SELECT COUNT(*) FROM PiXL.Parsed) AS ParsedRows,
                     (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS Watermark,
                     (SELECT LastRunAt FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS LastEtlRun,
@@ -310,10 +310,10 @@ public sealed class InfraHealthService : IDisposable
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT 
-                    (SELECT MAX(ReceivedAt) FROM PiXL.Test) AS LastInsert,
-                    (SELECT COUNT(*) FROM PiXL.Test WHERE ReceivedAt >= DATEADD(HOUR, -1, GETUTCDATE())) AS HitsLastHour,
-                    (SELECT COUNT(*) FROM PiXL.Test WHERE ReceivedAt >= DATEADD(MINUTE, -5, GETUTCDATE())) AS HitsLast5Min,
-                    (SELECT MAX(Id) FROM PiXL.Test) AS MaxTestId,
+                    (SELECT MAX(ReceivedAt) FROM PiXL.Raw) AS LastInsert,
+                    (SELECT COUNT(*) FROM PiXL.Raw WHERE ReceivedAt >= DATEADD(HOUR, -1, GETUTCDATE())) AS HitsLastHour,
+                    (SELECT COUNT(*) FROM PiXL.Raw WHERE ReceivedAt >= DATEADD(MINUTE, -5, GETUTCDATE())) AS HitsLast5Min,
+                    (SELECT MAX(Id) FROM PiXL.Raw) AS MaxTestId,
                     (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS WatermarkId,
                     (SELECT MAX(SourceId) FROM PiXL.Parsed) AS MaxParsedId";
             cmd.CommandTimeout = 5;
