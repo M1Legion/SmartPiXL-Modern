@@ -131,15 +131,17 @@ Browser → IIS (443) → ASP.NET Core InProcess
   → TrackingEndpoints.cs (route: /{**path} ending in _SMART.GIF)
   → TrackingCaptureService.cs (parse request into TrackingData)
   → DatabaseWriterService.cs (Channel<T> queue → SqlBulkCopy)
-  → dbo.PiXL_Test (raw ingest, 9 columns)
-  → EtlBackgroundService (every 60s, calls usp_ParseNewHits)
-  → dbo.PiXL_Parsed (~175 columns, materialized warehouse)
+  → PiXL.Test (raw ingest, 9 columns)
+  → EtlBackgroundService (every 60s):
+      1. ETL.usp_ParseNewHits → PiXL.Parsed (~175 cols, materialized warehouse)
+                              → PiXL.Device, PiXL.IP, PiXL.Visit
+      2. ETL.usp_MatchVisits  → PiXL.Match (identity resolution vs AutoConsumer)
   → vw_Dash_* views (power the Tron dashboard at /tron)
 ```
 
 ## Dashboard
 
-The **Tron dashboard** is the only dashboard. It's served from `wwwroot/tron.html` at the `/tron` endpoint (localhost-only). It calls `/api/dash/*` endpoints which query `vw_Dash_*` SQL views reading from `PiXL_Parsed`.
+The **Tron dashboard** is the only dashboard. It's served from `wwwroot/tron.html` at the `/tron` endpoint (localhost-only). It calls `/api/dash/*` endpoints which query `vw_Dash_*` SQL views reading from `PiXL.Parsed`.
 
 There is no separate diagnostics dashboard. The old `TrackingPixel.Diagnostics` project (port 5050) was removed.
 
@@ -151,8 +153,8 @@ There is no separate diagnostics dashboard. The old `TrackingPixel.Diagnostics` 
 3. Second most common: **`web.config` was emptied/overwritten** by `dotnet publish`
 
 ### Dashboard shows no data
-1. `PiXL_Test` has rows but `PiXL_Parsed` doesn't → ETL proc hasn't run. Check `ETL_Watermark` table and run `EXEC usp_ParseNewHits` manually
-2. Watermark is ahead of PiXL_Test max ID → Reset: `UPDATE ETL_Watermark SET LastProcessedId = 0, RowsProcessed = 0 WHERE ProcessName = 'ParseNewHits'`
+1. `PiXL.Test` has rows but `PiXL.Parsed` doesn't → ETL proc hasn't run. Check `ETL.Watermark` table and run `EXEC ETL.usp_ParseNewHits` manually
+2. Watermark is ahead of PiXL.Test max ID → Reset: `UPDATE ETL.Watermark SET LastProcessedId = 0, RowsProcessed = 0 WHERE ProcessName = 'ParseNewHits'`
 
 ### Process needs restart after config change
 The running process caches `appsettings.json` at startup. After changing config:

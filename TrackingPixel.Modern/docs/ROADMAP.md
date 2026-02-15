@@ -1,424 +1,115 @@
-# SmartPiXL Modernization Roadmap
+# SmartPiXL — Roadmap
 
-Last Updated: January 26, 2026
+Last Updated: February 15, 2026
 
 ---
 
-## ✅ Completed
+## Completed
 
 ### Phase 1: Core Server
-- [x] ASP.NET Core 8 Minimal APIs server
-- [x] Fingerprinting script (100+ data points)
-- [x] Background SQL bulk writer with graceful shutdown
-- [x] Async file logger with buffering
-- [x] SQL schema with parsed view (vw_PiXL_Parsed)
-- [x] 541K+ test records generated via Playwright
+- [x] .NET 10 Minimal API server (`Program.cs`)
+- [x] Fingerprinting script — 100+ data points via `<script>` tag
+- [x] `DatabaseWriterService` — `Channel<T>` → `SqlBulkCopy` into `PiXL.Test`
+- [x] `TrackingCaptureService` — HTTP request → `TrackingData` parser
+- [x] `FileTrackingLogger` — async daily rolling log files
+- [x] 1,000+ test records generated via Playwright
 
 ### Phase 2: Code Quality
-- [x] Code review - no strings in loops (StringBuilder)
-- [x] Code review - using declarations over blocks
-- [x] Code review - local functions where appropriate
-- [x] Removed dead code (MaxFileSizeMB, duplicate ConnectionStrings)
-- [x] Fixed naming consistency (CompanyID/PiXLID)
-- [x] Standardized ports to HTTPS 6001
-- [x] Deleted obsolete test files
-- [x] Cached static paths (test.html)
+- [x] StringBuilder for string loops, using declarations, local functions
+- [x] Removed dead code and duplicate config
+- [x] Naming consistency (CompanyID/PiXLID)
+- [x] Dev ports standardized to 7000/7001, production 6000/6001
+- [x] Compiled regex, stack allocation, zero-allocation patterns
+
+### Phase 3: IP & Fingerprint Enrichment
+- [x] `IpClassificationService` — datacenter / residential / reserved IP classification
+- [x] `DatacenterIpService` — AWS/GCP IP range downloader (background refresh)
+- [x] `IpBehaviorService` — subnet /24 velocity & rapid-fire timing detection
+- [x] `FingerprintStabilityService` — per-IP fingerprint variation scoring
+- [x] `IpClassification` model and enum
+- [x] Server-side enrichment pipeline wired into `TrackingEndpoints.CaptureAndEnqueue`
+
+### Phase 4: Database Schema & ETL
+- [x] `PiXL` and `ETL` schemas created (SQL/17B)
+- [x] Normalized star schema: `PiXL.Device`, `PiXL.IP`, `PiXL.Visit`, `PiXL.Match` (SQL/19)
+- [x] `PiXL.Parsed` materialized warehouse table (~175 columns, replaces the old view)
+- [x] `ETL.usp_ParseNewHits` — parses raw `PiXL.Test` rows into `PiXL.Parsed`
+- [x] `ETL.usp_MatchVisits` — identity resolution against `AutoConsumer` (421M rows)
+- [x] `EtlBackgroundService` — runs both ETL procs every 60 seconds
+- [x] `AutoConsumer` email index (SQL/22) — `IX_AutoConsumer_EMail`
+- [x] `dbo.vw_Dash_PipelineHealth` view (SQL/24)
+- [x] Evasion countermeasure columns (SQL/11)
+- [x] IP behavior signal columns (SQL/17)
+- [x] NVARCHAR → VARCHAR migration for non-Unicode columns (SQL/18)
+- [x] Backfill Visit/Device/IP dimension tables (SQL/21)
+
+### Phase 5: Dashboard
+- [x] Tron 3D WebGL dashboard (`wwwroot/tron.html`, Three.js)
+- [x] `DashboardEndpoints` — 11 JSON endpoints under `/api/dash/*`
+- [x] 10 SQL views (`vw_Dash_*`) powering all dashboard panels
+- [x] `InfraHealthService` — probes Windows services, SQL health, IIS, data flow
+- [x] Pipeline health panel (row counts, watermarks, lag, freshness)
+- [x] Localhost-only access control (`RequireLoopback`)
+
+### Phase 6: Evasion Countermeasures
+- [x] 10 vulnerability countermeasures documented and implemented
+- [x] Canvas noise detection (multi-canvas cross-validation)
+- [x] Audio fingerprint noise detection
+- [x] Behavioral analysis (mouse entropy, timing patterns)
+- [x] Stealth plugin detection
+- [x] Anti-detect browser detection (fingerprint stability)
+- [x] Datacenter IP detection
+- [x] Font spoofing hardening
 
 ---
 
-## 🔄 In Progress
+## Backlog
 
-### Phase 3: IP Geolocation & Classification
+### IP Geolocation Integration
+**Priority:** P1 — Next major feature
 
-**Goal:** Enrich tracking data with geolocation and bot detection signals before SQL insert.
+| Task | Effort | Status |
+|------|--------|--------|
+| Geo cache lookup service (`GeoCacheService`) against existing 342M-row IP geo table | 3–4 h | Not started |
+| Expand `TrackingData` with geo fields (Country, Region, City, Lat/Lon, Timezone, ISP) | 1 h | Not started |
+| Integrate geo lookup into enrichment pipeline (before SQL insert) | 2–3 h | Not started |
+| Geo-timezone mismatch bot signal | 2 h | Not started |
+| Queue unresolved IPs for IP-API batch | 2–3 h | Not started |
 
-### Phase 3B: SQL Server 2025 Native JSON Features (Implemented)
+### Bot Detection Enhancement
+**Priority:** P2
 
-**Status:** Design complete, migration script ready (`SQL/19_DeviceIpVisitMatchTables.sql`)
+| Task | Effort | Status |
+|------|--------|--------|
+| Known bot user-agent detection (compiled regex patterns for Googlebot, Bingbot, headless browsers, etc.) | 2–3 h | Not started |
+| `BotDetectionService` consolidating all bot signals into a single score | 3–4 h | Not started |
 
-Leveraging SQL Server 2025's native `json` data type and `CREATE JSON INDEX` for `PiXL.Visit.ClientParamsJson`:
+### SQL Server 2025 JSON Enhancements
+**Priority:** P2
 
-- **Native `json` type** — pre-parsed binary storage, built-in validation, ~30% smaller than NVARCHAR
-- **`CREATE JSON INDEX`** — indexed seeks on JSON paths (`$.email`, `$.hid`) without computed columns
-- **`JSON_OBJECTAGG`** — ETL Phase 12 builds JSON from `_cp_*` params cleanly (no string concatenation)
-- **`MatchEmail` as regular column** — fixes SQL Server limitation: filtered indexes can't reference computed columns
-- **Bug fix:** Original plan's `MatchEmail AS CAST(JSON_VALUE(...)) PERSISTED` + filtered index was impossible (`Msg 10609`)
+| Task | Effort | Status |
+|------|--------|--------|
+| Migrate `PiXL.Test.HeadersJson` from `NVARCHAR(MAX)` to native `json` type | 1 h | Not started |
+| Add more `JSON INDEX` paths on `PiXL.Visit.ClientParamsJson` as query patterns emerge | As needed | Not started |
 
-**Future JSON enhancements:**
-- **`.modify()` method** — in-place JSON field updates without rewriting the document. Could annotate `ClientParamsJson` with derived data (e.g., `$.match_status`, `$.normalized_email`) directly, avoiding additional columns for ephemeral metadata.
-- **`HeadersJson` migration** — `PiXL.Test.HeadersJson` (currently `NVARCHAR(MAX)`) could be migrated to `json` type for validation and storage efficiency. Low priority since it's never queried in SQL.
-- **Additional JSON INDEX paths** — as new client params become query targets, extend the JSON index `FOR` clause without schema changes.
+### Mobile Ad ID Integration
+**Priority:** P3 — Future
 
----
+| Task | Effort | Status |
+|------|--------|--------|
+| Design cross-system join (SmartPiXL visitors ↔ mobile ad IDs via shared IP + time window) | Design | Not started |
 
-## 📋 Backlog - Detailed Next Steps
+### TLS Fingerprinting
+**Priority:** P3 — Future
 
-### Epic: IP Geolocation Integration
-
-#### Task 3.1: IP Classification Service
-**Priority:** P0 (Required before geo)  
-**Effort:** 2-3 hours
-
-Create `Services/IpClassificationService.cs`:
-
-1. Parse IPv4 and IPv6 addresses
-2. Check against reserved ranges (see [docs/RESERVED_IP_RANGES.md](docs/RESERVED_IP_RANGES.md))
-3. Return `IpClassification` record:
-   ```csharp
-   public record IpClassification(
-       IpType Type,           // Public, Private, Loopback, CGNAT, etc.
-       bool ShouldGeolocate,  // false for private/loopback/reserved
-       string? RangeNote      // "RFC1918", "Loopback", "CGNAT", etc.
-   );
-   ```
-4. Handle edge cases:
-   - IPv4-mapped IPv6 (`::ffff:192.168.1.1`) - extract IPv4
-   - Malformed IPs - return `Unknown` type
-5. Unit tests for all reserved range boundaries
-
-**Files to create:**
-- `Services/IpClassificationService.cs`
-- `Models/IpClassification.cs`
-- Tests (later)
+| Task | Effort | Status |
+|------|--------|--------|
+| JA3/JA4 fingerprinting via reverse proxy (requires Nginx or HAProxy in front of IIS) | Design | Not started |
 
 ---
 
-#### Task 3.2: Existing Geo Cache Lookup Service
-**Priority:** P0  
-**Effort:** 3-4 hours
-
-Create `Services/GeoCacheService.cs`:
-
-1. **Database connection** to your existing IP geo table (342M records)
-   - Configure connection string in appsettings.json
-   - Table name and column mappings configurable
-2. **Lookup method:**
-   ```csharp
-   public GeoResult? LookupFromCache(string ipAddress);
-   ```
-3. **Batch lookup method:**
-   ```csharp
-   public Dictionary<string, GeoResult> LookupBatch(IEnumerable<string> ipAddresses);
-   ```
-4. Return `GeoResult` record:
-   ```csharp
-   public record GeoResult(
-       string? Country,
-       string? CountryCode,
-       string? Region,
-       string? City,
-       double? Latitude,
-       double? Longitude,
-       string? Timezone,
-       string? ISP,
-       string? Organization,
-       DateTime? CachedAt
-   );
-   ```
-5. Handle cache misses - return null, track for later IP-API batch
-
-**Configuration needed:**
-```json
-{
-  "GeoCache": {
-    "ConnectionString": "...",
-    "TableName": "IP_Geo_Cache",
-    "MaxBatchSize": 1000
-  }
-}
-```
-
-**Files to create:**
-- `Services/GeoCacheService.cs`
-- `Models/GeoResult.cs`
-- `Configuration/GeoCacheSettings.cs`
-
----
-
-#### Task 3.3: Expand TrackingData Model
-**Priority:** P0  
-**Effort:** 1 hour
-
-Update `Models/TrackingData.cs`:
-
-Add properties:
-```csharp
-// IP Classification
-public string? IpType { get; init; }           // "Public", "Private", etc.
-public bool IpShouldGeolocate { get; init; }
-
-// Geo Data (from cache or API)
-public string? GeoCountry { get; init; }
-public string? GeoCountryCode { get; init; }
-public string? GeoRegion { get; init; }
-public string? GeoCity { get; init; }
-public double? GeoLatitude { get; init; }
-public double? GeoLongitude { get; init; }
-public string? GeoTimezone { get; init; }
-public string? GeoISP { get; init; }
-public bool GeoFromCache { get; init; }        // true = from our cache, false = needs API
-
-// Bot Signals
-public bool GeoMismatch { get; init; }         // IP geo timezone != reported tz
-```
-
----
-
-#### Task 3.4: Update Database Schema
-**Priority:** P0  
-**Effort:** 1-2 hours
-
-Create `SQL/04_GeoAndClassificationColumns.sql`:
-
-1. Add columns to PiXL_Test:
-   ```sql
-   ALTER TABLE PiXL_Test ADD
-       IpType NVARCHAR(20) NULL,
-       GeoCountry NVARCHAR(100) NULL,
-       GeoCountryCode NVARCHAR(5) NULL,
-       GeoRegion NVARCHAR(100) NULL,
-       GeoCity NVARCHAR(100) NULL,
-       GeoLatitude DECIMAL(9,6) NULL,
-       GeoLongitude DECIMAL(9,6) NULL,
-       GeoTimezone NVARCHAR(50) NULL,
-       GeoISP NVARCHAR(200) NULL,
-       GeoFromCache BIT NULL,
-       GeoMismatch BIT NULL;
-   ```
-2. Update `CreateDataTableTemplate()` in DatabaseWriterService
-3. Update column mappings in `AddColumnMappings()`
-4. Add indexes:
-   ```sql
-   CREATE INDEX IX_PiXL_Test_GeoCountry ON PiXL_Test(GeoCountry);
-   CREATE INDEX IX_PiXL_Test_IpType ON PiXL_Test(IpType);
-   CREATE INDEX IX_PiXL_Test_GeoMismatch ON PiXL_Test(GeoMismatch) WHERE GeoMismatch = 1;
-   ```
-
----
-
-#### Task 3.5: Integrate Geo Lookup into Batch Writer
-**Priority:** P0  
-**Effort:** 2-3 hours
-
-Modify `Services/DatabaseWriterService.cs`:
-
-1. Inject `IpClassificationService` and `GeoCacheService`
-2. In `WriteBatchAsync`, before building the DataTable:
-   ```csharp
-   // Collect unique IPs from batch
-   var uniqueIps = batch
-       .Select(d => d.IPAddress)
-       .Where(ip => !string.IsNullOrEmpty(ip))
-       .Distinct()
-       .ToList();
-   
-   // Classify all IPs
-   var classifications = uniqueIps.ToDictionary(
-       ip => ip,
-       ip => _ipClassifier.Classify(ip)
-   );
-   
-   // Lookup geo for geolocatable IPs
-   var geolocatableIps = classifications
-       .Where(kv => kv.Value.ShouldGeolocate)
-       .Select(kv => kv.Key)
-       .ToList();
-   
-   var geoResults = _geoCache.LookupBatch(geolocatableIps);
-   ```
-3. When building each row, populate geo fields from lookup results
-4. Track IPs that weren't in cache (for later IP-API batch)
-
----
-
-#### Task 3.6: Bot Detection - Geo Mismatch
-**Priority:** P1  
-**Effort:** 2 hours
-
-Create `Services/BotDetectionService.cs`:
-
-1. **Timezone mismatch detection:**
-   ```csharp
-   public bool DetectGeoMismatch(string? reportedTimezone, int? reportedOffset, string? geoTimezone)
-   ```
-   - Parse reported timezone (from JS `tz` param) 
-   - Compare to geo timezone from IP lookup
-   - Allow ~2 hour tolerance (DST, regional variations)
-   - Return true if significant mismatch
-
-2. **Extract timezone offset from IANA timezone:**
-   - Use `TimeZoneInfo.FindSystemTimeZoneById()` or NodaTime
-   - Handle common IANA names: "America/New_York", "Europe/London", etc.
-
----
-
-#### Task 3.7: Queue Unresolved IPs for IP-API
-**Priority:** P2  
-**Effort:** 2-3 hours
-
-Create mechanism to track IPs that need external resolution:
-
-1. Add table or queue for pending IPs:
-   ```sql
-   CREATE TABLE IP_Pending_Geo (
-       IPAddress NVARCHAR(50) PRIMARY KEY,
-       FirstSeen DATETIME2 DEFAULT GETUTCDATE(),
-       AttemptCount INT DEFAULT 0
-   );
-   ```
-2. After batch insert, log any IPs that weren't in cache
-3. Separate background job (can be existing process) picks up pending IPs
-4. After IP-API resolution, update PiXL_Test records retroactively
-
-**Note:** This maintains compatibility with your existing IP-API batch process.
-
----
-
-### Epic: Bot Detection Enhancement
-
-#### Task 4.1: Known Bot User Agent Detection
-**Priority:** P1  
-**Effort:** 2-3 hours
-
-Add to `Services/BotDetectionService.cs`:
-
-1. Compiled regex patterns for known bots:
-   ```csharp
-   private static readonly Regex[] BotPatterns = [
-       new Regex(@"Googlebot|Bingbot|YandexBot|Baiduspider", RegexOptions.Compiled),
-       new Regex(@"facebookexternalhit|LinkedInBot|Twitterbot", RegexOptions.Compiled),
-       new Regex(@"HeadlessChrome|PhantomJS|Selenium|Puppeteer", RegexOptions.Compiled),
-       new Regex(@"curl/|wget/|python-requests/|Go-http-client/", RegexOptions.Compiled)
-   ];
-   ```
-2. Return `BotType` enum or null
-3. Add `IsKnownBot` and `BotType` fields to TrackingData
-
----
-
-#### Task 4.2: Datacenter IP Detection
-**Priority:** P2  
-**Effort:** 3-4 hours
-
-1. Download and cache major cloud provider IP ranges
-   - AWS, GCP, Azure, Cloudflare, DigitalOcean
-2. Create lookup service with periodic refresh (weekly)
-3. Add `IsDatacenterIP` field to TrackingData
-
----
-
-### Epic: Mobile Ad ID Integration
-
-#### Task 5.1: Design Cross-System Join
-**Priority:** P2 (Future)  
-**Effort:** Design phase
-
-**Goal:** Link SmartPiXL website visitors to mobile ad IDs via shared IP.
-
-1. Document your location service schema (IP + AdID tables)
-2. Design join strategy:
-   - Real-time lookup during ingest?
-   - Batch join after insert?
-   - Time window matching (IP + timestamp within X minutes)?
-3. Define enrichment fields:
-   - `LinkedAdID`
-   - `LocationLat`, `LocationLon` (GPS precision)
-   - `DeviceType` from location service
-4. Privacy/compliance review
-
----
-
-### Epic: Dashboard (Future)
-
-#### Task 6.1: "3026" Futuristic Dashboard
-**Priority:** P3 (Future)  
-**Effort:** TBD
-
-- Real-time metrics visualization
-- Fingerprint uniqueness analysis
-- Bot traffic breakdown
-- Geographic heatmaps
-- Device/browser distribution
-
----
-
-## 📊 Priority Matrix
-
-| Task | Priority | Effort | Dependencies |
-|------|----------|--------|--------------|
-| 3.1 IP Classification | P0 | 2-3h | None |
-| 3.2 Geo Cache Service | P0 | 3-4h | 3.1 |
-| 3.3 Expand TrackingData | P0 | 1h | None |
-| 3.4 SQL Schema Update | P0 | 1-2h | 3.3 |
-| 3.5 Integrate into Writer | P0 | 2-3h | 3.1, 3.2, 3.4 |
-| 3.6 Geo Mismatch Detection | P1 | 2h | 3.5 |
-| 3.7 Queue Unresolved IPs | P2 | 2-3h | 3.5 |
-| 4.1 Bot UA Detection | P1 | 2-3h | None |
-| 4.2 Datacenter IP Detection | P2 | 3-4h | 3.1 |
-| 5.1 AdID Integration Design | P2 | Design | 3.5 |
-| 6.1 Dashboard | P3 | TBD | All above |
-
----
-
-## 🔧 Configuration Additions Needed
-
-```json
-{
-  "GeoCache": {
-    "ConnectionString": "Server=...;Database=IP_Geo;...",
-    "TableName": "IP_Geo_Cache",
-    "IpColumn": "IPAddress",
-    "CountryColumn": "Country",
-    "RegionColumn": "Region",
-    "CityColumn": "City",
-    "LatitudeColumn": "Latitude",
-    "LongitudeColumn": "Longitude",
-    "TimezoneColumn": "Timezone",
-    "ISPColumn": "ISP"
-  },
-  
-  "BotDetection": {
-    "EnableUADetection": true,
-    "EnableDatacenterDetection": true,
-    "GeoMismatchToleranceHours": 2
-  }
-}
-```
-
----
-
-## 📁 New Files to Create
-
-```
-Services/
-  IpClassificationService.cs
-  GeoCacheService.cs
-  BotDetectionService.cs
-
-Models/
-  IpClassification.cs
-  GeoResult.cs
-  BotSignals.cs
-
-Configuration/
-  GeoCacheSettings.cs
-  BotDetectionSettings.cs
-
-SQL/
-  04_GeoAndClassificationColumns.sql
-
-docs/
-  RESERVED_IP_RANGES.md  ✅ (created)
-```
-
----
-
-## 📝 Notes
-
-- **IP-API compatibility:** The geo cache approach maintains compatibility with your existing IP-API batch process. New IPs that aren't cached will still get queued for IP-API resolution.
-
-- **Performance impact:** The geo cache lookup adds minimal latency to the batch writer. A batch of 100 IPs against a 342M row indexed table should complete in <10ms.
-
-- **Timezone comparison:** Comparing IANA timezone names to IP-derived timezones requires careful handling. Consider using NodaTime for robust timezone math.
-
-- **IPv6 readiness:** All services should handle both IPv4 and IPv6 from day one. The reserved ranges document includes both.
+## Notes
+
+- **IP-API compatibility:** The planned geo cache approach maintains compatibility with the existing IP-API batch process. New IPs not in cache will still queue for IP-API resolution.
+- **IPv6 readiness:** `IpClassificationService` already handles IPv4, IPv6, and IPv4-mapped IPv6 addresses.
+- **RESERVED_IP_RANGES.md** is the reference for all classified IP ranges.

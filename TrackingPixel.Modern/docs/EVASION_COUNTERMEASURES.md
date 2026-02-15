@@ -1,9 +1,15 @@
 # SmartPiXL Evasion Countermeasures
 
-**Red Team Assessment Date:** February 4, 2026  
-**Document Purpose:** Remediation guidance for fingerprinting evasion vulnerabilities  
-**Target Audience:** Fingerprinting-specialist, security-specialist, web-design-specialist agents  
-**Last Implementation Update:** February 7, 2026
+**Red Team Assessment Date:** February 4, 2026
+**Document Purpose:** Remediation guidance for fingerprinting evasion vulnerabilities
+**Last Implementation Update:** February 15, 2026
+
+> **Status:** 9 of 10 countermeasures implemented. V-07 (TLS fingerprinting) remains
+> deferred pending reverse-proxy infrastructure. All services referenced below
+> (`FingerprintStabilityService`, `DatacenterIpService`, `IpBehaviorService`,
+> `IpClassificationService`) are live in `Services/`. Table names use `PiXL` schema
+> (e.g., `PiXL.Test`, `PiXL.Parsed`) — some inline SQL examples below still show the
+> old `dbo.PiXL_Test` prefix.
 
 ---
 
@@ -498,7 +504,7 @@ Anti-detect browsers (Multilogin, GoLogin, Dolphin Anty) maintain consistent fak
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Services/FingerprintStabilityService.cs` (new file)
+**File:** `Services/FingerprintStabilityService.cs`
 
 ```csharp
 using System.Collections.Concurrent;
@@ -723,7 +729,7 @@ Bot traffic often originates from cloud providers (AWS, GCP, Azure). Not current
 
 ### Implementation
 
-**File:** `TrackingPixel.Modern/Services/DatacenterIpService.cs` (new file)
+**File:** `Services/DatacenterIpService.cs`
 
 ```csharp
 using System.Net;
@@ -1033,20 +1039,15 @@ if (data.fonts && data.fonts.split(',').length < 5) {
 
 ## Files to Create/Modify
 
-### New Files
+### Implemented Files
 ```
-Services/FingerprintStabilityService.cs
-Services/DatacenterIpService.cs
-SQL/05_FingerprintStability.sql
-SQL/06_DatacenterDetection.sql
-```
-
-### Modified Files
-```
-Scripts/PiXLScript.cs          - Most client-side countermeasures
-Services/TrackingCaptureService.cs - TLS header capture
-Services/DatabaseWriterService.cs  - Integration of new services
-Models/TrackingData.cs          - New fields for detection results
+Services/FingerprintStabilityService.cs  — Per-IP fingerprint variation scoring
+Services/DatacenterIpService.cs         — AWS/GCP IP range downloader
+Services/IpBehaviorService.cs           — Subnet /24 velocity & rapid-fire detection
+Services/IpClassificationService.cs     — DC / residential / reserved classification
+Models/TrackingData.cs                  — Evasion signal fields
+SQL/11_EvasionCountermeasures.sql       — Evasion signal columns on PiXL.Parsed
+SQL/17_IpBehaviorSignals.sql            — IP behavior columns
 ```
 
 ---

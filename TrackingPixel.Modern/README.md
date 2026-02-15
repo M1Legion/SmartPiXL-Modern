@@ -1,205 +1,186 @@
-# SmartPiXL Tracking Server - Modern Edition
+# SmartPiXL Tracking Server
 
-A high-performance, modern ASP.NET Core tracking pixel server that captures 100+ data points from website visitors using a single `<script>` tag. No cookies required.
+A high-performance ASP.NET Core tracking pixel server that captures 100+ data points from website visitors using a single `<script>` tag. No cookies required.
 
-## 🎯 Overview
+## Overview
 
-SmartPiXL is a complete rewrite of the legacy ASP.NET WebForms tracking pixel system, rebuilt for speed and maximum data collection using .NET 8 Minimal APIs.
+SmartPiXL is a complete rewrite of the legacy ASP.NET WebForms tracking pixel system, built on **.NET 10 Minimal APIs** with a normalized star-schema database, real-time ETL pipeline, and a 3D Tron-themed dashboard.
 
 ### Key Features
 
-- **One Line Integration** - Clients add a single `<script>` tag to their site
-- **100+ Data Points** - Captures screen, device, browser, fingerprints, preferences, and more
-- **No Cookies Required** - Works in a post-cookie world
-- **High Performance** - Fire-and-forget SQL inserts, compiled regex, zero-allocation patterns
-- **Full Fingerprinting** - 100+ data points from a single script tag
+- **One-Line Integration** — Clients add a single `<script>` tag; the pixel JS is generated server-side
+- **100+ Data Points** — Screen, device, browser fingerprints, timing, preferences, and evasion countermeasures
+- **No Cookies** — Cookieless identification via Canvas, WebGL, Audio, Math, and Font fingerprinting
+- **Real-Time ETL** — `EtlBackgroundService` runs every 60 s, parsing raw hits into a materialized warehouse and resolving email identity matches
+- **Tron Dashboard** — Live 3D WebGL dashboard at `/tron` powered by SQL views
+- **Bot & Datacenter Detection** — Server-side IP behavior analysis, datacenter IP range lookups (AWS/GCP), and fingerprint stability scoring
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
-- .NET 8 SDK
-- SQL Server (localhost with Windows Auth or configure connection string)
-- HTTPS required for full Client Hints support
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- SQL Server (`localhost\SQL2025` with Windows Auth, or configure a connection string)
 
-### Run the Server
+### Run
 
 ```bash
 cd TrackingPixel.Modern
 dotnet run
 ```
 
-Server starts on:
-- HTTP: `http://localhost:6000`
-- HTTPS: `https://localhost:6001` (required for Client Hints)
+- HTTP: `http://localhost:7000`
+- HTTPS: `https://localhost:7001`
 
-### Test It
+Visit `https://localhost:7001/demo` to see live data collection from your browser.
 
-Visit: `https://localhost:6001/test`
+## Client Integration
 
-See all 100+ data points captured in real-time from YOUR browser.
-
-## 📦 Client Integration
-
-### Integration
-
-Add this single line to any webpage:
+Add this to any webpage:
 
 ```html
-<script src="https://your-domain.com/js/CompanyID/PiXLID.js"></script>
+<script src="https://smartpixl.info/js/{CompanyID}/{PiXLID}.js" async></script>
 ```
 
-That's it. The script handles everything automatically.
+The server-generated JS collects all data points and fires them back as a query string on a `_SMART.GIF` request.
 
-### What Gets Captured
-
-| Category | Data Points |
-|----------|-------------|
-| **Screen** | Resolution, available space, viewport, window position, color depth, pixel ratio, orientation |
-| **Device** | CPU cores, RAM, GPU, GPU vendor, touch points, platform, vendor |
-| **Fingerprints** | Canvas hash, WebGL hash, Audio hash, Math fingerprint, Error fingerprint, Font list |
-| **Network** | WebRTC local IP, connection type/speed, RTT, data saver mode |
-| **Storage** | Storage quota/usage, battery level/charging, media devices count |
-| **Browser** | Cookies, DNT, PDF viewer, WebDriver (bot detection), plugins, MIME types |
-| **Features** | WebGL, WebAssembly, Service Workers, Canvas, WebRTC, and more (hardware/permission APIs intentionally excluded) |
-| **Preferences** | Dark mode, reduced motion, high contrast, forced colors, hover/pointer type |
-| **Performance** | Page load time, DOM ready, DNS lookup, TCP connect, TTFB |
-| **Session** | URL, referrer, title, domain, path, history depth |
-
-## 🔐 Fingerprinting Techniques
-
-SmartPiXL uses multiple browser fingerprinting techniques:
-
-### Canvas Fingerprint
-Renders specific shapes and text, then hashes the pixel data. Different GPUs/drivers produce different results.
-
-### WebGL Fingerprint
-Collects 23+ WebGL parameters including max texture sizes, shader precision, and supported extensions.
-
-### Audio Fingerprint
-Uses OfflineAudioContext to create a fingerprint from the audio processing stack.
-
-### Font Detection
-Tests 42 common fonts by measuring text rendering differences.
-
-### Math Fingerprint
-JavaScript math operations have subtle floating-point differences across systems.
-
-### WebRTC Local IP
-Uses RTCPeerConnection to discover the user's local network IP address.
-
-## 🏗️ Architecture
+## Architecture
 
 ```
 TrackingPixel.Modern/
-├── Program.cs           # Minimal API entry point (~130 lines)
-├── Configuration/       # App settings and configuration
-├── Endpoints/           # API endpoint handlers
-├── Models/              # Data models (TrackingData, etc.)
-├── Services/            # Business logic services
+├── Program.cs                  # Minimal API entry point, DI, Kestrel config
+├── Configuration/
+│   └── TrackingSettings.cs     # Typed config (connection string, batch settings)
+├── Endpoints/
+│   ├── TrackingEndpoints.cs    # Pixel serving, JS generation, enrichment pipeline
+│   └── DashboardEndpoints.cs   # Tron HTML, /api/dash/* JSON endpoints
+├── Models/
+│   ├── TrackingData.cs         # 100+ field model
+│   ├── IpClassification.cs     # IP classification enum
+│   └── InfraHealthModels.cs    # DTOs for infrastructure health probes
+├── Services/
+│   ├── DatabaseWriterService.cs        # Channel<T> → SqlBulkCopy to PiXL.Test
+│   ├── TrackingCaptureService.cs       # HTTP request → TrackingData parser
+│   ├── EtlBackgroundService.cs         # Calls ETL.usp_ParseNewHits + ETL.usp_MatchVisits every 60s
+│   ├── FingerprintStabilityService.cs  # Per-IP fingerprint variation detection
+│   ├── IpBehaviorService.cs            # Subnet /24 velocity & rapid-fire detection
+│   ├── DatacenterIpService.cs          # AWS/GCP IP range downloader
+│   ├── IpClassificationService.cs      # Datacenter / residential / reserved classification
+│   ├── InfraHealthService.cs           # Probes Windows services, SQL, IIS health
+│   └── FileTrackingLogger.cs           # Daily rolling log files
+├── SQL/                        # Migration scripts (05–24)
 ├── wwwroot/
-│   └── test.html        # Live data collection demo
-├── SQL/
-│   └── 00_FreshInstall.sql     # Complete schema (table + view + materialization)
-└── FINGERPRINTING_EXPLAINED.md # Technical documentation
+│   ├── tron.html               # 3D Tron dashboard (Three.js)
+│   └── demo.html               # Live data collection demo
+└── docs/                       # Architecture, field reference, ETL plans, security
 ```
 
-**Data Flow Architecture:**
-1. Client JS collects 100+ data points → sends via query string
-2. C# writes raw data to `PiXL_Test` table (8 columns)
-3. SQL view `vw_PiXL_Parsed` extracts all fields at query time
-4. Optional: `sp_MaterializePiXLData` copies to indexed table for fast queries
+## Data Pipeline
 
-### Performance Optimizations
-
-- **Fire-and-Forget SQL** - BlockingCollection with batched bulk inserts
-- **Compiled Regex** - Pre-compiled patterns for URL parsing
-- **DataTable Template Cloning** - Avoids column recreation per batch
-- **Const JS Template** - Pre-built JavaScript with `string.Format` placeholder
-- **stackalloc** - Stack allocation for small arrays
-- **CORS Preflight Handling** - Immediate OPTIONS responses
-
-## 🗄️ Database
-
-### Quick Setup
-
-```sql
--- Create database with filegroup on D: drive
-CREATE DATABASE SmartPixl;
-GO
-
--- Run the fresh install script
--- SQL/00_FreshInstall.sql
+```
+Browser → IIS (443) → ASP.NET Core InProcess
+  → TrackingEndpoints.cs    — route: /{**path} ending in _SMART.GIF
+  → TrackingCaptureService  — parse HTTP request into TrackingData (100+ fields)
+  → DatabaseWriterService   — Channel<T> queue → SqlBulkCopy into PiXL.Test (9 columns)
+  → EtlBackgroundService    — every 60s:
+      1. ETL.usp_ParseNewHits  → PiXL.Parsed (~175 columns, materialized warehouse)
+      2. ETL.usp_MatchVisits   → PiXL.Device, PiXL.IP, PiXL.Visit, PiXL.Match
+  → vw_Dash_* views         — power the Tron dashboard at /tron
 ```
 
-### Query Captured Data
+## Database
 
-```sql
--- View all parsed data (no manual parsing needed!)
-SELECT * FROM vw_PiXL_Parsed 
-WHERE ReceivedAt > DATEADD(hour, -1, GETDATE())
-ORDER BY ReceivedAt DESC;
+| Property | Value |
+|----------|-------|
+| **Instance** | `localhost\SQL2025` (MSSQL 2025 Developer) |
+| **Database** | `SmartPiXL` (capital X and L) |
+| **Connection** | `Server=localhost\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True` |
+| **Config path** | `appsettings.json` → `Tracking:ConnectionString` |
 
--- Fingerprint uniqueness
-SELECT CanvasFingerprint, WebGLFingerprint, COUNT(*) as Hits
-FROM vw_PiXL_Parsed
-GROUP BY CanvasFingerprint, WebGLFingerprint
-ORDER BY Hits DESC;
+### Schemas
 
--- Bot detection
-SELECT * FROM vw_PiXL_Parsed
-WHERE WebDriverDetected = 1;
+| Schema | Purpose |
+|--------|---------|
+| `PiXL` | Domain tables — `Test`, `Parsed`, `Config`, `Device`, `IP`, `Visit`, `Match`, `Company`, `Pixel` |
+| `ETL` | Pipeline infrastructure — `Watermark`, `MatchWatermark`, `usp_ParseNewHits`, `usp_MatchVisits` |
+| `dbo` | Dashboard views (`vw_Dash_*`), scalar functions |
+
+### Setup
+
+Run the SQL migration scripts in order:
+
+```powershell
+$scripts = Get-ChildItem "TrackingPixel.Modern\SQL\*.sql" | Sort-Object Name
+foreach ($s in $scripts) {
+    sqlcmd -S "localhost\SQL2025" -d SmartPiXL -E -i $s.FullName -b
+}
 ```
 
-## 📊 Data Collection
+## Endpoints
 
-SmartPiXL captures 100+ data points via a single JavaScript tag, including screen info,
-device details, browser fingerprints (Canvas, WebGL, Audio), timing data, and evasion
-countermeasures. All data is stored in `PiXL_Test` and parsed into `PiXL_Parsed` (~175 columns).
+| Route | Purpose |
+|-------|---------|
+| `/{**path}` (ending `_SMART.GIF`) | Tracking pixel — receives all data |
+| `/pixel204/{**path}` | 204-response pixel variant |
+| `/js/{CompanyID}/{PiXLID}.js` | Server-generated pixel JavaScript |
+| `/demo` | Live data collection demo page |
+| `/health` | Health check |
+| `/tron` | 3D Tron dashboard (localhost only) |
+| `/api/dash/health` | System health JSON |
+| `/api/dash/hourly` | Hourly rollup |
+| `/api/dash/bots` | Bot breakdown |
+| `/api/dash/bot-signals` | Top bot signals |
+| `/api/dash/devices` | Device breakdown |
+| `/api/dash/evasion` | Evasion summary |
+| `/api/dash/behavior` | Behavioral analysis |
+| `/api/dash/recent` | Recent hits |
+| `/api/dash/fingerprints` | Fingerprint clusters |
+| `/api/dash/pipeline` | Pipeline health |
+| `/api/dash/infra` | Infrastructure health |
 
-## 🔧 Configuration
+## Configuration
 
-### Connection String
+All config is in `appsettings.json` — there are no hardcoded values in `Program.cs`:
 
-Edit in `Program.cs`:
-
-```csharp
-const string connectionString = 
-    "Server=localhost;Database=SmartPixl;Integrated Security=True;TrustServerCertificate=True";
+```json
+{
+  "Kestrel": {
+    "Endpoints": {
+      "Http":  { "Url": "http://*:7000" },
+      "Https": { "Url": "https://*:7001" }
+    }
+  },
+  "Tracking": {
+    "ConnectionString": "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True"
+  }
+}
 ```
 
-### Ports
+> **Note:** Production (IIS) uses ports 6000/6001. Dev uses 7000/7001. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-```csharp
-builder.WebHost.UseUrls("http://*:5000", "https://*:5001");
-```
+## Documentation
 
-## 📝 Endpoints
+| Document | Description |
+|----------|-------------|
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production IIS deployment guide |
+| [docs/FIELD_REFERENCE.md](docs/FIELD_REFERENCE.md) | All 175 PiXL.Parsed columns documented |
+| [docs/MVP_ETL_PIPELINE_PLAN.md](docs/MVP_ETL_PIPELINE_PLAN.md) | Star-schema ETL design & implementation plan |
+| [docs/EVASION_COUNTERMEASURES.md](docs/EVASION_COUNTERMEASURES.md) | 10 fingerprint evasion vulnerabilities & countermeasures |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Feature roadmap and backlog |
+| [docs/FINGERPRINTING_EXPLAINED.md](docs/FINGERPRINTING_EXPLAINED.md) | Non-technical fingerprinting explainer |
+| [docs/RESERVED_IP_RANGES.md](docs/RESERVED_IP_RANGES.md) | IPv4/IPv6 reserved range reference |
+| [docs/MSSQL_REVIEW.md](docs/MSSQL_REVIEW.md) | SQL Server architecture review (2026-02-02 snapshot) |
+| [docs/SmartPiXL_ETL_Pipeline_Map.md](docs/SmartPiXL_ETL_Pipeline_Map.md) | Legacy Xavier pipeline reference |
+| [docs/LiQ Database Staleness Report.md](docs/LiQ%20Database%20Staleness%20Report.md) | LiQ database assessment |
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/{CompanyID}/{PiXLID}_SMART.GIF` | Tracking pixel (receives data) |
-| `/js/{CompanyID}/{PiXLID}.js` | Pixel JavaScript |
-| `/test` | Live demo page |
-| `/debug/headers` | Debug incoming headers |
-
-## 🛡️ Privacy & Compliance
+## Privacy & Compliance
 
 This tool collects extensive data. Ensure you:
 
-- Have proper consent mechanisms
-- Include tracking in privacy policies
-- Comply with GDPR, CCPA, and other regulations
-- Consider data minimization principles
+- Have proper consent mechanisms in place
+- Include tracking disclosure in privacy policies
+- Comply with GDPR, CCPA, and other applicable regulations
 
-## 📜 License
+## License
 
-Proprietary - M1 Data & Analytics
-
-## 🤝 Support
-
-Internal use only. Contact the development team for support.
-
----
-
-Built with ❤️ by M1 Data & Analytics
+Proprietary — M1 Data & Analytics

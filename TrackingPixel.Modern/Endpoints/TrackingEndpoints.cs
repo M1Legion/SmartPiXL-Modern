@@ -1,14 +1,46 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using TrackingPixel.Models;
 using TrackingPixel.Scripts;
 using TrackingPixel.Services;
 
 namespace TrackingPixel.Endpoints;
 
+// ============================================================================
+// TRACKING ENDPOINTS — The core pixel-serving + enrichment pipeline.
+//
+// ROUTE MAP:
+//   /                        →  Landing page (wwwroot/index.html)
+//   /demo                    →  Demo page (wwwroot/demo.html)
+//   /debug/headers            →  Diagnostic JSON dump (localhost only)
+//   /health                   →  Health check for load balancers
+//   /js/{companyId}/{pixlId}.js  →  Fingerprint collection script
+//   /{**path}                 →  Main pixel endpoint (returns 1x1 GIF)
+//   /pixel204/{**path}        →  Alternative 204 No Content endpoint
+//
+// ENRICHMENT PIPELINE (CaptureAndEnqueue):
+//   1. TrackingCaptureService parses HTTP request into TrackingData
+//   2. FingerprintStabilityService checks canvas/WebGL/audio fingerprint variation
+//   3. IpBehaviorService checks subnet velocity + rapid-fire timing
+//   4. DatacenterIpService checks AWS/GCP IP ranges
+//   5. IpClassificationService classifies IP type (Private, CGNAT, Loopback, etc.)
+//   6. Alert params appended to QueryString via thread-static StringBuilder
+//   7. Enriched TrackingData enqueued to Channel<T> for bulk SQL write
+//
+// STATIC FILES:
+//   Images and other assets are served by UseStaticFiles() middleware from
+//   wwwroot/. The legacy /images/{fileName} endpoint was removed — redundant.
+// ============================================================================
+
 /// <summary>
-/// Extension methods for registering tracking endpoints.
-/// Keeps route definitions separate from Program.cs.
+/// Extension methods for registering all tracking-related HTTP endpoints.
+/// <para>
+/// Keeps route definitions separate from <c>Program.cs</c> for readability.
+/// The class is <c>partial</c> to support the source-generated regex in
+/// <see cref="SafeRouteParam"/>. All state is static/thread-static —
+/// the class itself is never instantiated.
+/// </para>
 /// </summary>
 public static partial class TrackingEndpoints
 {
@@ -33,16 +65,24 @@ public static partial class TrackingEndpoints
     private static string? _wwwrootPath;
     
     /// <summary>
-    /// Maps all tracking-related endpoints.
+    /// Maps all tracking-related endpoints. Called once at startup from <c>Program.cs</c>.
+    /// <para>
+    /// Resolves services from DI and captures them by closure in the endpoint lambdas.
+    /// The catch-all <c>/{**path}</c> route MUST be registered last — it matches
+    /// everything, so more specific routes (/, /demo, /health, /js/...) must be
+    /// registered first or they'll be shadowed.
+    /// </para>
     /// </summary>
     public static void MapTrackingEndpoints(this WebApplication app)
     {
-        // Get required services
+        // Resolve services once at startup — captured by closure in each endpoint lambda.
+        // This is safe because all these services are registered as singletons.
         var captureService = app.Services.GetRequiredService<TrackingCaptureService>();
         var writerService = app.Services.GetRequiredService<DatabaseWriterService>();
         var logger = app.Services.GetRequiredService<ITrackingLogger>();
         var fpService = app.Services.GetRequiredService<FingerprintStabilityService>();
         var ipBehaviorService = app.Services.GetRequiredService<IpBehaviorService>();
+        var dcService = app.Services.GetRequiredService<DatacenterIpService>();
         
         // Resolve wwwroot path once at startup
         _wwwrootPath = ResolveWwwrootPath();
@@ -83,46 +123,8 @@ public static partial class TrackingEndpoints
             }
         });
         
-        // ============================================================================
-        // STATIC IMAGES - Serve logo and other assets
-        // ============================================================================
-        app.MapGet("/images/{fileName}", async (HttpContext ctx, string fileName) =>
-        {
-            // Sanitize filename to prevent path traversal
-            var sanitized = Path.GetFileName(fileName);
-            if (string.IsNullOrEmpty(sanitized) || sanitized != fileName)
-            {
-                ctx.Response.StatusCode = 400;
-                return;
-            }
-            
-            var imagePath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "images", sanitized) : null;
-            if (imagePath != null && File.Exists(imagePath))
-            {
-                var ext = Path.GetExtension(fileName).ToLowerInvariant();
-                ctx.Response.ContentType = ext switch
-                {
-                    ".png" => "image/png",
-                    ".jpg" or ".jpeg" => "image/jpeg",
-                    ".gif" => "image/gif",
-                    ".svg" => "image/svg+xml",
-                    ".ico" => "image/x-icon",
-                    ".webp" => "image/webp",
-                    _ => "application/octet-stream"
-                };
-                ctx.Response.Headers.CacheControl = "public, max-age=86400"; // Cache for 1 day
-                await ctx.Response.SendFileAsync(imagePath);
-            }
-            else
-            {
-                ctx.Response.StatusCode = 404;
-            }
-        });
-        
-        // ============================================================================
-        // INTERNAL TEST PAGE - Removed from public access
-        // This was at /test but is now only accessible locally via file
-        // ============================================================================
+        // NOTE: Static images are served by UseStaticFiles() middleware from wwwroot/.
+        // The legacy /images/{fileName} endpoint was removed — it was redundant.
         
         // ============================================================================
         // DEBUG ENDPOINT - Restricted to local machine only
@@ -202,7 +204,7 @@ public static partial class TrackingEndpoints
             
             if (isTrackingPixel && hasTrackingData)
             {
-                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, writerService, logger);
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, writerService, logger);
             }
             // Else: silently return the GIF without recording (favicon, robots, etc.)
             
@@ -228,7 +230,7 @@ public static partial class TrackingEndpoints
             
             if (isTrackingPixel && hasTrackingData)
             {
-                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, writerService, logger);
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, writerService, logger);
             }
             
             return Results.NoContent();
@@ -255,39 +257,72 @@ public static partial class TrackingEndpoints
     // ========================================================================
     
     /// <summary>
-    /// Captures tracking data from the HTTP request, runs server-side analysis
-    /// (fingerprint stability + IP behavior), appends alert parameters to the
-    /// query string, and enqueues the enriched record for bulk database write.
-    /// Uses a thread-static StringBuilder to avoid per-request heap allocations
-    /// when building server-side query string extensions.
+    /// Captures tracking data from the HTTP request, runs all server-side enrichment
+    /// analyses, appends alert/classification parameters to the query string, and
+    /// enqueues the enriched record for bulk database write.
+    /// <para>
+    /// This is the hot path — called for every valid tracking pixel hit.
+    /// Enrichment results are appended as <c>&amp;_srv_*</c> query string params
+    /// so the ETL pipeline (<c>usp_ParseNewHits</c>) can extract them into
+    /// dedicated columns in <c>PiXL_Parsed</c> without any schema changes to <c>PiXL.Test</c>.
+    /// </para>
+    /// <para>
+    /// Uses a <see cref="ThreadStaticAttribute">thread-static</see> <see cref="StringBuilder"/>
+    /// to avoid per-request heap allocations when building the enriched query string.
+    /// After the first request on each thread, the StringBuilder is reused via <c>Clear()</c>.
+    /// </para>
     /// </summary>
+    /// <param name="ctx">The current HTTP context (provides Request.Query for fingerprint extraction).</param>
+    /// <param name="captureService">Parses the HTTP request into a <see cref="Models.TrackingData"/> record.</param>
+    /// <param name="fpService">Fingerprint stability analysis (detects canvas/WebGL/audio variation).</param>
+    /// <param name="ipBehaviorService">Subnet velocity + rapid-fire timing detection.</param>
+    /// <param name="dcService">Datacenter IP range checker (AWS/GCP).</param>
+    /// <param name="writerService">Channel-backed bulk writer for database persistence.</param>
+    /// <param name="logger">Logger for dropped-request warnings.</param>
     private static void CaptureAndEnqueue(
         HttpContext ctx,
         TrackingCaptureService captureService,
         FingerprintStabilityService fpService,
         IpBehaviorService ipBehaviorService,
+        DatacenterIpService dcService,
         DatabaseWriterService writerService,
         ITrackingLogger logger)
     {
+        // Step 1: Parse HTTP request into an immutable TrackingData record
         var trackingData = captureService.CaptureFromRequest(ctx.Request);
         var ip = trackingData.IPAddress ?? "unknown";
         
         // --- Server-side fingerprint stability + volume analysis ---
-        // Catches what client-side can't: IP-level traffic patterns
+        // Catches what client-side can't: correlates multiple hits from the same IP
+        // to detect bots rotating browser fingerprints between requests.
         var canvasFP = ctx.Request.Query["canvasFP"].FirstOrDefault();
         var webglFP = ctx.Request.Query["webglFP"].FirstOrDefault();
         var audioFP = ctx.Request.Query["audioFP"].FirstOrDefault();
         var fpResult = fpService.RecordAndCheck(ip, canvasFP, webglFP, audioFP);
         
         // --- Server-side IP behavior analysis ---
-        // Subnet velocity + rapid-fire timing (cross-request correlation)
+        // Detects subnet /24 velocity (coordinated bot infra) and rapid-fire timing
+        // (same IP hitting faster than any human page-navigation pattern).
         var ipResult = ipBehaviorService.RecordAndCheck(ip);
         
-        // Build server-side query string extension only when alerts are triggered
+        // --- Server-side IP enrichment ---
+        // Datacenter detection: checks if the IP falls within known AWS/GCP CIDR ranges.
+        //   Downloads range files on startup and refreshes weekly.
+        // IP classification: categorizes as Public/Private/Loopback/CGNAT/etc.
+        //   Uses zero-allocation IPv4 path with manual dotted-decimal parser.
+        var dcResult = dcService.Check(ip);
+        var ipClass = IpClassificationService.Classify(ip);
+        
+        // Build server-side query string extension when any enrichment fires.
+        // Only allocates when there's something to append — clean hits pass through
+        // with the original QueryString untouched (no StringBuilder, no string concat).
         var hasFpAlert = fpResult.SuspiciousVariation || fpResult.HighVolume || fpResult.HighRate;
         var hasIpAlert = ipResult.SubnetVelocityAlert || ipResult.RapidFireAlert || ipResult.SubSecondDuplicate;
+        var hasDcMatch = dcResult.IsDatacenter;
+        // Skip enrichment for Public + Invalid — those are the common/default cases
+        var hasIpClass = ipClass.Type is not IpType.Public and not IpType.Invalid;
         
-        if (hasFpAlert || hasIpAlert)
+        if (hasFpAlert || hasIpAlert || hasDcMatch || hasIpClass)
         {
             // Thread-local StringBuilder — zero alloc after first request per thread
             var sb = t_alertSb ??= new StringBuilder(256);
@@ -313,15 +348,39 @@ public static partial class TrackingEndpoints
                 if (ipResult.RapidFireAlert) sb.Append("&_srv_rapidFire=1");
             }
             
+            // Datacenter flag: _srv_dc=AWS or _srv_dc=GCP
+            // Helps the ETL flag cloud-origin traffic for bot scoring
+            if (hasDcMatch)
+                sb.Append("&_srv_dc=").Append(dcResult.Provider);
+            
+            // IP classification: _srv_ipType=1 (Private), 3 (LinkLocal), 4 (CGNAT), etc.
+            // Byte-backed enum cast — serializes as a single digit, parseable by ETL
+            if (hasIpClass)
+                sb.Append("&_srv_ipType=").Append((byte)ipClass.Type);
+            
+            // Replace the original QueryString with the enriched version.
+            // Uses C# record 'with' expression — creates a shallow copy with only
+            // QueryString changed. All other fields reference the same strings (no copy).
             trackingData = trackingData with { QueryString = sb.ToString() };
         }
         
+        // Enqueue for async bulk write. TryQueue is a lock-free CAS operation
+        // that returns false only when the bounded channel is at capacity.
         if (!writerService.TryQueue(trackingData))
         {
             logger.Warning("Queue full - dropped tracking request");
         }
     }
     
+    /// <summary>
+    /// Thread-static <see cref="StringBuilder"/> reused across requests on the same thread.
+    /// <para>
+    /// Declared with <see cref="ThreadStaticAttribute"/> so each thread-pool thread gets
+    /// its own instance. After the first request, <c>Clear()</c> reuses the internal buffer
+    /// with zero allocation. Typical enriched query strings are 200–400 chars, well within
+    /// the initial 256-char capacity.
+    /// </para>
+    /// </summary>
     [ThreadStatic]
     private static StringBuilder? t_alertSb;
 }

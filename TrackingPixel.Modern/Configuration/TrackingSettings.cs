@@ -34,7 +34,7 @@ public sealed class TrackingSettings
     /// in addition to localhost/loopback. These are external workstation IPs that
     /// can reach the dashboard remotely. Empty = localhost only (original behavior).
     /// </summary>
-    public string[] DashboardAllowedIPs { get; set; } = Array.Empty<string>();
+    public string[] DashboardAllowedIPs { get; set; } = [];
     
     /// <summary>
     /// Maximum number of <see cref="Models.TrackingData"/> items the bounded

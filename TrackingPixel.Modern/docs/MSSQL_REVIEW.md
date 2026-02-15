@@ -1,7 +1,23 @@
 # SmartPiXL MSSQL Architecture Review
 
-**Review Date:** 2026-02-02  
+**Review Date:** 2026-02-02
 **Reviewer:** MSSQL Specialist
+
+> **Historical Note (2026-02-15):** This review was written against the original schema
+> (`dbo.PiXL_Test`, `vw_PiXL_Parsed`, `dbo.PiXL_Materialized`). Since then, the database
+> has been restructured:
+>
+> - Tables moved to `PiXL` and `ETL` schemas (e.g., `PiXL.Test`, `PiXL.Parsed`)
+> - The view `vw_PiXL_Parsed` was replaced by the materialized table `PiXL.Parsed`
+> - `sp_MaterializePiXLData` was replaced by `ETL.usp_ParseNewHits` (watermark-based)
+> - `ETL.usp_MatchVisits` was added for identity resolution
+> - `PiXL.Test.Id` was changed to `BIGINT`
+> - SQL Server instance migrated from default to `localhost\SQL2025` (2025 Developer)
+> - Database renamed from `SmartPixl` to `SmartPiXL`
+>
+> Many recommendations below have been **implemented**. This document is preserved as a
+> historical reference for the reasoning behind those changes.
+> See [MVP_ETL_PIPELINE_PLAN.md](MVP_ETL_PIPELINE_PLAN.md) for current architecture.
 
 ## Executive Summary
 
@@ -12,15 +28,15 @@ This project implements a high-throughput tracking pixel system with an excellen
 - Raw data storage with deferred parsing (fast inserts, flexible queries)
 - Async database operations (non-blocking I/O)
 - Graceful shutdown with queue draining
-- View-based query string parsing (90+ fields extracted at query time)
-- Materialization pattern for indexed queries
+- Materialization via ETL with watermark-based incremental processing
 
-⚠️ **Areas for Improvement:**
-- Missing composite covering indexes for common query patterns
-- No data lifecycle/archival strategy
-- Scalar function in view can be slow at scale
-- Missing UNIQUE constraint on SourceId in PiXL_Materialized
-- No connection string pooling options configured
+⚠️ **Areas Addressed Since This Review:**
+- ~~Missing composite covering indexes~~ → Added via SQL migrations
+- ~~Scalar function in view can be slow~~ → Replaced with materialized ETL proc
+- ~~Missing UNIQUE constraint~~ → Watermark-based processing eliminates duplicates
+- ~~Id is INT~~ → Changed to BIGINT
+- No data lifecycle/archival strategy (still outstanding)
+- No connection string pooling options configured (still outstanding)
 
 ---
 

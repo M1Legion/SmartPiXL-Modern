@@ -1,245 +1,220 @@
-# SmartPiXL Production Deployment Guide
+# SmartPiXL — Production Deployment Guide
 
-## Quick Start (Windows Service)
-
-The simplest production deployment: self-contained Windows Service with HTTPS.
-
-### Prerequisites
-- Windows Server 2016+ with admin access
-- SQL Server accessible from the server
-- A valid SSL certificate (PFX format)
+> **Canonical reference.** This is the single authoritative deployment document.
+> The Copilot instructions in `.github/copilot-instructions.md` mirror the critical values here.
 
 ---
 
-## Step 1: Build Self-Contained Package
+## Deployment Architecture
 
-On your dev machine:
+SmartPiXL runs as an ASP.NET Core (.NET 10) app hosted **InProcess** in IIS.
+
+| Instance | Location | Ports | Purpose |
+|----------|----------|-------|---------|
+| **IIS (Production)** | `C:\inetpub\Smartpixl.info\` | 80 / 443 via IIS binding on `192.168.88.176` | Public traffic from `smartpixl.info` |
+| **Dev (`dotnet run`)** | `C:\Users\Administrator\source\repos\SmartPiXL\TrackingPixel.Modern\` | 7000 / 7001 | Local development / testing |
+
+The IIS copy is a **published build** with its own `appsettings.json` and `web.config` that are independent of the repo copies.
+
+---
+
+## Prerequisites
+
+- Windows Server with IIS and the **ASP.NET Core Hosting Bundle for .NET 10**
+- SQL Server 2025 Developer (`localhost\SQL2025`) with Windows Authentication
+- The `SmartPiXL` database already created and migrations applied (see [README.md](../README.md#setup))
+
+---
+
+## Step 1 — Publish
 
 ```powershell
-cd C:\Users\Brian\source\repos\SmartPixl\TrackingPixel.Modern
-
-# Build self-contained for Windows x64
-dotnet publish -c Release -r win-x64 --self-contained -o .\publish
-```
-
-This creates `.\publish\` with everything needed - no .NET install required on server.
-
----
-
-## Step 2: Configure for Production
-
-Edit `publish\appsettings.json`:
-
-```json
-{
-  "TrackingSettings": {
-    "ConnectionString": "Server=YOUR_SQL_SERVER;Database=SmartPixl;Integrated Security=True;TrustServerCertificate=True",
-    "QueueCapacity": 10000,
-    "BatchSize": 100,
-    "BatchTimeoutMs": 500,
-    "BulkCopyTimeoutSeconds": 30,
-    "ShutdownTimeoutSeconds": 10
-  },
-  "TrackingLogSettings": {
-    "LogDirectory": "C:\\SmartPiXL\\Logs",
-    "MinimumLevel": "Info",
-    "WriteToConsole": false
-  }
-}
+Push-Location "C:\Users\Administrator\source\repos\SmartPiXL\TrackingPixel.Modern"
+dotnet publish -c Release -o "C:\inetpub\Smartpixl.info"
+Pop-Location
 ```
 
 ---
 
-## Step 3: Install SSL Certificate
+## Step 2 — Verify `web.config`
 
-### Option A: Use Existing PFX
-Copy your `.pfx` file to the server and note the path + password.
+`dotnet publish` overwrites `web.config`. It **must** contain the `AspNetCoreModuleV2` handler and `requestLimits`:
 
-### Option B: Create Self-Signed (Testing Only)
-```powershell
-$cert = New-SelfSignedCertificate -DnsName "pixl.yourcompany.com" -CertStoreLocation "Cert:\LocalMachine\My" -NotAfter (Get-Date).AddYears(5)
-$pwd = ConvertTo-SecureString -String "YourPassword123" -Force -AsPlainText
-Export-PfxCertificate -Cert $cert -FilePath "C:\SmartPiXL\pixl.pfx" -Password $pwd
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <location path="." inheritInChildApplications="false">
+    <system.webServer>
+      <security>
+        <requestFiltering>
+          <requestLimits maxQueryString="16384" maxUrl="8192" />
+        </requestFiltering>
+      </security>
+      <handlers>
+        <add name="aspNetCore" path="*" verb="*"
+             modules="AspNetCoreModuleV2" resourceType="Unspecified" />
+      </handlers>
+      <aspNetCore processPath="dotnet" arguments=".\TrackingPixel.dll"
+                  stdoutLogEnabled="true" stdoutLogFile=".\logs\stdout"
+                  hostingModel="inprocess" />
+    </system.webServer>
+  </location>
+</configuration>
 ```
-
-### Option C: Let's Encrypt (Free, Trusted)
-Use [win-acme](https://www.win-acme.com/) for automated Let's Encrypt certs.
 
 ---
 
-## Step 4: Configure HTTPS in appsettings.json
+## Step 3 — Verify `appsettings.json`
 
-Add Kestrel section to `appsettings.json`:
+The IIS copy **must** use production ports (6000/6001) and the correct connection string:
 
 ```json
 {
   "Kestrel": {
     "Endpoints": {
-      "Http": {
-        "Url": "http://*:80"
-      },
-      "Https": {
-        "Url": "https://*:443",
-        "Certificate": {
-          "Path": "C:\\SmartPiXL\\pixl.pfx",
-          "Password": "YourCertPassword"
-        }
-      }
+      "Http":  { "Url": "http://*:6000" },
+      "Https": { "Url": "https://*:6001" }
     }
   },
-  "TrackingSettings": { ... }
+  "Tracking": {
+    "ConnectionString": "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True"
+  }
 }
 ```
 
-**Note:** Update `Program.cs` to remove hardcoded ports and use config instead (see below).
+> **Warning:** Dev uses 7000/7001. Production uses 6000/6001. Never make them the same.
 
 ---
 
-## Step 5: Install as Windows Service
+## Step 4 — IIS App Pool & SQL Permissions
 
-On the production server (as Administrator):
+The IIS app pool is named `Smartpixl.info` and runs under its own identity.
+
+Grant it SQL access:
+
+```sql
+-- On localhost\SQL2025
+CREATE LOGIN [IIS APPPOOL\Smartpixl.info] FROM WINDOWS;
+
+USE SmartPiXL;
+CREATE USER  [IIS APPPOOL\Smartpixl.info] FOR LOGIN [IIS APPPOOL\Smartpixl.info];
+ALTER ROLE db_datareader ADD MEMBER [IIS APPPOOL\Smartpixl.info];
+ALTER ROLE db_datawriter ADD MEMBER [IIS APPPOOL\Smartpixl.info];
+GRANT EXECUTE TO [IIS APPPOOL\Smartpixl.info];
+```
+
+---
+
+## Step 5 — Start & Verify
 
 ```powershell
-# Create installation directory
-New-Item -ItemType Directory -Path "C:\SmartPiXL" -Force
+Import-Module WebAdministration
+Start-WebAppPool -Name "Smartpixl.info"
 
-# Copy published files
-Copy-Item -Path ".\publish\*" -Destination "C:\SmartPiXL" -Recurse
+# Send a test hit
+Invoke-WebRequest -Uri "http://192.168.88.176/DEMO/deploy-test_SMART.GIF?verify=1" -UseBasicParsing | Out-Null
+Start-Sleep -Seconds 3
 
-# Create the Windows Service
-sc.exe create SmartPiXL binPath="C:\SmartPiXL\TrackingPixel.exe" start=auto displayname="SmartPiXL Tracking Server"
-
-# Set description
-sc.exe description SmartPiXL "SmartPiXL Fingerprinting Tracking Pixel Server"
-
-# Configure recovery (restart on failure)
-sc.exe failure SmartPiXL reset=86400 actions=restart/60000/restart/60000/restart/60000
-
-# Start the service
-sc.exe start SmartPiXL
+# Check the log
+Get-Content "C:\inetpub\Smartpixl.info\Log\$(Get-Date -Format 'yyyy_MM_dd').log" -Tail 10
 ```
 
 ---
 
-## Step 6: Firewall Rules
+## Full Deploy Script (Copy-Paste)
 
 ```powershell
-# Allow HTTP (optional, for redirect to HTTPS)
-New-NetFirewallRule -DisplayName "SmartPiXL HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+# 1. Stop
+Import-Module WebAdministration
+Stop-WebAppPool -Name "Smartpixl.info"
 
-# Allow HTTPS
-New-NetFirewallRule -DisplayName "SmartPiXL HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
+# 2. Publish
+Push-Location "C:\Users\Administrator\source\repos\SmartPiXL\TrackingPixel.Modern"
+dotnet publish -c Release -o "C:\inetpub\Smartpixl.info"
+Pop-Location
+
+# 3. Verify web.config
+type "C:\inetpub\Smartpixl.info\web.config"
+
+# 4. Verify appsettings.json (ports 6000/6001, Database=SmartPiXL)
+type "C:\inetpub\Smartpixl.info\appsettings.json"
+
+# 5. Start
+Start-WebAppPool -Name "Smartpixl.info"
+
+# 6. Smoke test
+Invoke-WebRequest -Uri "http://192.168.88.176/DEMO/deploy-test_SMART.GIF?verify=1" -UseBasicParsing | Out-Null
+Start-Sleep -Seconds 3
+Get-Content "C:\inetpub\Smartpixl.info\Log\$(Get-Date -Format 'yyyy_MM_dd').log" -Tail 10
 ```
 
 ---
 
-## Step 7: Verify Installation
+## Critical Files That Must Stay In Sync
 
-```powershell
-# Check service status
-Get-Service SmartPiXL
-
-# Test endpoints
-Invoke-WebRequest -Uri "https://pixl.yourcompany.com/health" -UseBasicParsing
-```
-
----
-
-## Management Commands
-
-```powershell
-# Stop service
-sc.exe stop SmartPiXL
-
-# Start service
-sc.exe start SmartPiXL
-
-# Restart service
-sc.exe stop SmartPiXL; Start-Sleep 2; sc.exe start SmartPiXL
-
-# View logs (Event Viewer)
-Get-EventLog -LogName Application -Source SmartPiXL -Newest 20
-
-# View custom logs
-Get-Content "C:\SmartPiXL\Logs\*.log" -Tail 50
-
-# Remove service (for reinstall)
-sc.exe stop SmartPiXL
-sc.exe delete SmartPiXL
-```
-
----
-
-## Sample Pixel Script for Client
-
-Give this to your client to add to their website:
-
-```html
-<!-- SmartPiXL Tracking - Company ID: 12345, PiXL ID: 1 -->
-<script src="https://pixl.yourcompany.com/js/12345/1.js" async></script>
-```
-
-Or the direct image tag (no JavaScript fingerprinting):
-
-```html
-<img src="https://pixl.yourcompany.com/12345/1_SMART.GIF" width="1" height="1" style="display:none" alt="">
-```
+| # | File | What Lives There |
+|---|------|------------------|
+| 1 | `TrackingPixel.Modern/appsettings.json` | Dev connection string, Kestrel ports 7000/7001 |
+| 2 | `C:\inetpub\Smartpixl.info\appsettings.json` | **Production** connection string, Kestrel ports 6000/6001 |
+| 3 | `TrackingPixel.Modern/Configuration/TrackingSettings.cs` | Compiled default fallback connection string |
+| 4 | `C:\inetpub\Smartpixl.info\web.config` | ASP.NET Core module config for IIS hosting |
+| 5 | `TrackingPixel.Modern/web.config` | Source web.config (copied during publish) |
 
 ---
 
 ## Troubleshooting
 
-### Service Won't Start
+### No data after deploy
+
+1. Check `C:\inetpub\Smartpixl.info\Log\{date}.log` for "Failed to write batch" errors
+2. Most common: **SQL login failed** for IIS app pool identity on `localhost\SQL2025`
+3. Second most common: **`web.config` was overwritten** by `dotnet publish`
+
+### Dashboard shows no data
+
+1. `PiXL.Test` has rows but `PiXL.Parsed` doesn't → ETL hasn't run. Run `EXEC ETL.usp_ParseNewHits` manually.
+2. Watermark ahead of max Test ID → Reset:
+   ```sql
+   UPDATE ETL.Watermark
+   SET    LastProcessedId = 0, RowsProcessed = 0
+   WHERE  ProcessName = 'ParseNewHits';
+   ```
+
+### Process needs restart after config change
+
+The app caches `appsettings.json` at startup.
+
+- **IIS:** `Stop-WebAppPool` / `Start-WebAppPool` (or `iisreset`)
+- **Dev:** Kill the `TrackingPixel` process and re-run `dotnet run`
+
+### Service won't start
+
 ```powershell
 # Check Windows Event Log
-Get-EventLog -LogName Application -Newest 20 | Where-Object { $_.Source -eq ".NET Runtime" -or $_.Message -like "*SmartPiXL*" }
+Get-EventLog -LogName Application -Newest 20 |
+    Where-Object { $_.Source -eq ".NET Runtime" -or $_.Message -like "*TrackingPixel*" }
 ```
 
-### Connection Issues
-- Verify SQL Server is accessible: `Test-NetConnection YOUR_SQL_SERVER -Port 1433`
-- Check firewall allows inbound 80/443
-- Verify certificate is valid: `certutil -verify C:\SmartPiXL\pixl.pfx`
-
-### Performance Tuning
-For high-volume production, edit `appsettings.json`:
-```json
-{
-  "TrackingSettings": {
-    "QueueCapacity": 50000,
-    "BatchSize": 500
-  }
-}
-```
-
----
-
-## Alternative: IIS Hosting
-
-If you prefer IIS (existing infrastructure):
-
-1. Install ASP.NET Core Hosting Bundle for .NET 10
-2. Create IIS Site pointing to publish folder
-3. Use web.config for process model settings
-
-But honestly, the Windows Service approach is simpler and has less moving parts.
-
----
-
-## Updating the Application
+### Connection issues
 
 ```powershell
-# 1. Build new version
-dotnet publish -c Release -r win-x64 --self-contained -o .\publish
+# Verify SQL Server is reachable
+Test-NetConnection localhost -Port 1433
+```
 
-# 2. Stop service
-sc.exe stop SmartPiXL
+---
 
-# 3. Backup current
-Copy-Item "C:\SmartPiXL" "C:\SmartPiXL.backup" -Recurse
+## Client Integration
 
-# 4. Copy new files (preserve appsettings.json)
-Copy-Item ".\publish\*" "C:\SmartPiXL" -Recurse -Exclude "appsettings.json"
+Give this snippet to clients:
 
-# 5. Start service
-sc.exe start SmartPiXL
+```html
+<!-- SmartPiXL Tracking — CompanyID: ACME, PiXL: main -->
+<script src="https://smartpixl.info/js/ACME/main.js" async></script>
+```
+
+Or the direct image tag (no JavaScript fingerprinting):
+
+```html
+<img src="https://smartpixl.info/ACME/main_SMART.GIF" width="1" height="1" style="display:none" alt="">
 ```

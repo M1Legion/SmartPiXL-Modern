@@ -1,4 +1,5 @@
-using System.Data;
+using System.Collections;
+using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Data.SqlClient;
@@ -33,7 +34,7 @@ namespace TrackingPixel.Services;
 //   1. Async wait for at least one item (no CPU burn)
 //   2. Synchronous drain: read up to BatchSize items that are already buffered
 //   3. Write entire batch via SqlBulkCopy (single round-trip to SQL Server)
-//   4. DataTable.Clone() copies only schema, not rows — cheap per batch
+//   4. TrackingDataReader wraps List<TrackingData> directly — zero intermediate allocation
 //
 // SHUTDOWN BEHAVIOR:
 //   1. CancellationToken fires → main loop exits
@@ -45,6 +46,15 @@ namespace TrackingPixel.Services;
 //   Uses ordinal mapping (row[0], row[1], ...) instead of name-based mapping.
 //   This avoids a Dictionary<string,int> lookup inside SqlBulkCopy for every row.
 //   Column order MUST match the ColumnNames array exactly.
+//
+// WHY DbDataReader INSTEAD OF DataTable?
+//   DataTable.Clone() + N DataRow allocations per batch = significant GC pressure.
+//   TrackingDataReader wraps the existing List<TrackingData> directly:
+//     • Zero intermediate allocations (no DataTable, no DataRow objects)
+//     • SqlBulkCopy calls Read() + GetValue() which index the list by ordinal
+//     • The list is already in memory — we're just providing a typed view over it
+//   For a batch of 100 records, this eliminates ~100 DataRow objects (~200+ bytes each)
+//   and the DataTable bookkeeping. Every Gen0 avoided is a win on the hot path.
 // ============================================================================
 
 /// <summary>
@@ -60,20 +70,15 @@ public sealed class DatabaseWriterService : BackgroundService
     private readonly Channel<TrackingData> _channel;
     private readonly TrackingSettings _settings;
     private readonly ITrackingLogger _logger;
-    private readonly DataTable _dataTableTemplate;
     
     /// <summary>
     /// SQL column names in ordinal order. Must match the column order in <c>PiXL.Test</c>.
     /// <para>
-    /// Used for two purposes:
-    /// <list type="number">
-    ///   <item><description>DataTable schema creation (CreateDataTableTemplate)</description></item>
-    ///   <item><description>SqlBulkCopy column mapping (ordinal → name)</description></item>
-    /// </list>
+    /// Used for SqlBulkCopy column mapping (ordinal → name).
     /// Stored as a static array to avoid any per-batch allocation.
     /// </para>
     /// </summary>
-    private static readonly string[] ColumnNames =
+    internal static readonly string[] ColumnNames =
     [
         "CompanyID",    // [0] nvarchar — client identifier from URL path
         "PiXLID",       // [1] nvarchar — campaign/pixel identifier from URL path
@@ -102,10 +107,6 @@ public sealed class DatabaseWriterService : BackgroundService
                 FullMode = BoundedChannelFullMode.Wait, // TryWrite returns false when full
                 SingleReader = true     // Only ExecuteAsync reads — enables lock-free fast path
             });
-        
-        // Pre-build the DataTable schema once. Clone() in WriteBatchAsync copies
-        // only the column definitions, not any row data — cheap per batch.
-        _dataTableTemplate = CreateDataTableTemplate();
     }
     
     /// <summary>
@@ -224,14 +225,9 @@ public sealed class DatabaseWriterService : BackgroundService
     /// <summary>
     /// Writes a batch of tracking records to <c>PiXL.Test</c> via <see cref="SqlBulkCopy"/>.
     /// <para>
-    /// Steps:
-    /// <list type="number">
-    ///   <item><description>Clone the pre-built DataTable schema (cheap — copies columns, not rows)</description></item>
-    ///   <item><description>Populate rows using ordinal indexing (row[0], row[1], ...)</description></item>
-    ///   <item><description>Open a pooled SQL connection (ADO.NET handles connection pooling)</description></item>
-    ///   <item><description>Configure SqlBulkCopy with ordinal column mappings</description></item>
-    ///   <item><description>WriteToServerAsync sends the entire DataTable in one round-trip</description></item>
-    /// </list>
+    /// Uses <see cref="TrackingDataReader"/> to wrap the <c>List&lt;TrackingData&gt;</c> directly —
+    /// SqlBulkCopy reads from it via <c>Read()</c> + <c>GetValue()</c> calls with zero
+    /// intermediate allocations (no DataTable, no DataRow objects).
     /// </para>
     /// </summary>
     private async Task WriteBatchAsync(List<TrackingData> batch, CancellationToken ct)
@@ -240,26 +236,9 @@ public sealed class DatabaseWriterService : BackgroundService
         
         try
         {
-            // Clone() copies the schema (column definitions) without any row data.
-            // This is much cheaper than building a new DataTable from scratch each batch.
-            using var table = _dataTableTemplate.Clone();
-            
-            foreach (var data in batch)
-            {
-                var row = table.NewRow();
-                // Ordinal assignment — avoids the string-keyed Dictionary lookup that
-                // row["ColumnName"] would require. AsDbValue converts null → DBNull.Value.
-                row[0] = AsDbValue(data.CompanyID);
-                row[1] = AsDbValue(data.PiXLID);
-                row[2] = AsDbValue(data.IPAddress);
-                row[3] = AsDbValue(data.RequestPath);
-                row[4] = AsDbValue(data.QueryString);
-                row[5] = AsDbValue(data.HeadersJson);
-                row[6] = AsDbValue(data.UserAgent);
-                row[7] = AsDbValue(data.Referer);
-                row[8] = data.ReceivedAt; // DateTime — not nullable, no DBNull check needed
-                table.Rows.Add(row);
-            }
+            // TrackingDataReader wraps the list directly — zero DataTable/DataRow allocations.
+            // It implements DbDataReader so SqlBulkCopy.WriteToServerAsync can consume it.
+            using var reader = new TrackingDataReader(batch);
             
             // SqlBulkCopy with connection string — ADO.NET manages the connection pool.
             // We don't keep a persistent connection; each batch gets a pooled connection.
@@ -274,7 +253,7 @@ public sealed class DatabaseWriterService : BackgroundService
             for (var i = 0; i < cols.Length; i++)
                 bulkCopy.ColumnMappings.Add(i, cols[i]);
             
-            await bulkCopy.WriteToServerAsync(table, ct);
+            await bulkCopy.WriteToServerAsync(reader, ct);
             
             _logger.Debug($"Wrote {batch.Count} records");
         }
@@ -285,44 +264,183 @@ public sealed class DatabaseWriterService : BackgroundService
             _logger.Error($"Failed to write batch of {batch.Count} records", ex);
         }
     }
-
-    /// <summary>
-    /// Converts a nullable string to <see cref="DBNull.Value"/> when null.
-    /// <para>
-    /// <c>[MethodImpl(AggressiveInlining)]</c> ensures the JIT eliminates the method call
-    /// overhead — this compiles to a simple null-coalescing check at each call site.
-    /// SqlBulkCopy requires DBNull.Value, not C# null, for nullable columns.
-    /// </para>
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static object AsDbValue(string? value) => (object?)value ?? DBNull.Value;
+    
+    // ========================================================================
+    // TRACKING DATA READER — Zero-allocation DbDataReader over List<TrackingData>
+    //
+    // Replaces the old DataTable + DataRow approach. SqlBulkCopy calls Read() to
+    // advance and GetValue(ordinal) to read fields — both are simple index lookups
+    // into the existing list. No intermediate objects are allocated.
+    //
+    // For a batch of 100: eliminates ~100 DataRow allocations (each ~200+ bytes
+    // with internal storage arrays) plus DataTable.Clone() overhead.
+    // ========================================================================
     
     /// <summary>
-    /// Creates the DataTable schema template used by <see cref="WriteBatchAsync"/>.
+    /// Lightweight <see cref="DbDataReader"/> that wraps a <c>List&lt;TrackingData&gt;</c>
+    /// for direct consumption by <see cref="SqlBulkCopy"/>. No intermediate allocations.
     /// <para>
-    /// All columns are <c>typeof(string)</c> except <c>ReceivedAt</c> which is <c>typeof(DateTime)</c>.
-    /// This template is created once in the constructor and cloned per batch.
+    /// Primary constructor captures the batch list by reference — no copy is made.
+    /// <c>_index</c> starts at -1 because <see cref="Read"/> pre-increments before
+    /// the first access, matching the ADO.NET reader contract.
+    /// </para>
+    /// <para>
+    /// SqlBulkCopy only ever calls <see cref="Read"/>, <see cref="GetValue"/>,
+    /// <see cref="FieldCount"/>, and <see cref="IsDBNull"/>. All other overrides
+    /// are mandatory stubs required by the abstract <see cref="DbDataReader"/> base.
     /// </para>
     /// </summary>
-    private static DataTable CreateDataTableTemplate()
+    private sealed class TrackingDataReader(List<TrackingData> batch) : DbDataReader
     {
-        var table = new DataTable();
-        var cols = ColumnNames;
-        // Add all string columns (indices 0–7)
-        for (var i = 0; i < cols.Length - 1; i++)
-            table.Columns.Add(cols[i], typeof(string));
-        // Last column (ReceivedAt) is DateTime, not string
-        table.Columns.Add(cols[^1], typeof(DateTime));
-        return table;
-    }
-    
-    /// <summary>
-    /// Disposes the DataTable template. Called by <see cref="BackgroundService.Dispose"/>.
-    /// BackgroundService already implements IDisposable, so we just override and chain.
-    /// </summary>
-    public override void Dispose()
-    {
-        _dataTableTemplate.Dispose();
-        base.Dispose();
+        /// <summary>Current row position. Starts at -1; Read() pre-increments to 0.</summary>
+        private int _index = -1;
+        
+        /// <inheritdoc />
+        /// <remarks>9 columns — matches <see cref="ColumnNames"/> array length.</remarks>
+        public override int FieldCount => ColumnNames.Length;
+        
+        /// <inheritdoc />
+        /// <remarks>-1 = not applicable for SELECT-style readers (SqlBulkCopy ignores this).</remarks>
+        public override int RecordsAffected => -1;
+        
+        /// <inheritdoc />
+        public override bool HasRows => batch.Count > 0;
+        
+        /// <inheritdoc />
+        /// <remarks>Closed when the cursor has advanced past the last row.</remarks>
+        public override bool IsClosed => _index >= batch.Count;
+        
+        /// <inheritdoc />
+        /// <remarks>Always 0 — nested result sets are not supported.</remarks>
+        public override int Depth => 0;
+        
+        /// <inheritdoc />
+        /// <remarks>
+        /// Pre-increments <c>_index</c> and returns true while within bounds.
+        /// This is the primary method called by SqlBulkCopy in its inner loop.
+        /// </remarks>
+        public override bool Read() => ++_index < batch.Count;
+        
+        /// <inheritdoc />
+        /// <remarks>Always false — we have exactly one result set (the batch).</remarks>
+        public override bool NextResult() => false;
+        
+        /// <summary>
+        /// Returns the value at the given column ordinal for the current row.
+        /// <para>
+        /// This is the hot-path method called by SqlBulkCopy for every column
+        /// of every row. The switch expression compiles to a jump table —
+        /// constant-time dispatch regardless of column count.
+        /// </para>
+        /// <para>
+        /// Nullable string columns return <see cref="DBNull.Value"/> when null,
+        /// as required by the ADO.NET contract. ReceivedAt (ordinal 8) is never
+        /// null so it returns the <see cref="DateTime"/> directly.
+        /// </para>
+        /// </summary>
+        public override object GetValue(int ordinal)
+        {
+            var d = batch[_index];
+            return ordinal switch
+            {
+                0 => (object?)d.CompanyID ?? DBNull.Value,     // CompanyID
+                1 => (object?)d.PiXLID ?? DBNull.Value,        // PiXLID
+                2 => (object?)d.IPAddress ?? DBNull.Value,     // IPAddress
+                3 => (object?)d.RequestPath ?? DBNull.Value,   // RequestPath
+                4 => (object?)d.QueryString ?? DBNull.Value,   // QueryString
+                5 => (object?)d.HeadersJson ?? DBNull.Value,   // HeadersJson
+                6 => (object?)d.UserAgent ?? DBNull.Value,     // UserAgent
+                7 => (object?)d.Referer ?? DBNull.Value,       // Referer
+                8 => d.ReceivedAt,                             // ReceivedAt (never null)
+                _ => throw new IndexOutOfRangeException()
+            };
+        }
+        
+        /// <summary>
+        /// Checks if the value at the given column ordinal is null.
+        /// SqlBulkCopy calls this before <see cref="GetValue"/> for nullable columns
+        /// to decide whether to write NULL or the actual value to the bulkcopy stream.
+        /// </summary>
+        public override bool IsDBNull(int ordinal)
+        {
+            if (ordinal == 8) return false; // ReceivedAt (datetime2) is never null
+            var d = batch[_index];
+            return ordinal switch
+            {
+                0 => d.CompanyID is null,
+                1 => d.PiXLID is null,
+                2 => d.IPAddress is null,
+                3 => d.RequestPath is null,
+                4 => d.QueryString is null,
+                5 => d.HeadersJson is null,
+                6 => d.UserAgent is null,
+                7 => d.Referer is null,
+                _ => true
+            };
+        }
+        
+        /// <summary>Gets the column name for the given ordinal (e.g., 0 → "CompanyID").</summary>
+        public override string GetName(int ordinal) => ColumnNames[ordinal];
+        
+        /// <summary>Reverse lookup: column name → ordinal position. O(n) scan of 9 elements.</summary>
+        public override int GetOrdinal(string name) => Array.IndexOf(ColumnNames, name);
+        
+        /// <summary>SQL type name: "datetime2" for ReceivedAt, "nvarchar" for all others.</summary>
+        public override string GetDataTypeName(int ordinal) => ordinal == 8 ? "datetime2" : "nvarchar";
+        
+        /// <summary>.NET type: <see cref="DateTime"/> for ReceivedAt, <see cref="string"/> for all others.</summary>
+        public override Type GetFieldType(int ordinal) => ordinal == 8 ? typeof(DateTime) : typeof(string);
+        
+        /// <summary>Indexer by ordinal — delegates to <see cref="GetValue"/>.</summary>
+        public override object this[int ordinal] => GetValue(ordinal);
+        
+        /// <summary>Indexer by name — resolves ordinal first, then delegates to <see cref="GetValue"/>.</summary>
+        public override object this[string name] => GetValue(GetOrdinal(name));
+        
+        /// <summary>
+        /// Fills the provided array with all column values for the current row.
+        /// Returns the number of values actually written (min of array length and FieldCount).
+        /// </summary>
+        public override int GetValues(object[] values)
+        {
+            var count = Math.Min(values.Length, FieldCount);
+            for (var i = 0; i < count; i++) values[i] = GetValue(i);
+            return count;
+        }
+        
+        /// <summary>Typed string accessor. Throws <see cref="InvalidCastException"/> if the column is null or non-string.</summary>
+        public override string GetString(int ordinal)
+        {
+            var d = batch[_index];
+            return (ordinal switch
+            {
+                0 => d.CompanyID, 1 => d.PiXLID, 2 => d.IPAddress,
+                3 => d.RequestPath, 4 => d.QueryString, 5 => d.HeadersJson,
+                6 => d.UserAgent, 7 => d.Referer, _ => null
+            }) ?? throw new InvalidCastException();
+        }
+        
+        /// <summary>Typed DateTime accessor. Only valid for ordinal 8 (ReceivedAt).</summary>
+        public override DateTime GetDateTime(int ordinal) =>
+            ordinal == 8 ? batch[_index].ReceivedAt : throw new InvalidCastException();
+        
+        // ====================================================================
+        // ABSTRACT STUBS — Required by DbDataReader but never called by
+        // SqlBulkCopy. PiXL.Test has no bool/byte/decimal/float/guid/int
+        // columns that would trigger these typed accessors.
+        // ====================================================================
+        public override bool GetBoolean(int ordinal) => throw new NotSupportedException();
+        public override byte GetByte(int ordinal) => throw new NotSupportedException();
+        public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => 0;
+        public override char GetChar(int ordinal) => throw new NotSupportedException();
+        public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => 0;
+        public override decimal GetDecimal(int ordinal) => throw new NotSupportedException();
+        public override double GetDouble(int ordinal) => throw new NotSupportedException();
+        public override float GetFloat(int ordinal) => throw new NotSupportedException();
+        public override Guid GetGuid(int ordinal) => throw new NotSupportedException();
+        public override short GetInt16(int ordinal) => throw new NotSupportedException();
+        public override int GetInt32(int ordinal) => throw new NotSupportedException();
+        public override long GetInt64(int ordinal) => throw new NotSupportedException();
+        public override IEnumerator GetEnumerator() => throw new NotSupportedException();
     }
 }
