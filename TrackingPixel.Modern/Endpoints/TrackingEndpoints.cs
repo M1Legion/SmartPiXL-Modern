@@ -83,6 +83,7 @@ public static partial class TrackingEndpoints
         var fpService = app.Services.GetRequiredService<FingerprintStabilityService>();
         var ipBehaviorService = app.Services.GetRequiredService<IpBehaviorService>();
         var dcService = app.Services.GetRequiredService<DatacenterIpService>();
+        var geoService = app.Services.GetRequiredService<GeoCacheService>();
         
         // Resolve wwwroot path once at startup
         _wwwrootPath = ResolveWwwrootPath();
@@ -204,7 +205,7 @@ public static partial class TrackingEndpoints
             
             if (isTrackingPixel && hasTrackingData)
             {
-                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, writerService, logger);
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, geoService, writerService, logger);
             }
             // Else: silently return the GIF without recording (favicon, robots, etc.)
             
@@ -230,7 +231,7 @@ public static partial class TrackingEndpoints
             
             if (isTrackingPixel && hasTrackingData)
             {
-                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, writerService, logger);
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService, dcService, geoService, writerService, logger);
             }
             
             return Results.NoContent();
@@ -285,6 +286,7 @@ public static partial class TrackingEndpoints
         FingerprintStabilityService fpService,
         IpBehaviorService ipBehaviorService,
         DatacenterIpService dcService,
+        GeoCacheService geoService,
         DatabaseWriterService writerService,
         ITrackingLogger logger)
     {
@@ -313,6 +315,21 @@ public static partial class TrackingEndpoints
         var dcResult = dcService.Check(ip);
         var ipClass = IpClassificationService.Classify(ip);
         
+        // --- Server-side geolocation lookup (non-blocking) ---
+        // Returns immediately from in-memory cache. On first hit for an IP,
+        // queues an async SQL lookup — the next hit will have geo data.
+        var geoResult = ipClass.ShouldGeolocate ? geoService.TryLookup(ip) : GeoResult.NotFound;
+        
+        // --- Timezone mismatch detection ---
+        // Compares the client-reported IANA timezone (from JS Intl.DateTimeFormat)
+        // against the IP-derived timezone from IPAPI. A mismatch is a strong VPN/proxy signal.
+        var clientTz = ctx.Request.Query["tz"].FirstOrDefault();
+        var geoTzMismatch = false;
+        if (geoResult.Found && !string.IsNullOrEmpty(geoResult.Timezone) && !string.IsNullOrEmpty(clientTz))
+        {
+            geoTzMismatch = !string.Equals(clientTz, geoResult.Timezone, StringComparison.OrdinalIgnoreCase);
+        }
+        
         // Build server-side query string extension when any enrichment fires.
         // Only allocates when there's something to append — clean hits pass through
         // with the original QueryString untouched (no StringBuilder, no string concat).
@@ -321,11 +338,12 @@ public static partial class TrackingEndpoints
         var hasDcMatch = dcResult.IsDatacenter;
         // Skip enrichment for Public + Invalid — those are the common/default cases
         var hasIpClass = ipClass.Type is not IpType.Public and not IpType.Invalid;
+        var hasGeoData = geoResult.Found || geoTzMismatch;
         
-        if (hasFpAlert || hasIpAlert || hasDcMatch || hasIpClass)
+        if (hasFpAlert || hasIpAlert || hasDcMatch || hasIpClass || hasGeoData)
         {
             // Thread-local StringBuilder — zero alloc after first request per thread
-            var sb = t_alertSb ??= new StringBuilder(256);
+            var sb = t_alertSb ??= new StringBuilder(512);
             sb.Clear();
             sb.Append(trackingData.QueryString);
             
@@ -357,6 +375,32 @@ public static partial class TrackingEndpoints
             // Byte-backed enum cast — serializes as a single digit, parseable by ETL
             if (hasIpClass)
                 sb.Append("&_srv_ipType=").Append((byte)ipClass.Type);
+            
+            // Geo enrichment: _srv_geo* params for ETL and real-time bot signals.
+            // Only appended when the IP was found in the in-memory geo cache.
+            // IPs not in cache get geo data via the ETL JOIN (IPAPI.IP) instead.
+            if (geoResult.Found)
+            {
+                if (!string.IsNullOrEmpty(geoResult.CountryCode))
+                    sb.Append("&_srv_geoCC=").Append(geoResult.CountryCode);
+                if (!string.IsNullOrEmpty(geoResult.Region))
+                    sb.Append("&_srv_geoReg=").Append(Uri.EscapeDataString(geoResult.Region));
+                if (!string.IsNullOrEmpty(geoResult.City))
+                    sb.Append("&_srv_geoCity=").Append(Uri.EscapeDataString(geoResult.City));
+                if (!string.IsNullOrEmpty(geoResult.Timezone))
+                    sb.Append("&_srv_geoTz=").Append(Uri.EscapeDataString(geoResult.Timezone));
+                if (!string.IsNullOrEmpty(geoResult.ISP))
+                    sb.Append("&_srv_geoISP=").Append(Uri.EscapeDataString(geoResult.ISP));
+                if (geoResult.IsProxy == true)
+                    sb.Append("&_srv_geoProxy=1");
+                if (geoResult.IsMobile == true)
+                    sb.Append("&_srv_geoMobile=1");
+            }
+            
+            // Timezone mismatch: strong VPN/proxy signal.
+            // Client says America/New_York but IP resolves to Europe/London → suspicious.
+            if (geoTzMismatch)
+                sb.Append("&_srv_geoTzMismatch=1");
             
             // Replace the original QueryString with the enriched version.
             // Uses C# record 'with' expression — creates a shallow copy with only

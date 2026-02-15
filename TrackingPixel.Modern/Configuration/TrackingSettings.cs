@@ -69,6 +69,23 @@ public sealed class TrackingSettings
     /// 60 seconds handles worst-case SQL contention; increase for very large batches.
     /// </summary>
     public int BulkCopyTimeoutSeconds { get; set; } = 60;
+    
+    // ========================================================================
+    // IP-API / GEO SYNC SETTINGS
+    // ========================================================================
+    
+    /// <summary>
+    /// Connection string for Xavier (192.168.88.35) — the live IPGEO database.
+    /// Used by <see cref="Services.IpApiSyncService"/> to pull delta rows from
+    /// <c>IPGEO.dbo.IP_Location_New</c>. Null or empty = sync disabled.
+    /// </summary>
+    public string? XavierConnectionString { get; set; }
+    
+    /// <summary>
+    /// UTC hour (0–23) when the daily IP-API sync runs.
+    /// Default is 2 AM UTC to avoid peak traffic windows.
+    /// </summary>
+    public int IpApiSyncHourUtc { get; set; } = 2;
 }
 
 /// <summary>

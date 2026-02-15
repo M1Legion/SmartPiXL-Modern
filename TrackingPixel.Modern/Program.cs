@@ -86,6 +86,17 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpServic
 // raw data from PiXL.Test → PiXL.Parsed (materialized warehouse with ~175 columns).
 builder.Services.AddHostedService<EtlBackgroundService>();
 
+// GeoCacheService: Non-blocking in-memory IP geolocation lookups backed by IPAPI.IP.
+// Used on the hot path for timezone mismatch signals and _srv_geo* enrichment params.
+// On cache miss, fires async SQL lookup — next hit from that IP will be cached.
+builder.Services.AddSingleton<GeoCacheService>();
+
+// IpApiSyncService: Daily incremental sync from Xavier (IPGEO.dbo.IP_Location_New)
+// to local IPAPI.IP. Pulls delta by Last_Seen watermark, MERGEs via staging table.
+// After sync, enriches PiXL.IP geo columns and clears the geo hot cache.
+builder.Services.AddSingleton<IpApiSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
+
 // InfraHealthService: Probes Windows services, SQL connectivity, IIS websites,
 // and in-process app metrics. Results cached 15s to avoid hammering on refresh.
 builder.Services.AddSingleton<InfraHealthService>();
@@ -206,6 +217,21 @@ app.Services.GetRequiredService<IHostApplicationLifetime>()
 logger.Info("SmartPiXL Tracking Server starting...");
 logger.Info("HTTP:  http://localhost:7000");
 logger.Info("HTTPS: https://localhost:7001");
+
+// Pre-warm the geo cache with top-hit IPs from PiXL.IP × IPAPI.IP.
+// Runs on a background task so it doesn't block app startup.
+_ = Task.Run(async () =>
+{
+    try
+    {
+        var geoCache = app.Services.GetRequiredService<GeoCacheService>();
+        await geoCache.PrewarmAsync(2000);
+    }
+    catch (Exception ex)
+    {
+        logger.Warning($"Geo cache prewarm failed: {ex.Message}");
+    }
+});
 
 Console.WriteLine("SmartPiXL Tracking Server running — Ctrl+C to stop");
 

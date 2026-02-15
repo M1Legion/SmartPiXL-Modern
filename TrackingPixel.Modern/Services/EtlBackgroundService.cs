@@ -96,5 +96,24 @@ public sealed class EtlBackgroundService : BackgroundService
             if (rowsProcessed > 0)
                 _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched");
         }
+        await matchReader.CloseAsync();
+        
+        // Phase 3: Enrich geo data on PiXL.Parsed and PiXL.IP from IPAPI.IP
+        await using var geoCmd = conn.CreateCommand();
+        geoCmd.CommandText = "ETL.usp_EnrichParsedGeo";
+        geoCmd.CommandType = System.Data.CommandType.StoredProcedure;
+        geoCmd.Parameters.AddWithValue("@BatchSize", 10000);
+        geoCmd.CommandTimeout = 300;
+        
+        await using var geoReader = await geoCmd.ExecuteReaderAsync(ct);
+        if (await geoReader.ReadAsync(ct))
+        {
+            var parsedEnriched = geoReader.GetInt32(0);
+            var srvFallback = geoReader.GetInt32(1);
+            var ipEnriched = geoReader.GetInt32(2);
+            
+            if (parsedEnriched > 0 || ipEnriched > 0)
+                _logger.Info($"ETL geo: {parsedEnriched} parsed + {srvFallback} srv fallback + {ipEnriched} IPs enriched");
+        }
     }
 }
