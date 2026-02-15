@@ -61,20 +61,60 @@ Last Updated: February 15, 2026
 - [x] Datacenter IP detection
 - [x] Font spoofing hardening
 
+### Phase 7: IP Geolocation
+- [x] `GeoCacheService` — two-tier (ConcurrentDictionary + MemoryCache) non-blocking geo lookup against 342M-row `IPAPI.IP` table
+- [x] `IpApiSyncService` — daily watermark-based incremental sync from Xavier (`192.168.88.35`) `IPGEO.dbo.ip_location_new` → local `IPAPI.IP`
+- [x] Geo enrichment integrated into `CaptureAndEnqueue` pipeline (before SQL insert)
+- [x] Geo-timezone mismatch bot signal (`_srv_tzMismatch`)
+- [x] `ETL.usp_EnrichParsedGeo` — backfills geo columns on `PiXL.Parsed` from `IPAPI.IP`
+- [x] `IPAPI` schema, `IPAPI.IP` table, `IPAPI.SyncLog` audit table (SQL/25, SQL/26)
+
+---
+
+## In Progress
+
+### Phase 8: Legacy PiXL Support ⬅ P0
+**Priority:** P0 — Active development
+
+SmartPiXL is an upgrade to the existing Xavier tracking platform. Legacy pixels deployed to clients must continue to work. See `docs/LEGACY_SUPPORT.md` for full design.
+
+| Task | Effort | Status |
+|------|--------|--------|
+| Remove `queryString.Length > 10` gate — accept all `_SMART.GIF` hits | 1 h | Not started |
+| Add `_SMART.js` route — serves PiXLScript from same URL pattern as legacy | 1 h | Not started |
+| Hit-type detection (`_srv_hitType=legacy\|modern`) in `CaptureAndEnqueue` | 1 h | Not started |
+| Populate `Referer` from `?ref=` param for legacy `<script>` style hits | 30 min | Not started |
+| Add `HitType` column to `PiXL.Parsed` and `PiXL.Visit` | 1 h | Not started |
+| Update `ETL.usp_ParseNewHits` to populate `HitType` | 1 h | Not started |
+| Update `vw_Dash_*` views for legacy vs modern hit reporting | 2 h | Not started |
+| Xavier traffic forwarding documentation | 1 h | Not started |
+
+### Phase 9: Company/Pixel Sync from Xavier ⬅ P0
+**Priority:** P0 — Active development
+
+Xavier remains the system of record for Company/Pixel configuration. Changes must sync to SmartPiXL.
+
+| Task | Effort | Status |
+|------|--------|--------|
+| `CompanyPixelSyncService` — `BackgroundService` syncing from `Xavier.SmartPixl.dbo.Company` and `dbo.PiXL` | 3–4 h | Not started |
+| `ETL.CompanyPixelSyncLog` table for audit trail | 30 min | Not started |
+| Config additions to `TrackingSettings` (`CompanyPixelSyncIntervalMinutes`) | 30 min | Not started |
+| Register service in `Program.cs` | 15 min | Not started |
+| Verify sync preserves local-only columns (`ClientParams`, `Notes`, `SysStartTime`, `SysEndTime`) | 1 h | Not started |
+
 ---
 
 ## Backlog
 
-### IP Geolocation Integration
-**Priority:** P1 — Next major feature
+### Legacy Match Process
+**Priority:** P1 — After legacy ingestion is live
 
 | Task | Effort | Status |
 |------|--------|--------|
-| Geo cache lookup service (`GeoCacheService`) against existing 342M-row IP geo table | 3–4 h | Not started |
-| Expand `TrackingData` with geo fields (Country, Region, City, Lat/Lon, Timezone, ISP) | 1 h | Not started |
-| Integrate geo lookup into enrichment pipeline (before SQL insert) | 2–3 h | Not started |
-| Geo-timezone mismatch bot signal | 2 h | Not started |
-| Queue unresolved IPs for IP-API batch | 2–3 h | Not started |
+| Design legacy match strategy (IP + UA + timestamp window against AutoConsumer) | Design | Not started |
+| `ETL.usp_MatchLegacyVisits` stored procedure | 3–4 h | Not started |
+| Wire legacy match into `EtlBackgroundService` loop | 1 h | Not started |
+| Dashboard comparison: legacy match yield vs modern match yield per company | 2 h | Not started |
 
 ### Bot Detection Enhancement
 **Priority:** P2
@@ -106,10 +146,21 @@ Last Updated: February 15, 2026
 |------|--------|--------|
 | JA3/JA4 fingerprinting via reverse proxy (requires Nginx or HAProxy in front of IIS) | Design | Not started |
 
+### White-Label Support
+**Priority:** P3 — Future
+
+| Task | Effort | Status |
+|------|--------|--------|
+| Custom domain routing (e.g., `dashboard-datatracker.com`) for white-label clients | Design | Not started |
+| Branded pixel URLs and dashboard themes | Design | Not started |
+
 ---
 
 ## Notes
 
-- **IP-API compatibility:** The planned geo cache approach maintains compatibility with the existing IP-API batch process. New IPs not in cache will still queue for IP-API resolution.
+- **IP-API compatibility:** The geo cache approach maintains compatibility with the existing IP-API batch process. New IPs not in cache still queue for IP-API resolution.
 - **IPv6 readiness:** `IpClassificationService` already handles IPv4, IPv6, and IPv4-mapped IPv6 addresses.
 - **RESERVED_IP_RANGES.md** is the reference for all classified IP ranges.
+- **Legacy pixel format:** `<img src=".../{companyId}/{pixlId}_SMART.GIF">` (server-side data only). Modern pixel: `<script src=".../{companyId}/{pixlId}_SMART.js">` (90+ JS data points). One-tag upgrade path.
+- **Xavier is the system of record** for Company and Pixel configuration. `CompanyPixelSyncService` mirrors changes every 15 minutes. SmartPiXL adds local-only columns (`ClientParams`, temporal columns) that are not overwritten by sync.
+- **Legacy traffic forwarding:** Xavier's `Default.aspx.cs` can forward live production hits to SmartPiXL (`192.168.88.176`) via a fire-and-forget HTTP request on the same LAN. See `docs/LEGACY_SUPPORT.md`.

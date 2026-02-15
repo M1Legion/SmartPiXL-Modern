@@ -1,7 +1,7 @@
 # SmartPiXL — ETL Pipeline Design & Implementation Plan
 
 **Database:** SmartPiXL on `localhost\SQL2025` (SQL Server 2025 Developer)
-**Status:** Core pipeline implemented. SQLCLR and client-param JS phases remain TODO.
+**Status:** Core pipeline + geo enrichment implemented. Legacy PiXL support and Company/Pixel sync in progress.
 **Last updated:** February 15, 2026
 
 ---
@@ -41,48 +41,66 @@ PiXL.Test (raw, 9 columns)
 ### 2.1 Data Flow
 
 ```
-                    ┌──────────────────┐
-                    │  Browser / JS    │
-                    │  100+ data pts   │
-                    └───────┬──────────┘
-                            │  _SMART.GIF?qs=...
-                            ▼
-                    ┌──────────────────┐
-                    │ TrackingEndpoints│  server-side enrichment:
-                    │ CaptureAndEnqueue│  IP behavior, DC detection,
-                    └───────┬──────────┘  fingerprint stability
-                            │
-                            ▼
-                    ┌──────────────────┐
-                    │ DatabaseWriter   │  Channel<T> → SqlBulkCopy
-                    │ Service          │  bounded, single-reader
-                    └───────┬──────────┘
-                            │
-                            ▼
-              ┌─────────────────────────────┐
-              │        PiXL.Test            │  9 columns (raw ingest)
-              │  Id, SourceId, Headers,     │
-              │  QueryString, IP, UA, etc.  │
-              └─────────────┬───────────────┘
-                            │  ETL.usp_ParseNewHits (every 60s)
-                            ▼
-        ┌───────────────────────────────────────────┐
-        │              PiXL.Parsed                  │  ~175 columns
-        │  All query-string fields extracted         │  (materialized warehouse)
-        └───────┬───────────┬───────────┬───────────┘
-                │           │           │
-                ▼           ▼           ▼
-          PiXL.Device   PiXL.IP    PiXL.Visit
-          (dimension)   (dimension) (fact, JSON)
-                                       │
-                                       │  ETL.usp_MatchVisits (every 60s)
-                                       ▼
-                               ┌──────────────┐
-                               │ PiXL.Match   │  Joined against
-                               │ IndividualKey│  AutoConsumer (421M)
-                               │ AddressKey   │  via IX_AutoConsumer_EMail
-                               └──────────────┘
+  MODERN PATH                              LEGACY PATH
+  ───────────                              ───────────
+  <script src="_SMART.js">                 <img src="_SMART.GIF">
+        │                                        │
+        ▼                                        │
+  ┌──────────────────┐                           │
+  │  PiXLScript.js   │  100+ data pts            │  Server-side data only:
+  │  (served by app) │  collected in browser      │  IP, UA, Referer, Headers
+  └───────┬──────────┘                           │
+          │  new Image().src =                   │
+          │  _SMART.GIF?sw=...&sh=...            │
+          ▼                                      ▼
+  ┌─────────────────────────────────────────────────┐
+  │  TrackingEndpoints — /{**path} _SMART.GIF       │  Both paths land here.
+  │  CaptureAndEnqueue:                             │  Hit-type detected:
+  │    IP behavior, DC detection, geo lookup,       │  modern (has JS params)
+  │    fingerprint stability, tz mismatch           │  legacy (no JS params)
+  │    → appends _srv_hitType=modern|legacy         │
+  └───────────────────┬─────────────────────────────┘
+                      │
+                      ▼
+              ┌──────────────────┐
+              │ DatabaseWriter   │  Channel<T> → SqlBulkCopy
+              │ Service          │  bounded, single-reader
+              └───────┬──────────┘
+                      │
+                      ▼
+        ┌─────────────────────────────┐
+        │        PiXL.Test            │  9 columns (raw ingest)
+        │  Id, CompanyID, PiXLID,     │  Legacy rows: QueryString is
+        │  QueryString, IP, UA, etc.  │  empty or has only ?ref=...
+        └─────────────┬───────────────┘
+                      │  ETL.usp_ParseNewHits (every 60s)
+                      ▼
+  ┌───────────────────────────────────────────┐
+  │              PiXL.Parsed                  │  ~175 columns + HitType
+  │  Modern: all fields populated             │  Legacy: mostly NULL,
+  │  Legacy: IP, UA, Referer, HitType only    │  HitType = 'legacy'
+  └───────┬───────────┬───────────┬───────────┘
+          │           │           │
+          ▼           ▼           ▼
+    PiXL.Device   PiXL.IP    PiXL.Visit (+ HitType)
+    (dimension)   (dimension) (fact, JSON)
+                                 │
+                                 │  ETL.usp_MatchVisits (every 60s)
+                                 ▼
+                         ┌──────────────┐
+                         │ PiXL.Match   │  Modern: email-based match
+                         │ IndividualKey│  Legacy: deferred (IP+UA+TS)
+                         │ AddressKey   │  via IX_AutoConsumer_EMail
+                         └──────────────┘
 ```
+
+### 2.1.1 URL Patterns
+
+| URL Pattern | Purpose | Response |
+|-------------|---------|----------|
+| `/{companyId}/{pixlId}_SMART.js` | Modern pixel — serves PiXLScript JS | `Content-Type: text/javascript` |
+| `/{companyId}/{pixlId}_SMART.GIF` | Pixel hit (modern with JS params, or legacy bare) | `Content-Type: image/gif` (1×1 transparent) |
+| `/js/{companyId}/{pixlId}.js` | Legacy JS endpoint (backward compat) | `Content-Type: text/javascript` |
 
 ### 2.2 Table Lineage
 
@@ -94,8 +112,8 @@ PiXL.Test (raw, 9 columns)
 | `PiXL.IP` | IP address | `IPAddress` | `ETL.usp_ParseNewHits` (MERGE) |
 | `PiXL.Visit` | Per-parsed-row fact | `VisitId BIGINT IDENTITY` | `ETL.usp_ParseNewHits` |
 | `PiXL.Match` | Visit + AutoConsumer join | `VisitId` FK | `ETL.usp_MatchVisits` (MERGE) |
-| `PiXL.Company` | Config | `CompanyId` | Manual |
-| `PiXL.Pixel` | Config | `PixelId` | Manual |
+| `PiXL.Company` | Xavier sync | `CompanyId` | `CompanyPixelSyncService` (every 15 min from `Xavier.SmartPixl.dbo.Company`) |
+| `PiXL.Pixel` | Xavier sync | `(CompanyId, PiXLId)` | `CompanyPixelSyncService` (every 15 min from `Xavier.SmartPixl.dbo.PiXL`) |
 | `PiXL.Config` | Config | `CompanyId + PixelId` | Manual |
 | `ETL.Watermark` | Bookkeeping | `ProcessName` | `ETL.usp_ParseNewHits` |
 | `ETL.MatchWatermark` | Bookkeeping | `ProcessName` | `ETL.usp_MatchVisits` |
@@ -111,6 +129,9 @@ PiXL.Test (raw, 9 columns)
 | `IpBehaviorService` | Singleton | Subnet /24 velocity detection |
 | `DatacenterIpService` | Hosted (singleton) | AWS/GCP IP range downloader |
 | `IpClassificationService` | Singleton | DC / residential / reserved classification |
+| `GeoCacheService` | Singleton | Two-tier non-blocking IP geo lookup (ConcurrentDict + MemoryCache → IPAPI.IP) |
+| `IpApiSyncService` | Hosted | Daily watermark sync from Xavier IPGEO → IPAPI.IP |
+| `CompanyPixelSyncService` | Hosted | Every 15 min: MERGE sync from Xavier.SmartPixl.dbo.Company/PiXL |
 
 ---
 
@@ -130,8 +151,33 @@ PiXL.Test (raw, 9 columns)
 | — | Backfill Visit/Device/IP from existing Parsed rows | `SQL/21_BackfillVisitDeviceIP.sql` | Done |
 | — | Pipeline health view (`vw_Dash_PipelineHealth`) | `SQL/24_PipelineHealthView.sql` | Done |
 | — | C# `EtlBackgroundService` (unified loop calling both procs) | `Services/EtlBackgroundService.cs` | Done |
+| — | Geo enrichment proc (`ETL.usp_EnrichParsedGeo`) | `SQL/26_ETL_GeoEnrichment.sql` | Done |
+| — | `GeoCacheService` — two-tier non-blocking geo lookup | `Services/GeoCacheService.cs` | Done |
+| — | `IpApiSyncService` — daily incremental sync from Xavier IPGEO | `Services/IpApiSyncService.cs` | Done |
+| — | IPAPI schema + IP table + SyncLog | `SQL/25_GeoIntegration.sql` | Done |
 
-### TODO
+### In Progress — P0: Legacy PiXL Support
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| L1 | Remove `queryString.Length > 10` gate — accept all `_SMART.GIF` hits | Not started |
+| L2 | Add `_SMART.js` route — serves PiXLScript from `/{companyId}/{pixlId}_SMART.js` | Not started |
+| L3 | Hit-type detection (`_srv_hitType=legacy\|modern`) in `CaptureAndEnqueue` | Not started |
+| L4 | Populate `Referer` from `?ref=` param for legacy `<script>` style hits | Not started |
+| L5 | SQL: Add `HitType VARCHAR(10)` column to `PiXL.Parsed` and `PiXL.Visit` | Not started |
+| L6 | Update `ETL.usp_ParseNewHits` to populate `HitType` from `_srv_hitType` | Not started |
+| L7 | Update `vw_Dash_*` views for legacy vs modern hit reporting | Not started |
+
+### In Progress — P0: Company/Pixel Sync from Xavier
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| S1 | `CompanyPixelSyncService` — `BackgroundService` syncing Company + PiXL from Xavier | Not started |
+| S2 | `ETL.CompanyPixelSyncLog` table for audit | Not started |
+| S3 | Config: `CompanyPixelSyncIntervalMinutes` in `TrackingSettings` | Not started |
+| S4 | Register in `Program.cs` | Not started |
+
+### TODO (Lower Priority)
 
 | Phase | Description | Blocked By |
 |-------|-------------|------------|
@@ -140,6 +186,8 @@ PiXL.Test (raw, 9 columns)
 | 8 | JS script client-param support (`{{CLIENT_PARAMS}}` placeholder in PiXL script) | Phase 7 |
 | 10 | Config wiring for match interval/batch size in `TrackingSettings` | None |
 | 11 | Seed data for CompanyID 12800 (The Trivia Quest) | Phases 7, 8 |
+| LM1 | Design legacy match process (IP + UA + timestamp window) | Legacy ingest live |
+| LM2 | `ETL.usp_MatchLegacyVisits` stored procedure | LM1 |
 
 > **Note:** Phase 9 (separate `MatchBackgroundService`) was **superseded** by the unified `EtlBackgroundService`, which calls both `ETL.usp_ParseNewHits` and `ETL.usp_MatchVisits` on a single 60-second loop.
 
@@ -214,9 +262,9 @@ Client-configurable parameters use a `_cp_` prefix in the query string. The ETL 
 
 `ETL.usp_MatchVisits` uses `MERGE` to upsert into `PiXL.Match`. On conflict (`VisitId` already matched), it updates `IndividualKey` and `AddressKey` if a better match is found. This handles re-processing gracefully.
 
-### Decision 6: Lean Company / Pixel Tables
+### Decision 6: Company / Pixel Tables — Xavier System of Record
 
-`PiXL.Company` and `PiXL.Pixel` are intentionally minimal (name + active flag). Additional metadata (billing, contact, etc.) belongs in a future CRM system, not in the tracking database.
+`PiXL.Company` (41 columns, ~467 rows) and `PiXL.Pixel` (52 columns, ~5612 rows) are synced from Xavier (`192.168.88.35`, database `SmartPixl`, schema `dbo`). Xavier is the system of record — changes are made there and mirrored to SmartPiXL every 15 minutes via `CompanyPixelSyncService`. SmartPiXL adds local-only columns (`ClientParams`, `Notes`, `SysStartTime`, `SysEndTime`, `IsActive` on Pixel) that are **not overwritten** by the MERGE sync.
 
 ### Decision 7: No Staging Tables
 
@@ -250,6 +298,22 @@ The composite `DeviceHash` is computed by `ETL.usp_ParseNewHits` using `HASHBYTE
 
 `PiXL.Visit` uses its own `VisitId BIGINT IDENTITY` as the primary key, not `ParsedId`. This decouples the visit dimension from the parsed warehouse and allows future visit sources beyond `PiXL.Parsed`.
 
+### Decision 15: Tag, Don't Fork — Legacy vs Modern Hits
+
+Legacy pixel hits (`<img src="_SMART.GIF">`) and modern hits (`<script src="_SMART.js">` → JS fires `_SMART.GIF?params...`) flow through the **same pipeline** (PiXL.Test → Parsed → Visit → Match). They are differentiated by a `HitType` column (`'legacy'` or `'modern'`), not by separate tables or code paths. Legacy rows will have NULL values for all JS-only fields (~170 of ~175 columns in PiXL.Parsed). The ETL proc is already NULL-tolerant. This enables side-by-side comparison of legacy vs modern match yield per company.
+
+### Decision 16: Modern Pixel URL Mirrors Legacy Format
+
+Modern pixel embed code uses `<script src=".../{companyId}/{pixlId}_SMART.js">` — the same URL structure as legacy `<img src=".../{companyId}/{pixlId}_SMART.GIF">`, just changing the extension. This is intentional: clients upgrade by changing one character in one tag. The old `/js/{companyId}/{pixlId}.js` endpoint is retained for backward compatibility.
+
+### Decision 17: Accept All _SMART.GIF Hits
+
+The `queryString.Length > 10` gate is removed. The `_SMART.GIF` path suffix is sufficient to identify tracking pixel requests vs noise (favicon, robots, etc.). Legacy bare `<img>` requests with no query string are now recorded with server-side data only (IP, UA, Referer, all HTTP headers). Server-side enrichment (geo, IP classification, datacenter detection, IP behavior) still runs on legacy hits.
+
+### Decision 18: Xavier Traffic Forwarding
+
+Xavier's `Default.aspx.cs` can forward live production hits to SmartPiXL via a fire-and-forget HTTP request (`http://192.168.88.176/{path}`) with the original client IP in `X-Forwarded-For`. SmartPiXL already reads `X-Forwarded-For` in its IP extraction chain. This provides real production traffic for parallel validation without disrupting Xavier's operation.
+
 ---
 
 ## 6. Future Considerations
@@ -258,7 +322,7 @@ The composite `DeviceHash` is computed by `ETL.usp_ParseNewHits` using `HASHBYTE
 Use `DeviceHash` + `CanvasFingerprint` + `WebGLFingerprint` as a composite visitor identifier alongside email matching. Requires a similarity threshold and confidence scoring model.
 
 ### IP + Geo Matching
-When geo data is available (see [ROADMAP.md](ROADMAP.md)), add IP + city + timezone as a secondary match signal for `PiXL.Match`.
+Geo data is now available via `IPAPI.IP` (342M rows). Add IP + city + timezone as a secondary match signal for `PiXL.Match`.
 
 ### Cross-Device Linking
 Link the same visitor across devices using email as the anchor: if Device A and Device B both resolve to the same email, create a `PiXL.Visitor` entity spanning both.
@@ -283,6 +347,9 @@ Move from batch matching (every 60s) to event-driven matching using SQL Server S
 | `PiXL.Test` Id overflow (INT) | Low | Critical | Changed to `BIGINT` | Mitigated |
 | SQLCLR deployment complexity | Medium | Medium | Deferred; T-SQL UDFs work for current volume | Accepted |
 | `dotnet publish` overwrites `web.config` | High | High | Post-publish verification step in deploy script | Mitigated |
+| Legacy hits flood PiXL.Test with sparse rows | Medium | Low | `HitType` column enables filtering; ETL is NULL-tolerant; storage cost minimal | Accepted |
+| Xavier Company/Pixel sync overwrites local columns | Medium | High | MERGE excludes local-only columns (`ClientParams`, `Notes`, temporal cols) | Mitigated |
+| Xavier connectivity loss stops sync | Low | Medium | Service retries every 15 min; data is stale but not lost; SyncLog tracks failures | Accepted |
 
 ---
 
@@ -305,6 +372,11 @@ Move from batch matching (every 60s) to event-driven matching using SQL Server S
 | `SQL/22_AutoConsumerEmailIndex.sql` | IX_AutoConsumer_EMail on AutoConsumer(EMail) |
 | `SQL/23_MatchVisits.sql` | ETL.usp_MatchVisits stored procedure |
 | `SQL/24_PipelineHealthView.sql` | vw_Dash_PipelineHealth view |
+| `SQL/25_GeoIntegration.sql` | IPAPI schema, IPAPI.IP table, IPAPI.SyncLog |
+| `SQL/26_ETL_GeoEnrichment.sql` | ETL.usp_EnrichParsedGeo stored procedure |
+| `SQL/27_MatchTypeConfig.sql` | Match type configuration |
+| `SQL/28_LegacySupport.sql` | HitType columns on PiXL.Parsed and PiXL.Visit |
+| `SQL/29_CompanyPixelSyncLog.sql` | ETL.CompanyPixelSyncLog audit table |
 
 ### C# Services
 
@@ -318,3 +390,6 @@ Move from batch matching (every 60s) to event-driven matching using SQL Server S
 | `DatacenterIpService` | `Services/DatacenterIpService.cs` |
 | `IpClassificationService` | `Services/IpClassificationService.cs` |
 | `InfraHealthService` | `Services/InfraHealthService.cs` |
+| `GeoCacheService` | `Services/GeoCacheService.cs` |
+| `IpApiSyncService` | `Services/IpApiSyncService.cs` |
+| `CompanyPixelSyncService` | `Services/CompanyPixelSyncService.cs` |
