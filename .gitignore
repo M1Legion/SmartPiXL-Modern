@@ -30,3 +30,11 @@ Thumbs.db
 *.tmp
 *.temp
 .nuget/
+
+# Node / Puppeteer (screenshot tooling)
+node_modules/
+package-lock.json
+
+# TRON screenshots & artifacts
+TronDashboard/Screenshots/
+tron-lab-screenshot-*.png
