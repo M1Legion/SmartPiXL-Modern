@@ -1014,3 +1014,107 @@ Phase 9 creates the TrafficAlert subsystem — a unified traffic quality scoring
 | SmartPiXL (Edge) | 0 | 0 |
 | SmartPiXL.Forge | 0 | 0 |
 | Tests | 523/523 passing | 0 failures |
+
+---
+
+## Session 7 — Phase 10: Sentinel Service Separation
+
+### Objective
+
+Create the `SmartPiXL.Sentinel` project — the third and final process in the SmartPiXL architecture. The Sentinel owns all operational dashboards, documentation, and TrafficAlert endpoints on port 7500, while the Forge handles all background processing.
+
+### Architecture Decision: HTTP-Only Sentinel
+
+**Conflict:** The Worker-Deprecated ran both dashboard endpoints AND background services (SelfHealingService, MaintenanceSchedulerService, InfraHealthService loop, EmailNotificationService). The design doc specifies Sentinel should only host the HTTP API surface.
+
+**Decision:** Sentinel is a pure HTTP server with NO `AddHostedService` calls. All background processing (ETL, sync, self-healing loop, maintenance scheduling) already runs in the Forge (ported in Phase 2). The Sentinel provides:
+- Dashboard read API (`/api/dash/*`) — read-only SQL views
+- Atlas documentation portal (`/atlas`, `/api/atlas/*`) — public-facing
+- TrafficAlert API (`/api/traffic-alert/*`) — NEW, visitor scoring endpoints
+- Remediation approve/skip API — operator interaction only (no background loop)
+
+**Why:** Splits the concern cleanly. The Forge detects and proposes (writes to `Ops.RemediationLog`). The Sentinel displays and lets operators act. No duplication of background work.
+
+### Architecture Decision: RemediationService vs SelfHealingService
+
+**Conflict:** SelfHealingService in the Worker was 711 lines combining a 60-second detection loop with operator-facing approve/skip methods.
+
+**Decision:** Created `RemediationService` for the Sentinel containing only the 3 API-callable methods:
+- `ListRemediationsAsync()` — reads `Ops.RemediationLog` (top 50, newest first)
+- `ExecuteRemediationAsync(id)` — executes `ActionSql`, updates status, optionally resets Edge circuit breaker
+- `SkipRemediationAsync(id)` — marks as skipped
+
+The detection loop and auto-remediation logic stays in the Forge's `SelfHealingService`. This is a clean separation of concerns.
+
+### Architecture Decision: InfraHealthService Probes Updated
+
+**Change:** Added `SmartPiXL-Forge` to the Windows services probe list (replacing the retired `MSSQLSERVER` default instance). The Forge is now a critical service that should be monitored.
+
+### Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `SmartPiXL.Sentinel/SmartPiXL.Sentinel.csproj` | 29 | Web SDK, net10.0, Shared reference + 3 NuGet packages |
+| `SmartPiXL.Sentinel/Program.cs` | 205 | Composition root — services, middleware, endpoint mapping |
+| `SmartPiXL.Sentinel/appsettings.json` | 30 | Port 7500, SQL connection, SMTP, EdgeBaseUrl |
+| `SmartPiXL.Sentinel/Endpoints/DashboardEndpoints.cs` | 500 | Full Tron dashboard API (original + 9 new enrichment views) |
+| `SmartPiXL.Sentinel/Endpoints/AtlasEndpoints.cs` | 180 | Atlas documentation portal (4-tier content, live metrics) |
+| `SmartPiXL.Sentinel/Endpoints/TrafficAlertEndpoints.cs` | 280 | NEW: Visitor scoring, customer quality, trend endpoints |
+| `SmartPiXL.Sentinel/Services/InfraHealthService.cs` | 500 | Parallel probes: Windows services, SQL, IIS, data flow, pipeline, logs |
+| `SmartPiXL.Sentinel/Services/RemediationService.cs` | 160 | Approve/skip/list remediation entries (no background loop) |
+| `SmartPiXL.Sentinel/Services/EmailNotificationService.cs` | 170 | SMTP + SMS notifications with rate limiting |
+| `SmartPiXL.Sentinel/Services/HttpEdgeHealthClient.cs` | 100 | IEdgeHealthClient → Edge /internal/* HTTP bridge |
+| `SmartPiXL.Sentinel/wwwroot/tron.html` | — | Copied from Worker-Deprecated |
+| `SmartPiXL.Sentinel/wwwroot/atlas.html` | — | Copied from Worker-Deprecated |
+| `SmartPiXL.Sentinel/wwwroot/tron/*.mjs` | — | 8 modules: api, arena, camera, cycles, particles, pathing, scene, trails |
+
+### New TrafficAlert Endpoints (Phase 10 addition)
+
+| Endpoint | View/Table | Purpose |
+|----------|-----------|---------|
+| `GET /api/traffic-alert/visitors` | `vw_TrafficAlert_VisitorDetail` | Paginated visitor scores (top/offset/companyId/bucket filters) |
+| `GET /api/traffic-alert/visitors/{id}` | `vw_TrafficAlert_VisitorDetail` | Single visitor by VisitorScoreId |
+| `GET /api/traffic-alert/customers` | `vw_TrafficAlert_CustomerOverview` | Per-customer summary with quality grades |
+| `GET /api/traffic-alert/customers/{id}` | `vw_TrafficAlert_CustomerOverview` | Single customer by CompanyID |
+| `GET /api/traffic-alert/trend` | `vw_TrafficAlert_Trend` | Time-series for charting (per-customer or all) |
+| `GET /api/traffic-alert/summary` | `vw_TrafficAlert_CustomerOverview` | Aggregate KPI snapshot across all customers |
+
+### New Dashboard Endpoints (Enrichment-aware, Phase 8+)
+
+| Endpoint | View | Purpose |
+|----------|------|---------|
+| `/api/dash/sessions` | `vw_Dash_SessionSummary` | Session reconstruction |
+| `/api/dash/dead-internet` | `vw_Dash_DeadInternet` | Dead internet index |
+| `/api/dash/customer-quality` | `vw_Dash_CustomerQuality` | Traffic quality trending |
+| `/api/dash/cross-customer` | `vw_Dash_CrossCustomer` | Cross-customer intelligence |
+| `/api/dash/cross-customer/detail` | `vw_Dash_CrossCustomer_Detail` | Per-device cross-customer detail |
+| `/api/dash/impossible-travel` | `vw_Dash_ImpossibleTravel` | Geo anomaly detection |
+| `/api/dash/device-lifecycle` | `vw_Dash_DeviceLifecycle` | Device age/lifecycle |
+| `/api/dash/device-hops` | `vw_Dash_DeviceHops` | Device company-hopping trail |
+| `/api/dash/subnet-clusters` | `vw_Dash_SubnetClusters` | Subnet reputation clusters |
+
+### Solution File Changes
+
+- **Removed:** `SmartPiXL.Worker` project (`{8F1B70EF-CE9E-47D1-A7D7-0057D25C499F}`)
+- **Added:** `SmartPiXL.Sentinel` project (`{C3D4E5F6-A7B8-9012-CDEF-345678901234}`)
+- Worker-Deprecated directory preserved as read-only reference (workplan says delete in final cleanup)
+
+### Build & Test
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| SmartPiXL.Sentinel | 0 | 0 |
+| SmartPiXL.SqlClr | 0 | 0 |
+| Tests | 523/523 passing | 0 failures |
+
+### Post-Phase 10 Architecture
+
+| Process | Port | Purpose | Status |
+|---------|------|---------|--------|
+| **PiXL Edge** (IIS) | 80/443 (6000/6001 Kestrel) | Pixel capture, fast enrichments | LIVE |
+| **SmartPiXL Forge** | — (Windows Service) | Named pipe server, Tier 1-3 enrichments, ETL, SQL writer | BUILT |
+| **SmartPiXL Sentinel** | 7500 | Tron dashboard, Atlas portal, TrafficAlert API | BUILT |
+| SmartPiXL Worker | — | **DEPRECATED — removed from solution** | OFF |
