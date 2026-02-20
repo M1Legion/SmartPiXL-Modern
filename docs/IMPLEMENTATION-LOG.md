@@ -924,3 +924,90 @@ Note: `SmartPiXL.Worker-Deprecated` has pre-existing build errors (72) from miss
 | `dbo.vw_Dash_*` | 19 |
 | `dbo.vw_Dashboard_*` | 16 |
 | **Total views** | **35** |
+
+---
+
+## Session 6 — Phase 9: TrafficAlert Subsystem
+
+### Overview
+
+Phase 9 creates the TrafficAlert subsystem — a unified traffic quality scoring and reporting system that combines all enrichment outputs into per-visit composite scores and per-customer aggregate summaries. Pure SQL work (schema, materialization procs, dashboard views).
+
+### Conflict 1: MERGE Avoided for Performance — Separate DELETE + INSERT
+
+**What the conflict was:** The existing codebase uses MERGE for upserts (SubnetReputation, Device/IP dimensions). The workplan doesn't specify a pattern for CustomerSummary rollups, but MERGE would be the obvious choice for "update existing period rows, insert new ones."
+
+**Why the agent made the decision it did:** The platform owner expressed strong preference for avoiding MERGE due to performance concerns (wider lock scope, deadlock potential, historical SQL Server bugs). For VisitorScore, MERGE is unnecessary — watermark-based processing guarantees only new rows arrive. For CustomerSummary, period rows are fully recomputed when new data arrives.
+
+**What the decision was:**
+- VisitorScore: Pure INSERT (watermark prevents duplicates, no upsert needed).
+- CustomerSummary: DELETE affected rows + INSERT fresh aggregates. This is cleaner than MERGE and faster for a daily batch operation. Weekly and monthly rollups derive from daily rows to avoid re-scanning VisitorScore.
+
+### Conflict 2: PiXL.Visit.DeviceId Nullable — Most Visits Have NULL DeviceId
+
+**What the conflict was:** `TrafficAlert.VisitorScore.DeviceId` is NOT NULL (FK to PiXL.Device), but 2,008,715 of 2,009,326 visits have NULL DeviceId — they predate Forge enrichment.
+
+**What the decision was:** Filter `WHERE v.DeviceId IS NOT NULL` in the materialization proc. Only Forge-enriched visits get scored. As the Forge processes new traffic, VisitorScore grows proportionally.
+
+### Conflict 3: PiXL.Match Column Name Mismatch
+
+**What the conflict was:** CustomerSummary proc referenced `m.MatchEmail` but PiXL.Match uses `IndividualKey` for identity resolution keys.
+
+**What the decision was:** Changed to `COUNT(DISTINCT m.IndividualKey)`.
+
+### Scoring Algorithms Implemented
+
+#### Mouse Authenticity (0-100)
+| Component | Points | Logic |
+|-----------|--------|-------|
+| Entropy | 0-30 | MouseEntropy >= 70 → 30pts (high = human) |
+| Timing CV | 0-20 | MoveTimingCV >= 80 → 20pts (variable timing = human) |
+| Speed CV | 0-15 | MoveSpeedCV >= 80 → 15pts (variable speed = human) |
+| Move count | 0-15 | 51+ moves → 15pts |
+| No replay | 0-10 | 10pts if ReplayDetected != 1 |
+| No scroll conflict | 0-10 | 10pts if ScrollContradiction != 1 |
+
+#### Session Quality (0-100)
+| Component | Points | Logic |
+|-----------|--------|-------|
+| Page count | 0-40 | >=10 pages → 40, >=5 → 30, >=3 → 20, >=2 → 12 |
+| Duration | 0-40 | >=5min → 40, >=2min → 30, >=1min → 20 |
+| Multi-page bonus | 0-20 | 20pts if >=2 pages (not a bounce) |
+
+#### Composite Quality (0-100)
+| Signal | Weight |
+|--------|--------|
+| Inverted BotScore | 25% |
+| Mouse Authenticity | 20% |
+| Session Quality | 15% |
+| Lead Quality | 15% |
+| Cultural Consistency | 10% |
+| No Contradictions | 10% |
+| Affluence bonus | 5pts flat |
+
+### Phase 9 Migrations
+
+| Script | Objects Created | Status |
+|--------|----------------|--------|
+| `58_TrafficAlertSchema.sql` | `TrafficAlert` schema, `TrafficAlert.VisitorScore` (4 indexes incl. filtered), `TrafficAlert.CustomerSummary` (1 index), 2 watermark entries | ✅ Deployed |
+| `59_TrafficAlertMaterialization.sql` | `ETL.usp_MaterializeVisitorScores`, `ETL.usp_MaterializeCustomerSummary`, `dbo.vw_TrafficAlert_VisitorDetail`, `dbo.vw_TrafficAlert_CustomerOverview`, `dbo.vw_TrafficAlert_Trend` | ✅ Deployed |
+
+### Live Data Verification
+
+| Metric | Result |
+|--------|--------|
+| VisitorScores materialized | 611 (all Forge-enriched visits) |
+| CustomerSummary rows | 8 (3 daily + 3 weekly + 2 monthly) |
+| Top CompositeQuality | 64 (BotScore=0, MouseAuth=85) |
+| BotPercent (daily) | 0.83% for Company 12345 |
+| QualityGrade | A (< 20% bot rate) |
+| QualityTrend | STABLE / NEW as expected |
+
+### Build & Test
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| Tests | 523/523 passing | 0 failures |

@@ -1,7 +1,7 @@
 ---
 name: MSSQL Specialist
 description: 'SQL Server 2025 specialist for SmartPiXL. Schema design, query optimization, ETL stored procedures, CLR, vectors, graph tables, migration scripts.'
-tools: ['read', 'edit', 'execute', 'search', 'ms-mssql.mssql/*', 'todo']
+tools: [execute/runNotebookCell, execute/testFailure, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runInTerminal, execute/runTests, read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, ms-mssql.mssql/mssql_show_schema, ms-mssql.mssql/mssql_connect, ms-mssql.mssql/mssql_disconnect, ms-mssql.mssql/mssql_list_servers, ms-mssql.mssql/mssql_list_databases, ms-mssql.mssql/mssql_get_connection_details, ms-mssql.mssql/mssql_change_database, ms-mssql.mssql/mssql_list_tables, ms-mssql.mssql/mssql_list_schemas, ms-mssql.mssql/mssql_list_views, ms-mssql.mssql/mssql_list_functions, ms-mssql.mssql/mssql_run_query, todo]
 model: Claude Opus 4.6 (copilot)
 ---
 

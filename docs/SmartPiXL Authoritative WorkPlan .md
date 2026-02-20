@@ -70,7 +70,7 @@ Forge restarts → FailoverCatchupService reads JSONL → enrichment pipeline �
 | NuGet enrichment libraries | 0 of 8 installed | 0% |
 | SQL schema (core: Raw, Parsed, Device, IP, Visit, Match) | All exist, 40 migrations | 100% |
 | SQL advanced (CLR, vectors, graph, subnet reputation) | CLR deployed (10 functions), vectors (VECTOR(64)+VECTOR(32)), graph (3 nodes, 2 edges). Subnet reputation deployed (77K subnets). Phase 8 complete: 10 migrations (48-57), 8 new dashboard views, Geo.Zipcode table, dimension expansion. | 100% |
-| TrafficAlert subsystem | Not implemented | 0% |
+| TrafficAlert subsystem | Phase 9 complete: TrafficAlert schema, VisitorScore + CustomerSummary tables, 2 materialization procs, 3 dashboard views, scoring algorithms (Mouse Authenticity, Session Quality, Composite Quality). | 100% |
 | Worker (to be deprecated) | Fully functional, running ETL/sync/health/dashboards | 100% (deprecated) |
 | Dashboards (Tron + Atlas) | Both functional | 100% (going offline) |
 | Test coverage | 7 test files covering ~5 core services | ~40% |
@@ -658,13 +658,15 @@ Agents must read these before beginning any phase:
 
 ---
 
-## Phase 9 — TrafficAlert Subsystem
+## Phase 9 — TrafficAlert Subsystem ✅ COMPLETE
 
 **Scope:** Combine all enrichment outputs into a unified traffic quality scoring and reporting system. SQL schema + materialization + API-ready structure.
 
 **Effort:** Medium. Builds on all prior phases.
 
 **Design doc reference:** §7
+
+**Status:** Both migrations (58-59) created and deployed. 3 scoring algorithms implemented (Mouse Authenticity, Session Quality, Composite Quality). 611 visitor scores materialized, 8 customer summary rows. 523/523 tests passing. See IMPLEMENTATION-LOG.md Session 6 for conflict resolutions.
 
 ### Steps
 
