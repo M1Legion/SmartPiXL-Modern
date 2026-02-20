@@ -6,7 +6,7 @@
 using SmartPiXL.Forge.Services.Enrichments;
 using Xunit;
 
-namespace TrackingPixel.Tests;
+namespace SmartPiXL.Tests;
 
 public sealed class GeographicArbitrageServiceTests
 {

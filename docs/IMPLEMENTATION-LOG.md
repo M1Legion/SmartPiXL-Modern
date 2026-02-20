@@ -705,3 +705,23 @@ Phase 8D added to `ETL.usp_ParseNewHits` — parses 9 `_srv_*` params for Tier 3
 | SmartPiXL (Edge) | 0 | 0 |
 | SmartPiXL.Forge | 0 | 0 |
 | Tests | 471/471 passing | 0 failures |
+
+### Post-Phase 6 Fixes
+
+#### Namespace correction — `TrackingPixel.Tests` → `SmartPiXL.Tests`
+- **Problem:** All 5 Phase 6 test files were created with `namespace TrackingPixel.Tests;` instead of the correct `namespace SmartPiXL.Tests;`. The old namespace is from the deprecated project and is not acceptable in new code.
+- **Fix:** Changed all 5 files to `namespace SmartPiXL.Tests;`.
+- **Prevention:** All new files MUST use `SmartPiXL.*` namespaces. The `TrackingPixel` namespace exists only in legacy code that hasn't been migrated yet.
+
+### Future Work: Unknown GPU Logging
+
+**Idea:** `GpuTierReference.EstimateReleaseYear()` and `Classify()` both rely on hardcoded pattern arrays (~70 GPU entries). When a GPU renderer string doesn't match any pattern, these methods return 0 / `GpuTier.Unknown` silently. Over time, new GPUs ship (e.g., NVIDIA RTX 6000-series, AMD RX 10000-series) and mobile/integrated GPUs are heavily under-represented in the current list.
+
+**Proposed approach:**
+1. In the Forge (NOT the Edge hot path), when `EstimateReleaseYear()` returns 0 for a non-null, non-virtual GPU string, log the unknown renderer to a bounded `ConcurrentDictionary<string, int>` (string → hit count).
+2. Periodically (daily or on-demand via internal endpoint), dump the unknown GPU list to the tracking log or a dedicated SQL table (`PiXL.UnknownGpu`).
+3. This gives us a prioritized list of GPUs to add — sorted by frequency — without polluting the hot path or requiring manual auditing.
+
+**Why not in the hot path:** The Edge doesn't call `EstimateReleaseYear()` — it's Forge-only (Tier 3). But even in the Forge, the tracking should be a fire-and-forget side effect, not blocking the enrichment pipeline.
+
+**Scope:** This is a minor enhancement — can be added in any future phase without schema changes. The enrichment pipeline already works correctly with unknown GPUs (age = 0, no anomaly flagged).
