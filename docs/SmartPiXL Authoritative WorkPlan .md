@@ -69,7 +69,7 @@ Forge restarts → FailoverCatchupService reads JSONL → enrichment pipeline �
 | Forge | Does not exist | 0% |
 | NuGet enrichment libraries | 0 of 8 installed | 0% |
 | SQL schema (core: Raw, Parsed, Device, IP, Visit, Match) | All exist, 40 migrations | 100% |
-| SQL advanced (CLR, vectors, graph, subnet reputation) | CLR deployed (10 functions), vectors (VECTOR(64)+VECTOR(32)), graph (3 nodes, 2 edges). Subnet reputation pending Phase 8. | 75% |
+| SQL advanced (CLR, vectors, graph, subnet reputation) | CLR deployed (10 functions), vectors (VECTOR(64)+VECTOR(32)), graph (3 nodes, 2 edges). Subnet reputation deployed (77K subnets). Phase 8 complete: 10 migrations (48-57), 8 new dashboard views, Geo.Zipcode table, dimension expansion. | 100% |
 | TrafficAlert subsystem | Not implemented | 0% |
 | Worker (to be deprecated) | Fully functional, running ETL/sync/health/dashboards | 100% (deprecated) |
 | Dashboards (Tron + Atlas) | Both functional | 100% (going offline) |
@@ -589,13 +589,15 @@ Agents must read these before beginning any phase:
 
 ---
 
-## Phase 8 — SQL: Analysis Features + Schema Expansion
+## Phase 8 — SQL: Analysis Features + Schema Expansion ✅ COMPLETE
 
 **Scope:** Build all 13 SQL analysis features from design doc §8.3. Pure T-SQL views, tables, and procs. Geo.Zipcode polygon table from Census ZCTA shapefiles.
 
 **Effort:** Medium. Pure SQL work, no application code changes.
 
 **Design doc reference:** §8.3 priority list (items 1-13), §8.4 (Zipcode polygons)
+
+**Status:** All 10 migrations (48-57) created and deployed. 523/523 tests passing. See IMPLEMENTATION-LOG.md Session 5 for conflict resolutions.
 
 ### Steps (in design doc priority order)
 

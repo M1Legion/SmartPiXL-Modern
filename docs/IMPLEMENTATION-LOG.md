@@ -841,3 +841,86 @@ Multi-hop MATCH traversal validated with test data:
 | `45_CLR_Database.sql` | SmartPiXL_CLR database, certificate signing, assembly deployment, 10 wrapper functions, 10 synonyms in SmartPiXL |
 | `46_VectorInfrastructure.sql` | FingerprintVector VECTOR(64), UaVector VECTOR(32) on PiXL.Device |
 | `47_GraphTables.sql` | Graph schema, 3 NODE tables, 2 EDGE tables, MATCH traversal validation |
+---
+
+## Session 5 — Phase 8: SQL Analysis Features + Schema Expansion
+
+### Overview
+
+Phase 8 adds SQL-side analysis views, subnet reputation, zipcode polygon infrastructure, bitmap columns, and dimension table expansion. All work is SQL-only — no C# changes required.
+
+### Prerequisite: Migrations 42-44 Deployed
+
+**Discovery:** During database schema inspection, found that migrations 42 (Tier 1 enrichment columns), 43 (Tier 2), and 44 (Tier 3) had SQL files created in earlier phases but were **never executed** against the database. PiXL.Parsed had 188 columns instead of the expected 226.
+
+**Decision:** Executed 42, 43, 44 in order before starting Phase 8 migrations. All 38 columns added successfully. PiXL.Parsed went from 188 → 226 columns.
+
+### Conflict 1: Bitmap Computed Columns vs Regular Columns
+
+**What the conflict was:** The workplan (§8.3 Priority 10) specifies "computed bitmap columns using CLR functions: `FeatureBitmapValue AS dbo.FeatureBitmap(...) PERSISTED`". This implies PERSISTED computed columns that call CLR functions.
+
+**Why the agent made the decision it did:** The CLR functions (`dbo.FeatureBitmap`, `dbo.AccessibilityBitmap`, etc.) are deployed in the `SmartPiXL_CLR` database and accessed in `SmartPiXL` through cross-database synonyms (created in Phase 7, migration 45). SQL Server requires schema binding to persist computed columns, but schema binding **cannot follow cross-database synonyms**. Attempting to create `FeatureBitmapValue AS dbo.FeatureBitmap(...) PERSISTED` would fail with a schema binding error.
+
+**What the decision was:** Migration 56 creates the four bitmap columns (`FeatureBitmapValue`, `AccessibilityBitmapValue`, `BotBitmapValue`, `EvasionBitmapValue`) as regular `INT NULL` columns instead of computed columns. The Forge's ETL pipeline will populate these values during enrichment phases 8B/8C/8D (already wired in migration 44's ETL proc update). This approach is actually more robust — no cross-database schema dependency, values are materialized once at ETL time rather than computed on every read, and the filtered indexes work without PERSISTED requirements.
+
+### Conflict 2: QUOTED_IDENTIFIER for Filtered Indexes and MERGE
+
+**What the conflict was:** Migration 48 creates a filtered index (`IX_SubnetReputation_BotPercent WHERE BotPercent >= 50`) on `PiXL.SubnetReputation` and a stored procedure (`ETL.usp_UpdateSubnetReputation`) that MERGEs into that table. SQL Server requires `QUOTED_IDENTIFIER ON` for both creating and modifying tables with filtered indexes.
+
+**Why the agent made the decision it did:** `sqlcmd` does not enable `QUOTED_IDENTIFIER` by default. The filtered index creation failed silently on initial run, and the MERGE proc failed at execution time because the proc was created without `QUOTED_IDENTIFIER ON` (this setting is captured at proc creation time, not execution time).
+
+**What the decision was:** Added `SET QUOTED_IDENTIFIER ON;` before the `CREATE OR ALTER PROCEDURE` statement in migration 48. All subsequent migrations use the `-I` flag with sqlcmd. Future migration scripts should include `SET QUOTED_IDENTIFIER ON;` at the top when they contain filtered indexes, indexed views, or procs that modify tables with filtered indexes.
+
+### Phase 8 Migrations Created and Deployed
+
+| Script | Objects Created | Status |
+|--------|----------------|--------|
+| `48_SubnetReputation.sql` | `PiXL.SubnetReputation` table, `ETL.usp_UpdateSubnetReputation` proc, filtered index | ✅ Deployed, 77,195 subnets populated |
+| `49_SessionViews.sql` | `dbo.vw_Dash_Sessions`, `dbo.vw_Dash_SessionSummary` | ✅ Deployed |
+| `50_ImpossibleTravel.sql` | `dbo.vw_Dash_ImpossibleTravel` | ✅ Deployed |
+| `51_DeadInternetIndex.sql` | `dbo.vw_Dash_DeadInternet` | ✅ Deployed |
+| `52_CustomerQuality.sql` | `dbo.vw_Dash_CustomerQuality` | ✅ Deployed |
+| `53_DeviceLifecycle.sql` | `dbo.vw_Dash_DeviceLifecycle`, `dbo.vw_Dash_DeviceCustomerHops` | ✅ Deployed |
+| `54_CrossCustomerHistorical.sql` | `dbo.vw_Dash_CrossCustomer`, `dbo.vw_Dash_CrossCustomerDetail` | ✅ Deployed |
+| `55_GeoZipcode.sql` | `Geo.Zipcode` table (spatial index, integer bucket pattern), `Geo.usp_LookupZipcode` proc | ✅ Deployed (empty — awaiting ZCTA shapefile import) |
+| `56_ParsedColumnExpansion.sql` | 4 bitmap INT columns on `PiXL.Parsed`, 3 analysis indexes | ✅ Deployed (230 total columns) |
+| `57_DimensionExpansion.sql` | `PiXL.Device` +7 cols (14 total), `PiXL.IP` +8 cols (29 total), `PiXL.Visit` +5 cols (15 total), FK, indexes | ✅ Deployed |
+
+### Design Patterns Applied
+
+1. **Integer bucket geo pattern** (from design doc §2.3): `Geo.Zipcode` uses `LatBucket100`/`LonBucket100` persisted computed columns for coarse spatial filtering before `STContains()`. Same pattern used in `vw_Dash_ImpossibleTravel` for distance estimation.
+
+2. **Watermark-based incremental processing**: SubnetReputation proc uses full-table aggregation (appropriate for daily batch), consistent with existing watermark pattern for ETL procs.
+
+3. **Session reconstruction**: `vw_Dash_Sessions` uses `LAG()` + `SUM() OVER()` window functions with a 30-minute gap threshold to assign session numbers — no materialized session table needed.
+
+4. **Filtered indexes**: Applied to high-cardinality flag columns (`BotScore >= 50`, `FeatureBitmapValue IS NOT NULL`) to optimize dashboard queries without full-table scans.
+
+### Build & Test
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| Tests | 523/523 passing | 0 failures |
+
+Note: `SmartPiXL.Worker-Deprecated` has pre-existing build errors (72) from missing type references — this is expected for a deprecated read-only reference project.
+
+### Database State After Phase 8
+
+| Table | Columns |
+|-------|---------|
+| PiXL.Raw | 9 |
+| PiXL.Parsed | 230 |
+| PiXL.Device | 14 |
+| PiXL.IP | 29 |
+| PiXL.Visit | 15 |
+| PiXL.SubnetReputation | 13 (new) |
+| Geo.Zipcode | 9 (new, empty) |
+
+| Dashboard Views | Count |
+|-----------------|-------|
+| `dbo.vw_Dash_*` | 19 |
+| `dbo.vw_Dashboard_*` | 16 |
+| **Total views** | **35** |
