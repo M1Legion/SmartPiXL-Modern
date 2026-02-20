@@ -1,24 +1,57 @@
 ---
-description: 'Full IIS deployment checklist — publish, verify web.config + appsettings.json, restart, validate'
-agent: 'smartpixl-ops'
+description: 'Deploy Edge to IIS or Forge to Windows Service. Pre-flight checks, publish, verify.'
+agent: smartpixl-ops
 tools: ['execute', 'read']
 ---
 
-# Deploy to IIS
+# Deploy
 
-Run the full deployment checklist for the SmartPiXL IIS production instance.
+Which component?
 
-## Steps
+## Edge (IIS)
 
-1. Stop the IIS app pool `Smartpixl.info`
-2. Publish from source: `dotnet publish -c Release -o "C:\inetpub\Smartpixl.info"`
-3. **CRITICAL**: Verify `web.config` was not clobbered by publish — it MUST contain `AspNetCoreModuleV2`, `hostingModel="inprocess"`, and `requestLimits maxQueryString="16384"`
-4. **CRITICAL**: Verify `appsettings.json` has production values — Kestrel ports MUST be 6000/6001 (NOT 7000/7001), connection string MUST point to `localhost\SQL2025` database `SmartPiXL`
-5. Start the app pool
-6. Send a test pixel hit to `http://192.168.88.176/DEMO/deploy-test_SMART.GIF?verify=1`
-7. Wait 3 seconds, then check the application log for success
-8. Report the last 10 log lines
+```powershell
+# 1. Stop IIS app pool
+Import-Module WebAdministration
+Stop-WebAppPool -Name "Smartpixl.info"
 
-See [full deployment reference](.github/copilot-instructions.md) for expected file contents.
+# 2. Publish
+Push-Location "C:\Users\Administrator\source\repos\SmartPiXL\SmartPiXL"
+dotnet publish -c Release -o "C:\inetpub\Smartpixl.info"
+Pop-Location
 
-**If web.config or appsettings.json are wrong, fix them BEFORE starting the app pool.**
+# 3. CRITICAL: Verify web.config wasn't clobbered
+type "C:\inetpub\Smartpixl.info\web.config"
+# Must have: hostingModel="inprocess", maxQueryString="16384"
+
+# 4. CRITICAL: Verify appsettings.json has PRODUCTION values
+type "C:\inetpub\Smartpixl.info\appsettings.json"
+# Must have: ports 6000/6001 (NOT 7000/7001), SQL2025 connection string
+
+# 5. Start app pool
+Start-WebAppPool -Name "Smartpixl.info"
+
+# 6. Verify
+Invoke-WebRequest -Uri "http://192.168.88.176/DEMO/deploy-test_SMART.GIF?verify=1" -UseBasicParsing | Out-Null
+Start-Sleep -Seconds 3
+Get-Content "C:\inetpub\Smartpixl.info\Log\$(Get-Date -Format 'yyyy_MM_dd').log" -Tail 10
+```
+
+## Forge (Windows Service)
+
+```powershell
+Stop-Service -Name "SmartPiXL-Forge" -ErrorAction SilentlyContinue
+Push-Location "C:\Users\Administrator\source\repos\SmartPiXL\SmartPiXL.Forge"
+dotnet publish -c Release -o "C:\Services\SmartPiXL-Forge"
+Pop-Location
+# First time only: sc.exe create SmartPiXL-Forge binPath= "C:\Services\SmartPiXL-Forge\SmartPiXL.Forge.exe"
+Start-Service -Name "SmartPiXL-Forge"
+Get-Service SmartPiXL-Forge
+```
+
+## Post-Deploy Checks
+
+1. Check app logs for errors
+2. Verify PiXL.Raw is receiving new rows
+3. Check ETL watermarks are advancing
+4. Check Failover/ directory — no new JSONL files accumulating

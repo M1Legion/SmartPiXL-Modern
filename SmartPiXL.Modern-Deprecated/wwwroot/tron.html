@@ -1,0 +1,3541 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartPiXL // TRON</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+/* ============================================================================
+   TRON AESTHETIC â€” Single-Page App: Operations + Analytics
+   Canvas, header, nav, and modal persist across view switches.
+   ============================================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Share+Tech+Mono&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #030810;
+  --bg2: #060e1a;
+  --panel: rgba(6, 20, 40, 0.85);
+  --panel-border: rgba(0, 243, 255, 0.2);
+  --panel-glow: rgba(0, 243, 255, 0.05);
+  --cyan: #00f3ff;
+  --cyan-dim: rgba(0, 243, 255, 0.5);
+  --cyan-ghost: rgba(0, 243, 255, 0.08);
+  --orange: #ff6a00;
+  --orange-dim: rgba(255, 106, 0, 0.5);
+  --red: #ff2d55;
+  --red-dim: rgba(255, 45, 85, 0.5);
+  --green: #00ff88;
+  --green-dim: rgba(0, 255, 136, 0.5);
+  --yellow: #ffe14d;
+  --text: #d4eeff;
+  --text-dim: rgba(160, 200, 230, 0.7);
+  --mono: 'Share Tech Mono', 'Consolas', monospace;
+  --display: 'Orbitron', sans-serif;
+}
+
+html { font-size: 16px; }
+
+body {
+  font-family: var(--mono);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Scan lines â€” animated CRT drift */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.025) 2px, rgba(0,243,255,0.025) 4px);
+  pointer-events: none;
+  z-index: 9999;
+  will-change: transform;
+  animation: scanDrift 8s linear infinite;
+}
+
+@keyframes scanDrift {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(4px); }
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(rgba(0,243,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,243,255,0.035) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform;
+}
+
+#grid-canvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(3,8,16,0.5) 65%, rgba(3,8,16,0.85) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dashboard {
+  position: relative;
+  z-index: 1;
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  transition: opacity 0.5s ease, transform 0.5s ease, filter 0.5s ease;
+}
+
+.dashboard.hidden {
+  opacity: 0;
+  transform: translateY(20px) scale(0.98);
+  filter: blur(4px);
+  pointer-events: none;
+}
+
+.dashboard.derezzing {
+  animation: dashboardDerezz 0.6s ease-in forwards;
+}
+
+@keyframes dashboardDerezz {
+  0%   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  40%  { opacity: 0.7; filter: blur(2px) brightness(1.5); }
+  70%  { opacity: 0.3; transform: translateY(10px) scale(0.97); filter: blur(6px) brightness(2); }
+  100% { opacity: 0; transform: translateY(30px) scale(0.95); filter: blur(12px) brightness(0); pointer-events: none; }
+}
+
+.dashboard.rerezzing {
+  animation: dashboardRerezz 0.6s ease-out forwards;
+}
+
+@keyframes dashboardRerezz {
+  0%   { opacity: 0; transform: translateY(30px) scale(0.95); filter: blur(12px) brightness(0); }
+  30%  { opacity: 0.3; filter: blur(6px) brightness(2); }
+  60%  { opacity: 0.7; transform: translateY(5px) scale(0.99); filter: blur(2px) brightness(1.5); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) brightness(1); }
+}
+
+/* View toggle */
+.view-content { display: none; }
+.view-content.active { display: block; }
+
+/* â”€â”€â”€ LANDING OVERLAY â”€â”€â”€ */
+.landing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6vh;
+  gap: 32px;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.landing-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.landing-logo {
+  font-family: var(--display);
+  font-size: 3.5rem;
+  font-weight: 900;
+  letter-spacing: 14px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 40px var(--cyan-dim), 0 0 80px rgba(0,243,255,0.3), 0 0 160px rgba(0,243,255,0.12);
+  animation: logoGlow 4s ease-in-out infinite;
+  text-align: center;
+}
+
+.landing-sub {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  text-align: center;
+  margin-top: -28px;
+}
+
+.landing-buttons {
+  display: flex;
+  gap: 24px;
+}
+
+.landing-btn {
+  font-family: var(--display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: rgba(0, 243, 255, 0.06);
+  border: 1px solid rgba(0, 243, 255, 0.3);
+  border-radius: 4px;
+  padding: 18px 48px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+.landing-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.6;
+  transition: opacity 0.3s;
+}
+
+.landing-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  transform: scaleX(0);
+  transition: transform 0.4s ease;
+}
+
+.landing-btn:hover {
+  color: #fff;
+  background: rgba(0, 243, 255, 0.15);
+  border-color: var(--cyan);
+  box-shadow: 0 0 30px rgba(0,243,255,0.15), 0 0 60px rgba(0,243,255,0.08), inset 0 0 30px rgba(0,243,255,0.06);
+  transform: translateY(-2px);
+}
+
+.landing-btn:hover::before { opacity: 1; }
+.landing-btn:hover::after { transform: scaleX(1); }
+
+.landing-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 0 50px rgba(0,243,255,0.25), 0 0 100px rgba(0,243,255,0.1), inset 0 0 50px rgba(0,243,255,0.1);
+}
+
+.landing-hint {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 3px;
+  opacity: 0.4;
+  text-align: center;
+  animation: hintPulse 4s ease-in-out infinite;
+}
+
+@keyframes hintPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+/* â”€â”€â”€ HEADER â”€â”€â”€ */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0 20px;
+  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 24px;
+}
+
+.header-left { display: flex; align-items: center; gap: 16px; }
+
+.logo {
+  font-family: var(--display);
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.3), 0 0 120px rgba(0,243,255,0.1);
+  animation: logoGlow 4s ease-in-out infinite;
+}
+
+@keyframes logoGlow {
+  0%, 100% { text-shadow: 0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.3), 0 0 120px rgba(0,243,255,0.1); }
+  50% { text-shadow: 0 0 40px var(--cyan), 0 0 80px rgba(0,243,255,0.5), 0 0 150px rgba(0,243,255,0.2), 0 0 250px rgba(0,243,255,0.06); }
+}
+
+.logo-sub {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.status-beacon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.beacon-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 10px var(--green), 0 0 25px var(--green-dim), 0 0 50px rgba(0,255,136,0.15);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.beacon-dot.warn { background: var(--yellow); box-shadow: 0 0 10px var(--yellow), 0 0 25px rgba(255,225,77,0.4), 0 0 50px rgba(255,225,77,0.15); }
+.beacon-dot.danger { background: var(--red); box-shadow: 0 0 10px var(--red), 0 0 25px var(--red-dim), 0 0 50px rgba(255,45,85,0.15); animation: pulse 0.8s ease-in-out infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.refresh-timer { font-family: var(--mono); color: var(--cyan-dim); }
+
+/* â”€â”€â”€ NAV â”€â”€â”€ */
+.nav-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 24px;
+}
+
+.nav-tab {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  padding: 10px 24px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: all 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nav-tab:first-child { border-radius: 4px 0 0 4px; }
+.nav-tab:last-child { border-radius: 0 4px 4px 0; }
+
+.nav-tab:hover {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: rgba(0,243,255,0.05);
+}
+
+.nav-tab.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(0,243,255,0.1);
+  box-shadow: 0 0 20px rgba(0,243,255,0.1), 0 0 40px rgba(0,243,255,0.05), inset 0 0 20px rgba(0,243,255,0.03);
+}
+
+/* â”€â”€â”€ PANELS â”€â”€â”€ */
+/* ═══ PANELS - Holographic Tron Data Tiles ═══ */
+/* Every panel is a holographic tile: scanlines + inner circuit grid +
+   animated edge sweep + corner energy dots. The 3D background scene
+   shows through the glass-dark base. */
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.panel-grid.triple { grid-template-columns: 1fr 1fr 1fr; }
+.panel-grid.half { grid-template-columns: 1fr 1fr; }
+
+.panel {
+  background:
+    /* Scanlines - subtle horizontal interference */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 243, 255, 0.012) 2px,
+      rgba(0, 243, 255, 0.012) 4px
+    ),
+    /* Inner circuit grid pattern */
+    linear-gradient(90deg, rgba(0, 243, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(0, 243, 255, 0.018) 1px, transparent 1px),
+    /* Base glass gradient */
+    linear-gradient(
+      135deg,
+      rgba(0, 8, 18, 0.93) 0%,
+      rgba(4, 16, 35, 0.90) 50%,
+      rgba(0, 8, 18, 0.93) 100%
+    );
+  background-size: auto, 32px 32px, 32px 32px, auto;
+  border: 1px solid rgba(0, 243, 255, 0.12);
+  border-radius: 2px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.4s, box-shadow 0.4s;
+  contain: layout style paint;
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
+  /* Corner energy dots via box-shadow */
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 243, 255, 0.25),
+    inset -1px -1px 0 rgba(0, 243, 255, 0.12),
+    inset 1px -1px 0 rgba(0, 243, 255, 0.12),
+    inset -1px 1px 0 rgba(0, 243, 255, 0.08);
+}
+
+/* Top edge - animated energy sweep */
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 243, 255, 0.4) 20%,
+    rgba(255, 255, 255, 0.7) 50%,
+    rgba(0, 243, 255, 0.4) 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: panelEdgeSweep 6s ease-in-out infinite;
+}
+
+/* Bottom edge - static dim glow */
+.panel::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 15%; right: 15%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 243, 255, 0.12), transparent);
+  pointer-events: none;
+}
+
+@keyframes panelEdgeSweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.panel:hover {
+  border-color: rgba(0, 243, 255, 0.45);
+  box-shadow:
+    0 0 20px rgba(0, 243, 255, 0.12),
+    0 0 50px rgba(0, 243, 255, 0.04),
+    inset 0 0 40px rgba(0, 243, 255, 0.03),
+    inset 1px 1px 0 rgba(0, 243, 255, 0.35),
+    inset -1px -1px 0 rgba(0, 243, 255, 0.2),
+    inset 1px -1px 0 rgba(0, 243, 255, 0.2),
+    inset -1px 1px 0 rgba(0, 243, 255, 0.15);
+}
+
+.panel:hover::before { animation-duration: 3s; }
+
+.panel-title {
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-shadow: 0 0 12px rgba(0, 243, 255, 0.3);
+  position: relative;
+  z-index: 2;
+}
+
+.panel-title::before {
+  content: '\u25C8';
+  color: rgba(0, 243, 255, 0.5);
+  font-size: 0.65rem;
+}
+
+/* â”€â”€â”€ PIPELINE (shared) â”€â”€â”€ */
+.pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 16px 0;
+}
+
+.pipe-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 18px;
+  background:
+    linear-gradient(90deg, rgba(0,243,255,0.02) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(0,243,255,0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 8, 18, 0.95), rgba(4, 16, 35, 0.92));
+  background-size: 20px 20px, 20px 20px, auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 2px;
+  min-width: 115px;
+  transition: all 0.3s;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated top bar on pipe nodes */
+.pipe-node::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.pipe-node:hover::before { opacity: 1; }
+
+.pipe-node:hover {
+  border-color: rgba(0,243,255,0.5);
+  box-shadow: 0 0 25px rgba(0,243,255,0.1), inset 0 0 20px rgba(0,243,255,0.02);
+}
+
+.pipe-node.healthy {
+  border-color: rgba(0,255,136,0.3);
+  animation: nodeBreath 3s ease-in-out infinite;
+}
+.pipe-node.healthy::before { opacity: 0.6; background: linear-gradient(90deg, transparent, var(--green), transparent); }
+.pipe-node.healthy:hover { box-shadow: 0 0 30px rgba(0,255,136,0.15), inset 0 0 20px rgba(0,255,136,0.03); }
+
+@keyframes nodeBreath {
+  0%, 100% { box-shadow: 0 0 10px rgba(0,255,136,0.05); }
+  50% { box-shadow: 0 0 25px rgba(0,255,136,0.15), inset 0 0 15px rgba(0,255,136,0.04); }
+}
+.pipe-node.stale { border-color: rgba(255,225,77,0.3); background: rgba(255,225,77,0.03); }
+.pipe-node.stale::before { opacity: 0.6; background: linear-gradient(90deg, transparent, var(--yellow), transparent); }
+.pipe-node.down { border-color: rgba(255,45,85,0.3); background: rgba(255,45,85,0.03); }
+.pipe-node.down::before { opacity: 0.8; background: linear-gradient(90deg, transparent, var(--red), transparent); }
+
+.pipe-node-label {
+  font-family: var(--display);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(0, 243, 255, 0.2);
+}
+
+.pipe-node-value {
+  font-family: var(--display);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(192, 232, 255, 0.15);
+}
+.pipe-node-sub { font-size: 0.65rem; color: var(--text-dim); }
+
+.pipe-arrow {
+  width: 36px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+  position: relative;
+  animation: dataFlow 2s linear infinite;
+  box-shadow: 0 0 8px var(--cyan-dim), 0 0 20px rgba(0,243,255,0.08);
+  border-radius: 1px;
+}
+
+.pipe-arrow.dead {
+  background: linear-gradient(90deg, var(--red-dim), var(--red));
+  animation: none;
+  opacity: 0.4;
+}
+
+.pipe-arrow::after {
+  content: '';
+  position: absolute;
+  right: -6px; top: -4px;
+  width: 0; height: 0;
+  border-left: 8px solid var(--cyan);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  filter: drop-shadow(0 0 4px var(--cyan));
+}
+
+.pipe-arrow.dead::after { border-left-color: var(--red); filter: none; }
+
+.pipe-arrow::before {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  top: -1px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 0 6px var(--cyan), 0 0 14px var(--cyan-dim);
+  animation: arrowParticle 1.5s linear infinite;
+}
+
+.pipe-arrow.dead::before { display: none; }
+
+@keyframes arrowParticle {
+  0% { left: -4px; opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+@keyframes dataFlow {
+  0% { opacity: 0.35; }
+  50% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+/* â”€â”€â”€ FEED TABLE (shared) â”€â”€â”€ */
+.feed-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+
+.feed-table th {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(0,243,255,0.15);
+  text-shadow: 0 0 8px rgba(0,243,255,0.2);
+}
+
+.feed-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(0,243,255,0.04);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.feed-table tr { transition: background 0.2s, box-shadow 0.2s; cursor: pointer; position: relative; }
+.feed-table tr:hover {
+  background: rgba(0,243,255,0.06);
+  box-shadow: inset 3px 0 0 var(--cyan), inset 0 0 20px rgba(0,243,255,0.03);
+}
+
+@keyframes rowFlash {
+  0% { background: rgba(0,243,255,0.12); box-shadow: inset 3px 0 0 var(--cyan); }
+  100% { background: transparent; box-shadow: none; }
+}
+
+/* â”€â”€â”€ BADGE (shared) â”€â”€â”€ */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  position: relative;
+  text-shadow: 0 0 6px currentColor;
+}
+
+.badge.high {
+  background: linear-gradient(135deg, rgba(255,45,85,0.18), rgba(255,45,85,0.08));
+  color: var(--red);
+  border: 1px solid rgba(255,45,85,0.35);
+  box-shadow: 0 0 8px rgba(255,45,85,0.1), inset 0 0 6px rgba(255,45,85,0.05);
+}
+.badge.med {
+  background: linear-gradient(135deg, rgba(255,106,0,0.18), rgba(255,106,0,0.08));
+  color: var(--orange);
+  border: 1px solid rgba(255,106,0,0.35);
+  box-shadow: 0 0 8px rgba(255,106,0,0.1), inset 0 0 6px rgba(255,106,0,0.05);
+}
+.badge.low {
+  background: linear-gradient(135deg, rgba(255,225,77,0.12), rgba(255,225,77,0.05));
+  color: var(--yellow);
+  border: 1px solid rgba(255,225,77,0.25);
+  box-shadow: 0 0 8px rgba(255,225,77,0.08), inset 0 0 6px rgba(255,225,77,0.03);
+}
+.badge.ok {
+  background: linear-gradient(135deg, rgba(0,255,136,0.10), rgba(0,255,136,0.04));
+  color: var(--green);
+  border: 1px solid rgba(0,255,136,0.25);
+  box-shadow: 0 0 8px rgba(0,255,136,0.08), inset 0 0 6px rgba(0,255,136,0.03);
+}
+
+/* â”€â”€â”€ LOADING (shared) â”€â”€â”€ */
+/* ═══ LOADING - Data acquisition spinner ═══ */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  letter-spacing: 3px;
+  text-shadow: 0 0 8px rgba(0,243,255,0.1);
+}
+
+.loading::after {
+  content: '';
+  width: 20px; height: 20px;
+  border: 2px solid rgba(0,243,255,0.1);
+  border-top-color: var(--cyan);
+  border-right-color: rgba(0,243,255,0.3);
+  border-radius: 50%;
+  margin-left: 12px;
+  animation: spin 0.8s linear infinite;
+  box-shadow: 0 0 12px rgba(0,243,255,0.2), inset 0 0 6px rgba(0,243,255,0.1);
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* â”€â”€â”€ MODAL (shared) â”€â”€â”€ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 16, 0.88);
+  backdrop-filter: blur(6px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.modal-overlay.active { opacity: 1; pointer-events: all; }
+
+.modal-panel {
+  background: var(--bg2);
+  border: 1px solid var(--cyan-dim);
+  border-radius: 6px;
+  padding: 28px;
+  max-width: 800px;
+  width: 92%;
+  max-height: 82vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 0 60px rgba(0,243,255,0.15), 0 0 120px rgba(0,243,255,0.08), 0 0 200px rgba(0,243,255,0.03);
+  transform: scale(0.95);
+  transition: transform 0.3s;
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
+}
+
+.modal-overlay.active .modal-panel { transform: scale(1); }
+
+.modal-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  background: none;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.2s;
+  font-family: var(--mono);
+}
+
+.modal-close:hover {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  box-shadow: 0 0 12px rgba(0,243,255,0.1);
+}
+
+.modal-title {
+  font-family: var(--display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 20px;
+  padding-right: 40px;
+}
+
+.modal-title::before { content: '// '; color: var(--text-dim); }
+
+.modal-body { font-size: 0.82rem; line-height: 1.6; }
+
+.modal-body .detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.modal-body .detail-item {
+  padding: 10px 14px;
+  background: rgba(0,243,255,0.03);
+  border: 1px solid rgba(0,243,255,0.08);
+  border-radius: 4px;
+}
+
+.modal-body .detail-label {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.modal-body .detail-value {
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.modal-body .detail-value.ok { color: var(--green); }
+.modal-body .detail-value.bad { color: var(--red); }
+.modal-body .detail-value.warn { color: var(--yellow); }
+.modal-body .detail-value.cyan { color: var(--cyan); }
+
+.modal-body .full-text {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 14px;
+  margin-top: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.modal-body .suggestion {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: rgba(0,243,255,0.04);
+  border: 1px solid rgba(0,243,255,0.15);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.modal-body .suggestion-title {
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  margin-bottom: 8px;
+}
+
+/* ============================================================================
+   OPERATIONS VIEW â€” Critical Zone, Status Strip, Infra, Error Log, ETL
+   ============================================================================ */
+
+/* Critical Issues Zone */
+/* ═══ Critical Zone - Holographic threat alert tile ═══ */
+#critical-zone { margin-bottom: 24px; }
+#critical-zone.slide-in { animation: criticalSlideIn 0.4s ease-out; }
+
+@keyframes criticalSlideIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.critical-panel {
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,45,85,0.015) 2px, rgba(255,45,85,0.015) 4px),
+    linear-gradient(135deg, rgba(20,2,5,0.95), rgba(35,8,15,0.92), rgba(20,2,5,0.95));
+  border: 1px solid rgba(255, 45, 85, 0.35);
+  border-radius: 2px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  animation: criticalBreath 2s ease-in-out infinite;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 45, 85, 0.2),
+    inset -1px -1px 0 rgba(255, 45, 85, 0.1);
+}
+
+@keyframes criticalBreath {
+  0%, 100% { box-shadow: 0 0 20px rgba(255,45,85,0.06), inset 0 0 20px rgba(255,45,85,0.02), inset 1px 1px 0 rgba(255,45,85,0.2), inset -1px -1px 0 rgba(255,45,85,0.1); }
+  50% { box-shadow: 0 0 40px rgba(255,45,85,0.15), 0 0 80px rgba(255,45,85,0.04), inset 0 0 40px rgba(255,45,85,0.04), inset 1px 1px 0 rgba(255,45,85,0.3), inset -1px -1px 0 rgba(255,45,85,0.15); }
+}
+
+.critical-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--red) 20%, rgba(255,255,255,0.6) 50%, var(--red) 80%, transparent 100%);
+  background-size: 200% 100%;
+  animation: panelEdgeSweep 4s ease-in-out infinite;
+}
+
+.critical-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+
+.critical-icon {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 14px var(--red-dim), 0 0 35px rgba(255,45,85,0.25);
+  animation: pulse 0.8s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.critical-icon.warning {
+  background: var(--yellow);
+  box-shadow: 0 0 14px rgba(255,225,77,0.5), 0 0 35px rgba(255,225,77,0.2);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.critical-title {
+  font-family: var(--display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+.critical-title.warning { color: var(--yellow); }
+
+.critical-count {
+  margin-left: auto;
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+.critical-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  border-left: 3px solid var(--red);
+  background: rgba(255, 45, 85, 0.06);
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.critical-issue:hover { background: rgba(255, 45, 85, 0.12); }
+.critical-issue.warning { border-left-color: var(--yellow); background: rgba(255, 225, 77, 0.04); }
+.critical-issue.warning:hover { background: rgba(255, 225, 77, 0.1); }
+
+.issue-severity {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.issue-severity.critical { background: rgba(255,45,85,0.2); color: var(--red); border: 1px solid rgba(255,45,85,0.3); }
+.issue-severity.warning { background: rgba(255,225,77,0.15); color: var(--yellow); border: 1px solid rgba(255,225,77,0.2); }
+
+.issue-body { flex: 1; min-width: 0; }
+.issue-title { font-size: 0.88rem; font-weight: bold; color: var(--text); margin-bottom: 3px; }
+.issue-detail { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
+.issue-time { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; text-align: right; }
+
+/* ═══ Status Strip - Holographic KPI tiles ═══ */
+.status-strip { display: flex; gap: 4px; margin-bottom: 24px; flex-wrap: wrap; }
+
+.status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,243,255,0.008) 3px, rgba(0,243,255,0.008) 6px),
+    linear-gradient(to bottom, rgba(0, 8, 18, 0.95), rgba(4, 16, 35, 0.92));
+  border: 1px solid rgba(0, 243, 255, 0.10);
+  border-radius: 2px;
+  flex: 1;
+  min-width: 140px;
+  transition: all 0.35s;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+/* Top edge glow */
+.status-chip::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 15%; right: 15%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 243, 255, 0.15), transparent);
+  transition: all 0.3s;
+}
+
+/* Bottom status bar */
+.status-chip::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  transform: scaleX(0);
+  transition: transform 0.4s ease;
+  pointer-events: none;
+}
+
+.status-chip:hover::before { left: 0; right: 0; background: linear-gradient(90deg, transparent, rgba(0, 243, 255, 0.3), transparent); }
+.status-chip:hover::after { transform: scaleX(1); }
+.status-chip.healthy::after { background: linear-gradient(90deg, transparent, var(--green), transparent); transform: scaleX(1); opacity: 0.6; }
+.status-chip.degraded::after { background: linear-gradient(90deg, transparent, var(--yellow), transparent); transform: scaleX(1); opacity: 0.6; }
+.status-chip.critical::after { background: linear-gradient(90deg, transparent, var(--red), transparent); transform: scaleX(1); opacity: 0.6; animation: chipPulse 1.5s ease-in-out infinite; }
+
+@keyframes chipPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.9; }
+}
+
+.status-chip:hover {
+  border-color: rgba(0,243,255,0.4);
+  box-shadow: 0 0 20px rgba(0,243,255,0.08), inset 0 0 15px rgba(0,243,255,0.02);
+}
+.status-chip.healthy { border-color: rgba(0,255,136,0.25); }
+.status-chip.healthy::before { background: linear-gradient(90deg, transparent, rgba(0,255,136,0.15), transparent); }
+.status-chip.healthy:hover { border-color: rgba(0,255,136,0.5); box-shadow: 0 0 20px rgba(0,255,136,0.1); }
+.status-chip.degraded { border-color: rgba(255,225,77,0.25); }
+.status-chip.degraded::before { background: linear-gradient(90deg, transparent, rgba(255,225,77,0.15), transparent); }
+.status-chip.degraded:hover { border-color: rgba(255,225,77,0.5); box-shadow: 0 0 20px rgba(255,225,77,0.1); }
+.status-chip.critical { border-color: rgba(255,45,85,0.25); }
+.status-chip.critical::before { background: linear-gradient(90deg, transparent, rgba(255,45,85,0.2), transparent); left: 0; right: 0; }
+.status-chip.critical:hover { border-color: rgba(255,45,85,0.5); box-shadow: 0 0 20px rgba(255,45,85,0.1); }
+
+.chip-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  transition: box-shadow 0.3s;
+}
+.chip-dot.up { background: var(--green); box-shadow: 0 0 6px var(--green-dim), 0 0 12px rgba(0,255,136,0.15); }
+.chip-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red-dim), 0 0 12px rgba(255,45,85,0.2); animation: pulse 0.8s ease-in-out infinite; }
+.chip-dot.warn { background: var(--yellow); box-shadow: 0 0 6px rgba(255,225,77,0.4); }
+.chip-dot.idle { background: var(--text-dim); }
+
+.chip-label {
+  font-family: var(--display);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.chip-value {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  text-shadow: 0 0 8px rgba(192, 232, 255, 0.1);
+}
+.chip-value.ok { color: var(--green); text-shadow: 0 0 8px rgba(0, 255, 136, 0.15); }
+.chip-value.bad { color: var(--red); text-shadow: 0 0 8px rgba(255, 45, 85, 0.2); }
+.chip-value.warn { color: var(--yellow); text-shadow: 0 0 8px rgba(255, 225, 77, 0.15); }
+
+/* ═══ Xavier Sync Panel ═══ */
+.sync-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 900px) { .sync-cards { grid-template-columns: 1fr; } }
+
+.sync-card {
+  position: relative;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 16px;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.006) 2px, rgba(0,243,255,0.006) 4px),
+    var(--panel);
+  cursor: pointer;
+  transition: all 0.25s;
+  overflow: hidden;
+}
+.sync-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.4;
+  transition: opacity 0.3s;
+}
+.sync-card:hover {
+  border-color: rgba(0,243,255,0.4);
+  box-shadow: 0 0 20px rgba(0,243,255,0.06);
+}
+.sync-card:hover::before { opacity: 0.8; }
+.sync-card.sync-ok::before { background: linear-gradient(90deg, transparent, var(--green), transparent); }
+.sync-card.sync-ok { border-color: rgba(0,255,136,0.25); }
+.sync-card.sync-error::before { background: linear-gradient(90deg, transparent, var(--red), transparent); opacity: 0.8; animation: chipPulse 1.5s ease-in-out infinite; }
+.sync-card.sync-error { border-color: rgba(255,45,85,0.35); background: linear-gradient(135deg, rgba(255,45,85,0.06), transparent 60%), var(--panel); }
+.sync-card.sync-stale::before { background: linear-gradient(90deg, transparent, var(--yellow), transparent); opacity: 0.7; }
+.sync-card.sync-stale { border-color: rgba(255,225,77,0.25); }
+.sync-card.sync-never::before { background: linear-gradient(90deg, transparent, var(--text-dim), transparent); }
+.sync-card.sync-never { border-color: rgba(140,180,210,0.15); }
+
+.sync-card-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.sync-card-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.sync-card-dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.4); }
+.sync-card-dot.error { background: var(--red); box-shadow: 0 0 8px rgba(255,45,85,0.5); animation: pulse 0.8s ease-in-out infinite; }
+.sync-card-dot.stale { background: var(--yellow); box-shadow: 0 0 8px rgba(255,225,77,0.4); }
+.sync-card-dot.never { background: var(--text-dim); }
+
+.sync-card-name {
+  font-family: var(--display); font-size: 0.78rem; font-weight: 600;
+  letter-spacing: 2px; color: var(--cyan);
+}
+.sync-card-status {
+  margin-left: auto; font-family: var(--mono); font-size: 0.72rem;
+  padding: 2px 8px; border-radius: 2px;
+}
+.sync-card-status.ok { color: var(--green); border: 1px solid rgba(0,255,136,0.3); background: rgba(0,255,136,0.06); }
+.sync-card-status.error { color: var(--red); border: 1px solid rgba(255,45,85,0.3); background: rgba(255,45,85,0.06); }
+.sync-card-status.stale { color: var(--yellow); border: 1px solid rgba(255,225,77,0.3); background: rgba(255,225,77,0.06); }
+.sync-card-status.never { color: var(--text-dim); border: 1px solid rgba(140,180,210,0.2); }
+
+.sync-card-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;
+}
+.sync-stat-label {
+  font-family: var(--display); font-size: 0.58rem; font-weight: 500;
+  letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase;
+}
+.sync-stat-value {
+  font-family: var(--mono); font-size: 0.82rem; color: var(--text);
+  text-shadow: 0 0 6px rgba(192,232,255,0.08);
+}
+.sync-stat-value.bad { color: var(--red); }
+.sync-stat-value.warn { color: var(--yellow); }
+
+.sync-card-error {
+  margin-top: 10px; padding: 6px 10px; border-radius: 2px;
+  font-family: var(--mono); font-size: 0.7rem; color: var(--red);
+  background: rgba(255,45,85,0.05); border-left: 2px solid var(--red);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ═══ Error Log - Threat telemetry feed ═══ */
+.error-log { font-size: 0.82rem; }
+
+.error-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 3px;
+  border-radius: 2px;
+  border-left: 2px solid rgba(255,45,85,0.5);
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,45,85,0.008) 2px, rgba(255,45,85,0.008) 4px),
+    rgba(255,45,85,0.04);
+  transition: all 0.25s;
+  cursor: pointer;
+  position: relative;
+}
+
+.error-entry:hover {
+  background: rgba(255,45,85,0.10);
+  box-shadow: inset 3px 0 0 var(--red), 0 0 15px rgba(255,45,85,0.06);
+  border-left-color: var(--red);
+}
+.error-entry.stale {
+  border-left-color: rgba(255,225,77,0.3);
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,225,77,0.005) 2px, rgba(255,225,77,0.005) 4px),
+    rgba(255,225,77,0.02);
+  opacity: 0.55;
+}
+.error-entry.stale:hover {
+  background: rgba(255,225,77,0.08);
+  box-shadow: inset 3px 0 0 var(--yellow), 0 0 12px rgba(255,225,77,0.04);
+}
+
+.error-source {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  width: 80px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.error-msg { flex: 1; color: var(--text); word-break: break-word; }
+.error-msg.stale { color: var(--text-dim); }
+
+.error-count {
+  font-family: var(--display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--red);
+  flex-shrink: 0;
+  text-shadow: 0 0 8px rgba(255,45,85,0.3);
+}
+.error-age { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; width: 60px; text-align: right; }
+
+/* ═══ ETL Grid - Pipeline metric holotiles ═══ */
+.etl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+
+.etl-stat {
+  text-align: center;
+  padding: 14px 8px;
+  background:
+    linear-gradient(90deg, rgba(0,243,255,0.015) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(0,243,255,0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0,8,18,0.95), rgba(4,16,35,0.9));
+  background-size: 24px 24px, 24px 24px, auto;
+  border: 1px solid rgba(0,243,255,0.10);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.etl-stat::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 20%; right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0,243,255,0.12), transparent);
+}
+
+.etl-stat:hover {
+  border-color: rgba(0,243,255,0.3);
+  box-shadow: 0 0 15px rgba(0,243,255,0.06), inset 0 0 20px rgba(0,243,255,0.02);
+}
+
+.etl-val {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0,243,255,0.3), 0 0 30px rgba(0,243,255,0.1);
+}
+.etl-val.warn { color: var(--yellow); text-shadow: 0 0 12px rgba(255,225,77,0.3), 0 0 30px rgba(255,225,77,0.1); }
+.etl-val.bad { color: var(--red); text-shadow: 0 0 12px rgba(255,45,85,0.3), 0 0 30px rgba(255,45,85,0.1); }
+.etl-lbl {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+/* ═══ Infra Grid - System topology holograph ═══ */
+.infra-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+.infra-group-title {
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(0,243,255,0.12);
+  text-shadow: 0 0 8px rgba(0,243,255,0.15);
+}
+
+.infra-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  border-radius: 2px;
+  transition: all 0.2s;
+  border-left: 2px solid transparent;
+}
+
+.infra-item:hover {
+  background: rgba(0,243,255,0.04);
+  border-left-color: var(--cyan);
+  box-shadow: inset 0 0 15px rgba(0,243,255,0.02);
+}
+
+.infra-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  transition: all 0.3s;
+}
+.infra-dot.up { background: var(--green); box-shadow: 0 0 6px var(--green-dim), 0 0 14px rgba(0,255,136,0.12); }
+.infra-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red-dim), 0 0 14px rgba(255,45,85,0.15); animation: pulse 0.8s ease-in-out infinite; }
+.infra-dot.warn { background: var(--yellow); box-shadow: 0 0 6px rgba(255,225,77,0.3), 0 0 14px rgba(255,225,77,0.1); }
+
+.infra-item-name { flex: 1; }
+.infra-item-detail { font-size: 0.72rem; color: var(--text-dim); text-align: right; }
+.infra-item-ms {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--cyan-dim);
+  width: 50px;
+  text-align: right;
+  text-shadow: 0 0 6px rgba(0,243,255,0.1);
+}
+
+.infra-app-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+
+.infra-app-stat {
+  text-align: center;
+  padding: 10px 4px;
+  background:
+    linear-gradient(90deg, rgba(0,243,255,0.012) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(0,243,255,0.012) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0,8,18,0.95), rgba(4,16,35,0.9));
+  background-size: 20px 20px, 20px 20px, auto;
+  border: 1px solid rgba(0,243,255,0.08);
+  border-radius: 2px;
+  position: relative;
+  transition: all 0.3s;
+}
+
+.infra-app-stat:hover {
+  border-color: rgba(0,243,255,0.25);
+  box-shadow: 0 0 10px rgba(0,243,255,0.05), inset 0 0 10px rgba(0,243,255,0.02);
+}
+
+.infra-app-val {
+  font-family: var(--display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0,243,255,0.25);
+}
+.infra-app-lbl { font-size: 0.62rem; font-weight: 500; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px; }
+
+/* ═══ All-Clear Banner - System nominal beacon ═══ */
+.all-clear {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,136,0.008) 2px, rgba(0,255,136,0.008) 4px),
+    linear-gradient(135deg, rgba(0,20,10,0.95), rgba(5,30,18,0.92), rgba(0,20,10,0.95));
+  border: 1px solid rgba(0,255,136,0.2);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+  animation: allClearPulse 4s ease-in-out infinite;
+}
+
+.all-clear::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--green) 20%, rgba(255,255,255,0.5) 50%, var(--green) 80%, transparent 100%);
+  background-size: 200% 100%;
+  animation: panelEdgeSweep 5s ease-in-out infinite;
+}
+
+@keyframes allClearPulse {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,255,136,0.06); }
+  50% { box-shadow: 0 0 60px rgba(0,255,136,0.15), 0 0 100px rgba(0,255,136,0.06), 0 0 160px rgba(0,255,136,0.02); }
+}
+
+.all-clear-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 12px var(--green-dim), 0 0 30px rgba(0,255,136,0.2);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+.all-clear-text {
+  font-family: var(--display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--green);
+  text-shadow: 0 0 15px rgba(0,255,136,0.3);
+}
+
+.all-clear-sub { margin-left: auto; font-size: 0.72rem; color: var(--text-dim); }
+
+/* ============================================================================
+   ANALYTICS VIEW â€” Hero Cards, Charts, Signals, Evasion, Behavior, FP, Devices
+   ============================================================================ */
+
+/* ═══ Hero Cards - Primary KPI holotiles ═══ */
+.hero-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
+
+.hero-card {
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.008) 2px, rgba(0,243,255,0.008) 4px),
+    linear-gradient(90deg, rgba(0,243,255,0.015) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(0,243,255,0.015) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(0,8,18,0.95), rgba(4,16,35,0.92), rgba(0,8,18,0.95));
+  background-size: auto, 32px 32px, 32px 32px, auto;
+  border: 1px solid rgba(0,243,255,0.12);
+  border-radius: 2px;
+  padding: 16px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.35s;
+  cursor: pointer;
+  box-shadow:
+    inset 1px 1px 0 rgba(0,243,255,0.06),
+    inset -1px -1px 0 rgba(0,243,255,0.03);
+}
+
+.hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.6;
+  transition: opacity 0.3s;
+}
+
+.hero-card:hover {
+  border-color: rgba(0,243,255,0.4);
+  box-shadow:
+    0 0 25px rgba(0,243,255,0.1),
+    0 0 60px rgba(0,243,255,0.04),
+    inset 0 0 30px rgba(0,243,255,0.04),
+    inset 1px 1px 0 rgba(0,243,255,0.15),
+    inset -1px -1px 0 rgba(0,243,255,0.08);
+}
+.hero-card:hover::before { opacity: 1; }
+
+.hero-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(0,243,255,0.04) 45%, rgba(0,243,255,0.08) 50%, rgba(0,243,255,0.04) 55%, transparent 60%);
+  animation: holoSweep 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes holoSweep {
+  0% { transform: translateX(-100%); }
+  50%, 100% { transform: translateX(200%); }
+}
+
+.hero-label {
+  font-family: var(--display);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.hero-value {
+  font-family: var(--display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--cyan);
+  text-shadow: 0 0 20px var(--cyan-dim);
+  line-height: 1;
+  animation: valueBreath 4s ease-in-out infinite;
+}
+
+@keyframes valueBreath {
+  0%, 100% { text-shadow: 0 0 20px var(--cyan-dim); filter: brightness(1); }
+  50% { text-shadow: 0 0 35px var(--cyan), 0 0 70px var(--cyan-dim), 0 0 120px rgba(0,243,255,0.1); filter: brightness(1.15); }
+}
+
+.hero-value.warn { color: var(--yellow); text-shadow: 0 0 20px rgba(255,225,77,0.3); }
+.hero-value.danger { color: var(--red); text-shadow: 0 0 20px var(--red-dim); }
+.hero-value.good { color: var(--green); text-shadow: 0 0 20px var(--green-dim); }
+
+.hero-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 6px; }
+
+/* Hourly Chart */
+.chart-container { height: 200px; display: flex; align-items: flex-end; gap: 2px; padding-top: 10px; }
+
+.chart-bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; cursor: pointer; transition: opacity 0.2s; }
+.chart-bar-group:hover { opacity: 0.8; }
+
+.chart-bar { width: 100%; min-height: 1px; border-radius: 1px 1px 0 0; transition: height 0.6s ease; }
+.chart-bar.human { background: linear-gradient(to top, rgba(0,243,255,0.3), rgba(0,243,255,0.7)); box-shadow: 0 0 8px rgba(0,243,255,0.3); }
+.chart-bar.bot { background: linear-gradient(to top, rgba(255,45,85,0.3), rgba(255,45,85,0.7)); box-shadow: 0 0 8px rgba(255,45,85,0.3); }
+
+.chart-label { font-size: 0.6rem; color: var(--text-dim); writing-mode: vertical-rl; transform: rotate(180deg); max-height: 50px; overflow: hidden; }
+
+/* Risk Gauge */
+.risk-list { display: flex; flex-direction: column; gap: 12px; }
+
+.risk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.risk-row:hover { border-color: var(--panel-border); background: var(--cyan-ghost); }
+
+.risk-indicator { width: 6px; height: 32px; border-radius: 3px; flex-shrink: 0; }
+.risk-indicator.high { background: var(--red); box-shadow: 0 0 10px var(--red-dim); }
+.risk-indicator.medium { background: var(--orange); box-shadow: 0 0 10px var(--orange-dim); }
+.risk-indicator.low { background: var(--yellow); box-shadow: 0 0 8px rgba(255,225,77,0.3); }
+.risk-indicator.ok { background: var(--green); box-shadow: 0 0 8px var(--green-dim); }
+
+.risk-info { flex: 1; }
+.risk-label { font-size: 0.82rem; letter-spacing: 1px; }
+.risk-count { font-family: var(--display); font-size: 1.3rem; font-weight: 700; text-shadow: 0 0 10px rgba(0,243,255,0.15); }
+.risk-meta { font-size: 0.72rem; color: var(--text-dim); }
+
+/* Signal Bars */
+.signal-list { display: flex; flex-direction: column; gap: 8px; }
+.signal-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.signal-row:hover .signal-bar-fill { box-shadow: 0 0 16px var(--cyan-dim); }
+
+.signal-name { width: 180px; flex-shrink: 0; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.signal-bar-track { flex: 1; height: 16px; background: rgba(0,243,255,0.05); border-radius: 2px; overflow: hidden; }
+
+.signal-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+  box-shadow: 0 0 10px var(--cyan-dim);
+  transition: width 0.8s ease, box-shadow 0.3s;
+  position: relative;
+}
+
+.signal-bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+.signal-count { width: 50px; text-align: right; font-size: 0.78rem; color: var(--cyan); }
+
+/* Evasion Grid */
+.evasion-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+.evasion-card {
+  text-align: center;
+  padding: 12px;
+  background: rgba(0,243,255,0.03);
+  border: 1px solid rgba(0,243,255,0.08);
+  border-radius: 4px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  cursor: pointer;
+}
+
+.evasion-card:hover { border-color: rgba(0,243,255,0.2); box-shadow: 0 0 15px rgba(0,243,255,0.05); }
+
+.evasion-val { font-family: var(--display); font-size: 1.4rem; font-weight: 700; color: var(--cyan); text-shadow: 0 0 10px rgba(0,243,255,0.2); }
+.evasion-val.alert { color: var(--red); text-shadow: 0 0 12px var(--red-dim); }
+.evasion-lbl { font-size: 0.65rem; font-weight: 500; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+
+/* Behavior */
+.behavior-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.behavior-col { text-align: center; }
+.behavior-col-title {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.behavior-col-title.human { color: var(--cyan); }
+.behavior-col-title.bot { color: var(--red); }
+.behavior-stat { display: flex; justify-content: space-between; padding: 5px 8px; font-size: 0.78rem; }
+.behavior-stat .val { font-weight: bold; }
+
+/* Fingerprint Clusters */
+.fp-cluster-list { display: flex; flex-direction: column; gap: 6px; }
+
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.fp-row:hover { border-color: var(--panel-border); background: var(--cyan-ghost); }
+
+.fp-hash { font-family: var(--mono); color: var(--cyan); width: 100px; flex-shrink: 0; }
+.fp-meta { flex: 1; color: var(--text-dim); }
+.fp-hits { font-family: var(--display); font-weight: 700; color: var(--text); }
+
+/* â”€â”€â”€ RESPONSIVE â”€â”€â”€ */
+@media (max-width: 1400px) {
+  .hero-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 1200px) {
+  .status-strip { flex-wrap: wrap; }
+  .status-chip { min-width: 120px; }
+}
+
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: repeat(2, 1fr); }
+  .panel-grid, .panel-grid.triple, .panel-grid.half { grid-template-columns: 1fr; }
+  .infra-grid { grid-template-columns: 1fr; }
+  .infra-app-grid { grid-template-columns: repeat(2, 1fr); }
+  .etl-grid { grid-template-columns: repeat(2, 1fr); }
+  .evasion-grid { grid-template-columns: repeat(2, 1fr); }
+  .pipeline { flex-wrap: wrap; gap: 8px; }
+  .pipe-arrow { display: none; }
+  .status-strip { gap: 8px; }
+  .modal-body .detail-grid { grid-template-columns: 1fr; }
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; box-shadow: 0 0 6px rgba(0,243,255,0.1); }
+::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); box-shadow: 0 0 12px rgba(0,243,255,0.25); }
+</style>
+</head>
+<body>
+
+<canvas id="grid-canvas"></canvas>
+<div class="vignette"></div>
+
+<!-- LANDING OVERLAY â€” visible on load, hides when a view activates -->
+<div class="landing-overlay" id="landing-overlay">
+  <div class="landing-logo">SMARTPIXL</div>
+  <div class="landing-sub">DevOps Command Center</div>
+  <div class="landing-buttons">
+    <button class="landing-btn" onclick="enterView('ops')">OPERATIONS</button>
+    <button class="landing-btn" onclick="enterView('analytics')">ANALYTICS</button>
+  </div>
+  <div class="landing-hint">SELECT A VIEW TO ENTER THE GRID</div>
+</div>
+
+<div class="dashboard hidden" id="dashboard">
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       SHARED HEADER (persists across views)
+       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <div class="header">
+    <div class="header-left">
+      <div>
+        <div class="logo">SMARTPIXL</div>
+        <div class="logo-sub" id="logo-sub">Operations Center</div>
+      </div>
+      <div class="status-beacon">
+        <div class="beacon-dot" id="beacon"></div>
+        <span id="system-status">CONNECTING...</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div>UTC <span id="utc-clock">--:--:--</span></div>
+      <div>REFRESH <span class="refresh-timer" id="countdown">10</span>s</div>
+      <div id="etl-header-wrap">ETL <span id="etl-status">--</span></div>
+    </div>
+  </div>
+
+  <!-- SHARED NAV (JS-driven, no page reload) -->
+  <div class="nav-bar">
+    <a class="nav-tab" id="nav-ops" onclick="toggleView('ops')">OPERATIONS</a>
+    <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">ANALYTICS</a>
+  </div>
+
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       OPERATIONS VIEW
+       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <div id="view-ops" class="view-content">
+    <!-- Critical Issues -->
+    <div id="critical-zone"></div>
+
+    <!-- Status Strip -->
+    <div class="status-strip" id="status-strip">
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">OVERALL</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">DATA FLOW</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">SQL</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">IIS</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">ETL</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">MATCH</div><div class="chip-value">--</div></div>
+      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">LAST HIT</div><div class="chip-value">--</div></div>
+      <div class="status-chip" id="xavier-chip"><div class="chip-dot idle"></div><div class="chip-label">XAVIER</div><div class="chip-value">--</div></div>
+    </div>
+
+    <!-- Data Flow Pipeline -->
+    <div class="pipeline-section" style="margin-bottom:24px;">
+      <div class="panel">
+        <div class="panel-title">DATA FLOW PIPELINE</div>
+        <div class="pipeline" id="ops-pipeline">
+          <div class="pipe-node" id="pipe-ingest" onclick="drillPipeline('ingest')">
+            <div class="pipe-node-label">INGEST</div>
+            <div class="pipe-node-value" id="pipe-ingest-val">--</div>
+            <div class="pipe-node-sub" id="pipe-ingest-sub">queue</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-1"></div>
+          <div class="pipe-node" id="pipe-sql" onclick="drillPipeline('sql')">
+            <div class="pipe-node-label">SQL WRITE</div>
+            <div class="pipe-node-value" id="pipe-sql-val">--</div>
+            <div class="pipe-node-sub" id="pipe-sql-sub">PiXL.Raw</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-2"></div>
+          <div class="pipe-node" id="pipe-etl" onclick="drillPipeline('etl')">
+            <div class="pipe-node-label">ETL PARSE</div>
+            <div class="pipe-node-value" id="pipe-etl-val">--</div>
+            <div class="pipe-node-sub" id="pipe-etl-sub">parsed</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-3"></div>
+          <div class="pipe-node" id="pipe-dim" onclick="drillPipeline('dim')">
+            <div class="pipe-node-label">DIMENSIONS</div>
+            <div class="pipe-node-value" id="pipe-dim-val">--</div>
+            <div class="pipe-node-sub" id="pipe-dim-sub">Device Â· IP</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-4"></div>
+          <div class="pipe-node" id="pipe-visit" onclick="drillPipeline('visit')">
+            <div class="pipe-node-label">VISITS</div>
+            <div class="pipe-node-value" id="pipe-visit-val">--</div>
+            <div class="pipe-node-sub" id="pipe-visit-sub">linked</div>
+          </div>
+          <div class="pipe-arrow" id="pipe-arrow-5"></div>
+          <div class="pipe-node" id="pipe-match" onclick="drillPipeline('match')">
+            <div class="pipe-node-label">MATCH</div>
+            <div class="pipe-node-value" id="pipe-match-val">--</div>
+            <div class="pipe-node-sub" id="pipe-match-sub">resolved</div>
+          </div>
+        </div>
+        <div class="etl-grid" style="margin-top:12px;">
+          <div class="etl-stat"><div class="etl-val" id="flow-5min">--</div><div class="etl-lbl">LAST 5 MIN</div></div>
+          <div class="etl-stat"><div class="etl-val" id="flow-1hr">--</div><div class="etl-lbl">LAST HOUR</div></div>
+          <div class="etl-stat"><div class="etl-val" id="flow-last-insert">--</div><div class="etl-lbl">LAST INSERT</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Errors + ETL + Pipeline -->
+    <div class="panel-grid triple">
+      <div class="panel">
+        <div class="panel-title">ERROR LOG</div>
+        <div class="error-log" id="error-log"><div style="color:var(--text-dim); font-size:0.78rem; padding: 20px; text-align:center;">Waiting for data...</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">ETL HEALTH</div>
+        <div id="etl-details"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">PIPELINE TABLES</div>
+        <div id="pipeline-tables"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Xavier Sync Health -->
+    <div class="panel" style="margin-bottom:24px;">
+      <div class="panel-title">XAVIER DATA SYNC</div>
+      <div id="xavier-sync-panel"><div class="loading">LOADING</div></div>
+    </div>
+
+    <!-- Infrastructure -->
+    <div class="panel" style="margin-bottom:24px;">
+      <div class="panel-title">INFRASTRUCTURE</div>
+      <div id="infra-detail"><div class="loading">LOADING</div></div>
+    </div>
+
+    <!-- Live Feed (compact, 15 hits) -->
+    <div class="panel" style="margin-bottom:24px;">
+      <div class="panel-title">LIVE FEED â€” LAST 15 HITS</div>
+      <div style="overflow-x:auto;">
+        <table class="feed-table">
+          <thead><tr><th>TIME</th><th>IP</th><th>THREAT</th><th>SCORE</th><th>PLATFORM</th><th>BROWSER</th><th>FINGERPRINT</th></tr></thead>
+          <tbody id="ops-feed-body"><tr><td colspan="7" class="loading">LOADING</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       ANALYTICS VIEW
+       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <div id="view-analytics" class="view-content">
+    <!-- Hero Cards -->
+    <div class="hero-grid" id="hero-grid">
+      <div class="hero-card" onclick="drillHero('total')"><div class="hero-label">TOTAL HITS</div><div class="hero-value" id="h-total">--</div><div class="hero-sub" id="h-total-sub"></div></div>
+      <div class="hero-card" onclick="drillHero('24h')"><div class="hero-label">LAST 24H</div><div class="hero-value" id="h-24h">--</div><div class="hero-sub" id="h-24h-sub"></div></div>
+      <div class="hero-card" onclick="drillHero('bots')"><div class="hero-label">BOTS DETECTED</div><div class="hero-value" id="h-bots">--</div><div class="hero-sub" id="h-bots-sub"></div></div>
+      <div class="hero-card" onclick="drillHero('botpct')"><div class="hero-label">BOT RATE</div><div class="hero-value" id="h-botpct">--</div><div class="hero-sub" id="h-botpct-sub"></div></div>
+      <div class="hero-card" onclick="drillHero('fp')"><div class="hero-label">UNIQUE FP</div><div class="hero-value" id="h-fp">--</div><div class="hero-sub" id="h-fp-sub"></div></div>
+      <div class="hero-card" onclick="drillHero('evasion')"><div class="hero-label">EVASION</div><div class="hero-value" id="h-evasion">--</div><div class="hero-sub" id="h-evasion-sub"></div></div>
+    </div>
+
+    <!-- Pipeline (full) -->
+    <div class="pipeline" id="a-pipeline" style="margin-bottom:24px;">
+      <div class="pipe-node"><div class="pipe-node-label">RAW HITS</div><div class="pipe-node-value" id="a-pipe-raw">--</div></div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-node"><div class="pipe-node-label">ETL PARSE</div><div class="pipe-node-value" id="a-pipe-parsed">--</div></div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-node"><div class="pipe-node-label">VISITS</div><div class="pipe-node-value" id="a-pipe-visits">--</div></div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-node"><div class="pipe-node-label">MATCH</div><div class="pipe-node-value" id="a-pipe-match">--</div></div>
+      <div class="pipe-arrow"></div>
+      <div class="pipe-node"><div class="pipe-node-label">RESOLVED</div><div class="pipe-node-value" id="a-pipe-resolved" style="color:var(--green);">--</div></div>
+    </div>
+
+    <!-- Hourly + Risk -->
+    <div class="panel-grid">
+      <div class="panel">
+        <div class="panel-title">HOURLY TRAFFIC</div>
+        <div class="chart-container" id="hourly-chart"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">RISK BREAKDOWN</div>
+        <div class="risk-list" id="risk-list"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Live Feed (full, 30 hits) + Signals -->
+    <div class="panel-grid">
+      <div class="panel">
+        <div class="panel-title">LIVE FEED</div>
+        <div style="overflow-x:auto;">
+          <table class="feed-table">
+            <thead><tr><th>TIME</th><th>IP</th><th>THREAT</th><th>SCORE</th><th>PLATFORM</th><th>BROWSER</th><th>RESOLUTION</th><th>FINGERPRINT</th><th>SIGNALS</th></tr></thead>
+            <tbody id="a-feed-body"><tr><td colspan="9" class="loading">LOADING</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">TOP BOT SIGNALS</div>
+        <div class="signal-list" id="signal-list"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Evasion + Behavior + Fingerprints -->
+    <div class="panel-grid triple">
+      <div class="panel">
+        <div class="panel-title">EVASION COUNTERMEASURES</div>
+        <div class="evasion-grid" id="evasion-grid"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">BEHAVIORAL ANALYSIS</div>
+        <div class="behavior-compare" id="behavior-compare"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">FINGERPRINT CLUSTERS</div>
+        <div class="fp-cluster-list" id="fp-clusters"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Devices + ETL -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">DEVICE BREAKDOWN</div>
+        <div id="device-breakdown"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">ETL HEALTH</div>
+        <div id="a-etl-details" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SHARED MODAL (persists across views) -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal-panel">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// DATA LAYER
+// ============================================================================
+const API = {
+  health:       () => fetchJson('/api/dash/health'),
+  infra:        () => fetchJson('/api/dash/infra'),
+  recent:       () => fetchJson('/api/dash/recent'),
+  xavierSync:   () => fetchJson('/api/dash/xavier-sync'),
+  hourly:       (h=48) => fetchJson(`/api/dash/hourly?hours=${h}`),
+  bots:         () => fetchJson('/api/dash/bots'),
+  signals:      () => fetchJson('/api/dash/bot-signals'),
+  devices:      () => fetchJson('/api/dash/devices'),
+  evasion:      () => fetchJson('/api/dash/evasion'),
+  behavior:     () => fetchJson('/api/dash/behavior'),
+  fingerprints: () => fetchJson('/api/dash/fingerprints?limit=12'),
+};
+
+let lastData = {};
+let isRefreshing = false;
+let refreshAbort = false;
+
+async function fetchJson(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.warn('Fetch failed:', url, e);
+    return null;
+  }
+}
+
+// ============================================================================
+// GRID â€” Three.js Tron Arena (WebGL + Bloom)
+// Loaded via ES module below. Stub API until module initializes.
+// Contestant light-cycles race the grid, bounded by arena walls.
+// ============================================================================
+var Grid = { spawnOrb() {}, derezzAll() {}, emitPulse() {} };
+
+// ============================================================================
+// MODAL SYSTEM (shared)
+// ============================================================================
+function openModal(title, bodyHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-overlay').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('modal-overlay').classList.contains('active')) {
+      closeModal();
+    } else if (currentView !== 'landing') {
+      derezToLanding();
+    }
+  }
+});
+
+function di(label, value, cls) {
+  return `<div class="detail-item"><div class="detail-label">${label}</div><div class="detail-value${cls ? ' ' + cls : ''}">${value}</div></div>`;
+}
+
+function sug(text) {
+  return `<div class="suggestion"><div class="suggestion-title">TROUBLESHOOTING</div>${text}</div>`;
+}
+
+// ============================================================================
+// VIEW SWITCHING â€” Three states: 'landing', 'ops', 'analytics'
+// Landing = background only + two buttons. Clicking active tab derezzes back.
+// ============================================================================
+let currentView = 'landing';  // start on landing
+
+const dashEl   = document.getElementById('dashboard');
+const landingEl = document.getElementById('landing-overlay');
+
+function setViewClasses(view) {
+  document.getElementById('view-ops').className = 'view-content' + (view === 'ops' ? ' active' : '');
+  document.getElementById('view-analytics').className = 'view-content' + (view === 'analytics' ? ' active' : '');
+  document.getElementById('nav-ops').className = 'nav-tab' + (view === 'ops' ? ' active' : '');
+  document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
+  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : view === 'analytics' ? 'Analytics & Intelligence' : '';
+  document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
+  document.title = view === 'ops' ? 'SmartPiXL // TRON â€” Operations'
+                 : view === 'analytics' ? 'SmartPiXL // TRON â€” Analytics'
+                 : 'SmartPiXL // TRON';
+}
+
+// Called from landing overlay buttons
+function enterView(view) {
+  if (currentView === view) return;
+  closeModal();
+  refreshAbort = true;
+  currentView = view;
+
+  // Hide landing
+  landingEl.classList.add('hidden');
+
+  // Show + rerezz dashboard
+  dashEl.classList.remove('hidden', 'derezzing');
+  dashEl.classList.add('rerezzing');
+  dashEl.addEventListener('animationend', function onRe() {
+    dashEl.classList.remove('rerezzing');
+    dashEl.removeEventListener('animationend', onRe);
+  });
+
+  setViewClasses(view);
+  const url = view === 'ops' ? '/tron' : '/tron/analytics';
+  history.pushState({ view }, '', url);
+  window.scrollTo(0, 0);
+
+  // Immediately render from cached pipeline data (cycles have been fetching all along)
+  renderCachedData(view);
+  countdown = 0; // next cycle will refresh with fresh data
+}
+
+// Render all panels from whatever lastData the pipeline has already cached
+function renderCachedData(view) {
+  const { health, infra, recent } = lastData;
+  if (view === 'ops') {
+    if (health) document.getElementById('etl-status').textContent = health.etL_Watermark ? `#${num(health.etL_Watermark)}` : '--';
+    if (health || infra) {
+      renderCriticalZone(buildIssues(health, infra));
+      renderStatusStrip(health, infra);
+      renderPipeline(health, infra);
+      renderOpsETL(health, infra);
+      updateOpsBeacon(health, infra);
+    }
+    if (infra) { renderErrorLog(infra); renderPipelineTables(infra); renderInfraDetail(infra); }
+    if (recent) renderOpsFeed(recent);
+  } else if (view === 'analytics') {
+    if (health) { renderAnalyticsHero(health); updateAnalyticsBeacon(health); renderAnalyticsETL(health); }
+    if (lastData.hourly) renderHourlyChart(lastData.hourly);
+    if (lastData.bots) renderRiskList(lastData.bots);
+    if (lastData.signals) renderSignals(lastData.signals);
+    if (lastData.evasion) renderEvasion(lastData.evasion);
+    if (lastData.behavior) renderBehavior(lastData.behavior);
+    if (recent) renderAnalyticsFeed(recent);
+    if (lastData.fingerprints) renderFingerprints(lastData.fingerprints);
+    if (lastData.devices) renderDevices(lastData.devices);
+  }
+}
+
+// Called from nav tabs â€” toggle: same tab = derezz to landing, diff tab = switch
+function toggleView(view) {
+  if (currentView === view) {
+    // Derezz back to landing
+    derezToLanding();
+  } else if (currentView === 'landing') {
+    enterView(view);
+  } else {
+    // Switch between views (ops â†” analytics)
+    closeModal();
+    refreshAbort = true;
+    currentView = view;
+    setViewClasses(view);
+    const url = view === 'ops' ? '/tron' : '/tron/analytics';
+    history.pushState({ view }, '', url);
+    window.scrollTo(0, 0);
+    renderCachedData(view);
+    countdown = 0;
+  }
+}
+
+function derezToLanding() {
+  closeModal();
+  refreshAbort = true;
+  currentView = 'landing';
+
+  // Derezz animation on dashboard (cycles keep running â€” they track API health)
+  dashEl.classList.add('derezzing');
+  dashEl.addEventListener('animationend', function onDerez() {
+    dashEl.classList.remove('derezzing');
+    dashEl.classList.add('hidden');
+    dashEl.removeEventListener('animationend', onDerez);
+  });
+
+  // Update nav â€” no active tab
+  document.getElementById('nav-ops').className = 'nav-tab';
+  document.getElementById('nav-analytics').className = 'nav-tab';
+
+  // Show landing
+  landingEl.classList.remove('hidden');
+
+  document.title = 'SmartPiXL // TRON';
+  history.pushState({ view: 'landing' }, '', '/tron');
+}
+
+window.addEventListener('popstate', (e) => {
+  const view = e.state?.view || 'landing';
+  if (view === 'landing') {
+    currentView = 'landing';
+    dashEl.classList.add('hidden');
+    dashEl.classList.remove('derezzing', 'rerezzing');
+    landingEl.classList.remove('hidden');
+    document.getElementById('nav-ops').className = 'nav-tab';
+    document.getElementById('nav-analytics').className = 'nav-tab';
+    document.title = 'SmartPiXL // TRON';
+  } else {
+    enterView(view);
+  }
+});
+
+// Start on landing
+(function() {
+  currentView = 'landing';
+  dashEl.classList.add('hidden');
+  landingEl.classList.remove('hidden');
+  document.title = 'SmartPiXL // TRON';
+  history.replaceState({ view: 'landing' }, '', location.pathname);
+})();
+
+// ============================================================================
+// HELPERS (shared)
+// ============================================================================
+function num(n) { if (n == null) return '--'; return Number(n).toLocaleString(); }
+
+function formatDuration(sec) {
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec/60) + 'm';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
+  return Math.floor(sec/86400) + 'd';
+}
+
+function timeAgo(dt) {
+  const d = new Date(dt);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 0) return 'just now';
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  return Math.floor(sec/3600) + 'h ago';
+}
+
+// ============================================================================
+// â-ˆâ-ˆâ-ˆâ-ˆâ-ˆâ-ˆ  OPERATIONS RENDERERS & DRILL-DOWNS
+// ============================================================================
+
+// â”€â”€â”€ Drill-Down: Pipeline Nodes â”€â”€â”€
+function drillPipeline(stage) {
+  const infra = lastData.infra;
+  const health = lastData.health;
+  if (!infra && !health) { openModal('NO DATA', '<div style="color:var(--text-dim)">Waiting for data...</div>'); return; }
+  const df = infra?.dataFlow;
+  const sql = infra?.sql;
+  let html = '<div class="detail-grid">';
+
+  if (stage === 'ingest') {
+    html += di('Queue Depth', df?.queueDepth ?? '--', df?.queueDepth > 100 ? 'warn' : 'ok');
+    html += di('Hits Last 5m', df?.hitsLast5Min ?? '--', df?.hitsLast5Min === 0 ? 'bad' : 'ok');
+    html += di('Hits Last Hour', df?.hitsLastHour ?? '--', df?.hitsLastHour === 0 ? 'warn' : 'ok');
+    html += di('Is Flowing', df?.isFlowing ? 'YES' : 'NO', df?.isFlowing ? 'ok' : 'bad');
+    html += di('Last Insert', df?.secondsSinceLastInsert != null ? formatDuration(df.secondsSinceLastInsert) + ' ago' : '--');
+    html += di('Write Service', infra?.app ? 'PID ' + infra.app.processId : '--', 'cyan');
+    html += '</div>';
+    html += sug('If the queue is backing up, check SQL Server connectivity and disk I/O. If hits are 0, verify that tracking requests are reaching the server (check IIS logs). The write queue should normally be near 0.');
+    openModal('INGEST STAGE', html);
+  }
+  else if (stage === 'sql') {
+    html += di('Connected', sql?.isConnected ? 'YES' : 'NO', sql?.isConnected ? 'ok' : 'bad');
+    html += di('Response Time', sql?.responseMs != null ? sql.responseMs + 'ms' : '--', sql?.responseMs > 200 ? 'warn' : 'ok');
+    html += di('Data Source', sql?.dataSource || '--');
+    html += di('Database', sql?.database || '--');
+    html += di('PiXL.Raw Rows', num(sql?.testRows));
+    html += di('PiXL.Parsed Rows', num(sql?.parsedRows));
+    html += di('Watermark', num(sql?.watermark));
+    html += di('Last ETL Run', sql?.lastEtlRun ? timeAgo(sql.lastEtlRun) : '--');
+    html += '</div>';
+    if (!sql?.isConnected) {
+      html += sug('SQL Server is disconnected. Check that the SQL2025 instance is running:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>Verify the connection string in appsettings.json points to localhost\\SQL2025.');
+    } else {
+      html += sug('SQL connection is healthy. PiXL.Raw stores raw ingested hits. PiXL.Parsed contains ETL-processed rows with all 167+ signals materialized.');
+    }
+    openModal('SQL WRITE STAGE', html);
+  }
+  else if (stage === 'etl') {
+    html += di('Watermark', num(sql?.watermark ?? health?.etL_Watermark));
+    html += di('Total Processed', num(health?.etL_TotalProcessed));
+    html += di('Parsed Rows', num(sql?.parsedRows ?? health?.totalHits));
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('Last ETL Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
+    html += di('Synthetic Hits', num(health?.syntheticHits));
+    html += '</div>';
+    html += sug('ETL runs every 60 seconds via EtlBackgroundService, calling ETL.usp_ParseNewHits. If lag is high, run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_ParseNewHits</code><br>If watermark is ahead of max Test ID, reset with:<br><code style="color:var(--cyan)">UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = \'ParseNewHits\'</code>');
+    openModal('ETL PARSE STAGE', html);
+  }
+  else if (stage === 'dash') {
+    html += di('Status', df?.isFlowing ? 'LIVE' : 'STALE', df?.isFlowing ? 'ok' : 'bad');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('Data Freshness', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) + ' ago' : '--');
+    html += di('24h Hits', num(health?.hits_24h));
+    html += di('Total Hits', num(health?.totalHits));
+    html += di('Unique Fingerprints', num(health?.uniqueFP_24h));
+    html += '</div>';
+    html += sug('Dashboard reads from materialized views on PiXL.Parsed. If showing stale, ensure ETL is processing and that the views are querying PiXL.Parsed (not the old dbo schema).');
+    openModal('DASHBOARD STAGE', html);
+  }
+  else if (stage === 'dim') {
+    const pipe = infra?.pipeline;
+    html += di('Devices', num(pipe?.deviceRows), 'cyan');
+    html += di('IPs', num(pipe?.ipRows), 'cyan');
+    html += di('Unique Devices in Visits', num(pipe?.uniqueDevicesInVisits));
+    html += di('Unique IPs in Visits', num(pipe?.uniqueIpsInVisits));
+    html += di('Last Device Activity', pipe?.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
+    html += di('Last IP Activity', pipe?.ipLatest ? timeAgo(pipe.ipLatest) : '--');
+    html += '</div>';
+    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by usp_ParseNewHits (Phases 9-10). Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
+    openModal('DIMENSION TABLES', html);
+  }
+  else if (stage === 'visit') {
+    const pipe = infra?.pipeline;
+    html += di('Total Visits', num(pipe?.visitRows), 'cyan');
+    html += di('With Email', num(pipe?.visitsWithEmail), pipe?.visitsWithEmail > 0 ? 'ok' : '');
+    html += di('Max Visit ID', num(pipe?.maxVisitId));
+    html += di('Last Visit', pipe?.visitLatest ? timeAgo(pipe.visitLatest) : '--');
+    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += '</div>';
+    html += sug('PiXL.Visit is the fact table linking Device + IP per parsed hit. Visits with a MatchEmail are eligible for identity resolution via usp_MatchVisits. Match lag shows how many visits haven\'t been checked yet.');
+    openModal('VISIT TABLE', html);
+  }
+  else if (stage === 'match') {
+    const pipe = infra?.pipeline;
+    html += di('Total Matches', num(pipe?.matchRows));
+    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
+    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Match Watermark', num(pipe?.matchWatermark));
+    html += di('Processed by Match', num(pipe?.matchTotalProcessed));
+    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
+    html += '</div>';
+    html += sug('PiXL.Match stores identity resolution results from usp_MatchVisits. Resolved matches have an IndividualKey + AddressKey from the AutoConsumer lookup. Pending matches had email but no AutoConsumer hit. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
+    openModal('MATCH / IDENTITY', html);
+  }
+}
+
+// â”€â”€â”€ Drill-Down: Pipeline Table cell â”€â”€â”€
+function drillPipelineTable(table) {
+  const pipe = lastData.infra?.pipeline;
+  if (!pipe) return;
+  let html = '<div class="detail-grid">';
+  if (table === 'test') {
+    html += di('Rows', num(pipe.testRows));
+    html += di('Max ID', num(pipe.maxTestId));
+    html += di('Latest', pipe.testLatest ? timeAgo(pipe.testLatest) : '--');
+    html += di('Parse Watermark', num(pipe.parseWatermark));
+    html += '</div>';
+    openModal('PiXL.Raw', html);
+  } else if (table === 'parsed') {
+    html += di('Rows', num(pipe.parsedRows));
+    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Latest', pipe.parsedLatest ? timeAgo(pipe.parsedLatest) : '--');
+    html += di('Total Processed', num(pipe.parseTotalProcessed));
+    html += '</div>';
+    openModal('PiXL.Parsed', html);
+  } else if (table === 'device') {
+    html += di('Rows', num(pipe.deviceRows), 'cyan');
+    html += di('In Visits', num(pipe.uniqueDevicesInVisits));
+    html += di('Latest', pipe.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Device', html);
+  } else if (table === 'ip') {
+    html += di('Rows', num(pipe.ipRows), 'cyan');
+    html += di('In Visits', num(pipe.uniqueIpsInVisits));
+    html += di('Latest', pipe.ipLatest ? timeAgo(pipe.ipLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.IP', html);
+  } else if (table === 'visit') {
+    html += di('Rows', num(pipe.visitRows));
+    html += di('Max Visit ID', num(pipe.maxVisitId));
+    html += di('With Email', num(pipe.visitsWithEmail));
+    html += di('Latest', pipe.visitLatest ? timeAgo(pipe.visitLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Visit', html);
+  } else if (table === 'match') {
+    html += di('Rows', num(pipe.matchRows));
+    html += di('Resolved', num(pipe.matchesResolved), 'ok');
+    html += di('Pending', num(pipe.matchesPending), pipe.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Latest', pipe.matchLatest ? timeAgo(pipe.matchLatest) : '--');
+    html += '</div>';
+    openModal('PiXL.Match', html);
+  }
+}
+
+// â”€â”€â”€ Drill-Down: Status Chips â”€â”€â”€
+function drillStatus(type) {
+  const infra = lastData.infra;
+  const health = lastData.health;
+  if (!infra && !health) return;
+  let html = '<div class="detail-grid">';
+
+  if (type === 'overall') {
+    html += di('Status', infra?.overallStatus?.toUpperCase() || '--', infra?.overallStatus === 'healthy' ? 'ok' : infra?.overallStatus === 'critical' ? 'bad' : 'warn');
+    html += di('Probe Time', (infra?.probeTimeMs || 0) + 'ms');
+    const svcUp = (infra?.services || []).filter(s => s.isRunning).length;
+    const svcTotal = (infra?.services || []).length;
+    html += di('Services', `${svcUp}/${svcTotal} running`, svcUp === svcTotal ? 'ok' : 'bad');
+    const webUp = (infra?.websites || []).filter(w => w.isHealthy).length;
+    const webTotal = (infra?.websites || []).length;
+    html += di('Endpoints', `${webUp}/${webTotal} healthy`, webUp === webTotal ? 'ok' : 'bad');
+    html += di('SQL', infra?.sql?.isConnected ? 'Connected' : 'Disconnected', infra?.sql?.isConnected ? 'ok' : 'bad');
+    html += di('Data Flow', infra?.dataFlow?.isFlowing ? 'Active' : 'Stopped', infra?.dataFlow?.isFlowing ? 'ok' : 'bad');
+    html += '</div>';
+    openModal('SYSTEM OVERVIEW', html);
+  }
+  else if (type === 'dataflow') {
+    const df = infra?.dataFlow;
+    html += di('Is Flowing', df?.isFlowing ? 'YES' : 'NO', df?.isFlowing ? 'ok' : 'bad');
+    html += di('Hits Last 5m', df?.hitsLast5Min ?? '--');
+    html += di('Hits Last Hour', df?.hitsLastHour ?? '--');
+    html += di('Queue Depth', df?.queueDepth ?? '--');
+    html += di('Max Test ID', num(df?.maxTestId));
+    html += di('Since Last Insert', df?.secondsSinceLastInsert != null ? formatDuration(df.secondsSinceLastInsert) : '--');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--');
+    html += di('Last Insert UTC', df?.lastInsertUtc || '--');
+    html += '</div>';
+    openModal('DATA FLOW DETAIL', html);
+  }
+  else if (type === 'sql') {
+    const s = infra?.sql;
+    html += di('Connected', s?.isConnected ? 'YES' : 'NO', s?.isConnected ? 'ok' : 'bad');
+    html += di('Instance', s?.dataSource || '--');
+    html += di('Database', s?.database || '--');
+    html += di('Response', s?.responseMs != null ? s.responseMs + 'ms' : '--');
+    html += di('PiXL.Raw', num(s?.testRows) + ' rows');
+    html += di('PiXL.Parsed', num(s?.parsedRows) + ' rows');
+    html += di('Watermark', num(s?.watermark));
+    html += di('Last ETL', s?.lastEtlRun ? timeAgo(s.lastEtlRun) : '--');
+    html += '</div>';
+    if (s?.error) html += `<div class="full-text" style="color:var(--red)">${s.error}</div>`;
+    openModal('SQL SERVER DETAIL', html);
+  }
+  else if (type === 'iis') {
+    const sites = infra?.websites || [];
+    html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+    sites.forEach(w => {
+      const ok = w.isHealthy;
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(0,243,255,0.03);border:1px solid ${ok ? 'rgba(0,255,136,0.15)' : 'rgba(255,45,85,0.2)'};border-radius:4px;">
+        <div class="infra-dot ${ok ? 'up' : 'down'}"></div>
+        <div style="flex:1;"><div style="font-weight:bold;">${w.name}</div><div style="font-size:0.75rem;color:var(--text-dim)">${w.url || ''}</div></div>
+        <div style="color:${ok ? 'var(--green)' : 'var(--red)'}">${ok ? 'HTTP ' + w.statusCode : (w.error || 'HTTP ' + w.statusCode)}</div>
+        <div style="color:var(--cyan-dim)">${w.responseMs}ms</div>
+      </div>`;
+    });
+    html += '</div>';
+    openModal('IIS ENDPOINTS', html);
+  }
+  else if (type === 'etl') {
+    html += di('Watermark', num(health?.etL_Watermark));
+    html += di('Total Processed', num(health?.etL_TotalProcessed));
+    html += di('Parsed Rows', num(health?.totalHits));
+    html += di('Last Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
+    html += di('Lag', infra?.dataFlow?.etlLag != null ? infra.dataFlow.etlLag + ' rows' : '--');
+    html += di('Synthetic Hits', num(health?.syntheticHits));
+    html += '</div>';
+    openModal('ETL DETAIL', html);
+  }
+  else if (type === 'match') {
+    const pipe = infra?.pipeline;
+    html += di('Total Matches', num(pipe?.matchRows), 'cyan');
+    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
+    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
+    html += di('Match Watermark', num(pipe?.matchWatermark));
+    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
+    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
+    html += di('Visits With Email', num(pipe?.visitsWithEmail));
+    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
+    html += '</div>';
+    html += sug('Identity resolution matches Visit emails against the AutoConsumer database (421M rows). Resolved = IndividualKey found. Pending = email present but no AutoConsumer match. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
+    openModal('MATCH / IDENTITY', html);
+  }
+  else if (type === 'lasthit') {
+    html += di('Time Since Last', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) : '--');
+    html += di('24h Hits', num(health?.hits_24h));
+    html += di('1h Hits', num(health?.hits_1h));
+    html += di('7d Hits', num(health?.hits_7d));
+    html += di('Bots 24h', num(health?.bots_24h));
+    html += di('Bot Rate', health?.botPct_24h != null ? health.botPct_24h.toFixed(1) + '%' : '--');
+    html += '</div>';
+    openModal('TRAFFIC DETAIL', html);
+  }
+}
+
+// â”€â”€â”€ Drill-Down: Error Entry â”€â”€â”€
+function drillError(idx) {
+  const errors = lastData.infra?.recentErrors?.errors;
+  if (!errors || !errors[idx]) return;
+  const e = errors[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Source', e.source || 'Unknown');
+  html += di('Count', e.count || 1);
+  html += di('Last Seen', e.lastSeenUtc ? timeAgo(e.lastSeenUtc) : '--');
+  html += di('Status', e.isStale ? 'Stale' : 'Active', e.isStale ? 'warn' : 'bad');
+  html += '</div>';
+  html += '<div class="full-text">' + (e.message || 'No message') + '</div>';
+  openModal('ERROR DETAIL', html);
+}
+
+// â”€â”€â”€ Drill-Down: Critical Issue â”€â”€â”€
+function drillIssue(idx) {
+  const issues = lastData._issues;
+  if (!issues || !issues[idx]) return;
+  const issue = issues[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Severity', issue.severity.toUpperCase(), issue.severity === 'critical' ? 'bad' : 'warn');
+  html += di('Detected', issue.time ? timeAgo(issue.time) : 'Current');
+  html += '</div>';
+  html += '<div style="margin-top:16px;font-size:0.85rem;line-height:1.6;color:var(--text);">' + issue.detail + '</div>';
+  const fixes = getFixSuggestion(issue);
+  if (fixes) html += sug(fixes);
+  openModal(issue.title, html);
+}
+
+function getFixSuggestion(issue) {
+  const t = issue.title.toLowerCase();
+  if (t.includes('sql') && t.includes('disconnect')) return 'Check SQL Server service:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>If stopped, start it:<br><code style="color:var(--cyan)">Start-Service MSSQL$SQL2025</code>';
+  if (t.includes('data not flowing')) return 'Check that the TrackingPixel process is running and that the IIS app pool identity has SQL permissions.<br><code style="color:var(--cyan)">Get-Process TrackingPixel</code>';
+  if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
+  if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
+  if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
+  if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
+  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
+  if (t.includes('xavier') && t.includes('failed')) return 'Check Xavier connectivity and Windows Auth trust:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL login on Xavier.';
+  if (t.includes('xavier') && t.includes('never')) return 'The sync service may not have run yet. Restart the app to trigger it:<br><code style="color:var(--cyan)">Stop-WebAppPool "Smartpixl.info"; Start-WebAppPool "Smartpixl.info"</code>';
+  if (t.includes('xavier') && t.includes('stale')) return 'The sync is overdue. Check if the background service is running:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50 | Select-String "Sync"</code>';
+  return null;
+}
+
+// â”€â”€â”€ Critical Issues Engine â”€â”€â”€
+function buildIssues(health, infra) {
+  const issues = [];
+  if (infra) {
+    if (infra.overallStatus === 'critical')
+      issues.push({ severity: 'critical', title: 'Infrastructure Critical', detail: 'One or more core services are down. See infrastructure panel below.', time: infra.checkedAt });
+    if (infra.dataFlow && !infra.dataFlow.isFlowing)
+      issues.push({ severity: 'critical', title: 'Data Not Flowing', detail: `No data ingested in ${formatDuration(infra.dataFlow.secondsSinceLastInsert || 0)}. Queue: ${infra.dataFlow.queueDepth}. Check SQL connection and write service.`, time: infra.checkedAt });
+    if (infra.sql && !infra.sql.isConnected)
+      issues.push({ severity: 'critical', title: 'SQL Server Disconnected', detail: infra.sql.error || 'Cannot connect to SQL Server.', time: infra.checkedAt });
+    if (infra.services) {
+      infra.services.filter(s => !s.isRunning && s.critical).forEach(s => issues.push({ severity: 'critical', title: `Service Down: ${s.name}`, detail: s.error || 'Critical service not running.', time: infra.checkedAt }));
+      infra.services.filter(s => !s.isRunning && !s.critical).forEach(s => issues.push({ severity: 'warning', title: `Service Stopped: ${s.name}`, detail: s.error || s.status, time: infra.checkedAt }));
+    }
+    if (infra.websites) {
+      infra.websites.filter(w => !w.isHealthy && w.critical).forEach(w => issues.push({ severity: 'critical', title: `Endpoint Down: ${w.name}`, detail: w.error || `HTTP ${w.statusCode}`, time: infra.checkedAt }));
+      infra.websites.filter(w => !w.isHealthy && !w.critical).forEach(w => issues.push({ severity: 'warning', title: `Endpoint Unhealthy: ${w.name}`, detail: w.error || `HTTP ${w.statusCode}`, time: infra.checkedAt }));
+    }
+    if (infra.recentErrors && infra.recentErrors.hasRecentErrors) {
+      const re = infra.recentErrors;
+      issues.push({ severity: 'warning', title: `${re.recentErrorCount} Active Error${re.recentErrorCount > 1 ? 's' : ''} in Log`, detail: `Most recent: ${re.errors[0]?.message?.substring(0,100) || 'Unknown'}`, time: re.lastErrorUtc });
+    }
+    if (infra.dataFlow && infra.dataFlow.etlLag > 100)
+      issues.push({ severity: 'warning', title: 'ETL Lag High', detail: `Watermark is ${infra.dataFlow.etlLag} rows behind. Parsed data may be stale.`, time: infra.checkedAt });
+    if (infra.dataFlow && infra.dataFlow.queueDepth > 100)
+      issues.push({ severity: 'warning', title: 'Write Queue Backing Up', detail: `Queue depth: ${infra.dataFlow.queueDepth}. Writes may be slow.`, time: infra.checkedAt });
+    if (infra.pipeline && infra.pipeline.isAvailable) {
+      if (infra.pipeline.matchLag > 100)
+        issues.push({ severity: 'warning', title: 'Match Lag High', detail: `Match watermark is ${infra.pipeline.matchLag} visits behind. Identity resolution may be delayed.`, time: infra.checkedAt });
+      if (infra.pipeline.parseLag > 100)
+        issues.push({ severity: 'warning', title: 'Parse Lag High (Pipeline)', detail: `Parse watermark is ${infra.pipeline.parseLag} rows behind. Device/IP/Visit tables may be stale.`, time: infra.checkedAt });
+    }
+  }
+  if (health) {
+    const secSince = health.secondsSinceLastHit || 9999;
+    if (secSince > 3600)
+      issues.push({ severity: 'warning', title: 'No Recent Hits', detail: `Last hit ${formatDuration(secSince)} ago. Traffic may have stopped or ingestion is broken.`, time: null });
+  }
+  // Xavier sync issues
+  const xSync = lastData.xavierSync;
+  if (xSync && Array.isArray(xSync)) {
+    xSync.forEach(s => {
+      const friendlyNames = { IpGeo: 'IP Geolocation', Company: 'Company', Pixel: 'PiXL Config' };
+      const name = friendlyNames[s.syncType] || s.syncType;
+      if (s.lastStatus === 'Error') {
+        issues.push({ severity: 'critical', title: `Xavier ${name} Sync Failed`, detail: s.lastError ? s.lastError.substring(0, 120) : 'Sync ended with error.', time: s.lastSyncStarted });
+      } else if (!s.lastSyncStarted) {
+        issues.push({ severity: 'warning', title: `Xavier ${name} Never Synced`, detail: `${s.targetTable} has ${typeof s.localRows === 'number' ? num(s.localRows) : '?'} local rows but no sync history.`, time: null });
+      } else if (s.secondsSinceLastRun > 90000) {
+        issues.push({ severity: 'warning', title: `Xavier ${name} Sync Stale`, detail: `Last sync ${formatDuration(s.secondsSinceLastRun)} ago. Data may be outdated.`, time: s.lastSyncStarted });
+      }
+    });
+  }
+  issues.sort((a, b) => {
+    const sevOrder = { critical: 0, warning: 1 };
+    return (sevOrder[a.severity] || 2) - (sevOrder[b.severity] || 2);
+  });
+  return issues;
+}
+
+let previousIssueCount = -1;
+
+function renderCriticalZone(issues) {
+  const zone = document.getElementById('critical-zone');
+  lastData._issues = issues;
+
+  if (!issues || issues.length === 0) {
+    zone.innerHTML = `<div class="all-clear"><div class="all-clear-dot"></div><div class="all-clear-text">ALL SYSTEMS OPERATIONAL</div><div class="all-clear-sub">No issues detected</div></div>`;
+    previousIssueCount = 0;
+    return;
+  }
+
+  const critCount = issues.filter(i => i.severity === 'critical').length;
+  const warnCount = issues.filter(i => i.severity === 'warning').length;
+  const hasCritical = critCount > 0;
+  const panelStyle = hasCritical ? '' : 'style="border-color:rgba(255,225,77,0.3);background:rgba(255,225,77,0.03);"';
+  const iconClass = hasCritical ? '' : 'warning';
+  const titleClass = hasCritical ? '' : 'warning';
+  const titleText = hasCritical ? 'CRITICAL ISSUES DETECTED' : 'WARNINGS';
+  const countText = `${critCount ? critCount + ' CRITICAL' : ''}${critCount && warnCount ? ' Â· ' : ''}${warnCount ? warnCount + ' WARNING' : ''}`;
+  const shouldAnimate = previousIssueCount !== issues.length;
+  zone.className = shouldAnimate ? 'slide-in' : '';
+
+  zone.innerHTML = `
+    <div class="critical-panel" ${panelStyle}>
+      <div class="critical-header">
+        <div class="critical-icon ${iconClass}"></div>
+        <div class="critical-title ${titleClass}">${titleText}</div>
+        <div class="critical-count">${countText}</div>
+      </div>
+      ${issues.map((issue, i) => `
+        <div class="critical-issue ${issue.severity === 'warning' ? 'warning' : ''}" onclick="drillIssue(${i})">
+          <div class="issue-severity ${issue.severity}">${issue.severity.toUpperCase()}</div>
+          <div class="issue-body">
+            <div class="issue-title">${issue.title}</div>
+            <div class="issue-detail">${issue.detail}</div>
+          </div>
+          <div class="issue-time">${issue.time ? timeAgo(issue.time) : ''}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  previousIssueCount = issues.length;
+}
+
+// â”€â”€â”€ Ops: Status Strip â”€â”€â”€
+function renderStatusStrip(health, infra) {
+  const strip = document.getElementById('status-strip');
+  const chips = [];
+
+  const os = infra?.overallStatus || 'unknown';
+  const osDot = os === 'healthy' ? 'up' : os === 'degraded' ? 'warn' : os === 'critical' ? 'down' : 'idle';
+  const osVal = os === 'healthy' ? 'ok' : os === 'degraded' ? 'warn' : os === 'critical' ? 'bad' : '';
+  chips.push(`<div class="status-chip ${os}" onclick="drillStatus('overall')"><div class="chip-dot ${osDot}"></div><div class="chip-label">OVERALL</div><div class="chip-value ${osVal}">${os.toUpperCase()}</div></div>`);
+
+  const df = infra?.dataFlow;
+  const flowOk = df?.isFlowing;
+  chips.push(`<div class="status-chip ${flowOk ? 'healthy' : df ? 'critical' : ''}" onclick="drillStatus('dataflow')"><div class="chip-dot ${flowOk ? 'up' : df ? 'down' : 'idle'}"></div><div class="chip-label">DATA FLOW</div><div class="chip-value ${flowOk ? 'ok' : df ? 'bad' : ''}">${flowOk ? `${df.hitsLast5Min}/5m` : df ? 'STOPPED' : '--'}</div></div>`);
+
+  const sqlOk = infra?.sql?.isConnected;
+  const sqlMs = infra?.sql?.responseMs;
+  chips.push(`<div class="status-chip ${sqlOk ? 'healthy' : infra?.sql ? 'critical' : ''}" onclick="drillStatus('sql')"><div class="chip-dot ${sqlOk ? 'up' : infra?.sql ? 'down' : 'idle'}"></div><div class="chip-label">SQL</div><div class="chip-value ${sqlOk ? (sqlMs > 200 ? 'warn' : 'ok') : infra?.sql ? 'bad' : ''}">${sqlOk ? `${sqlMs}ms` : infra?.sql ? 'DOWN' : '--'}</div></div>`);
+
+  const sites = infra?.websites || [];
+  const iisDown = sites.filter(w => !w.isHealthy);
+  chips.push(`<div class="status-chip ${iisDown.length ? 'critical' : sites.length ? 'healthy' : ''}" onclick="drillStatus('iis')"><div class="chip-dot ${sites.length === 0 ? 'idle' : iisDown.length === 0 ? 'up' : 'down'}"></div><div class="chip-label">IIS</div><div class="chip-value ${sites.length === 0 ? '' : iisDown.length === 0 ? 'ok' : 'bad'}">${sites.length === 0 ? '--' : iisDown.length === 0 ? `${sites.length}/${sites.length} UP` : `${iisDown.length} DOWN`}</div></div>`);
+
+  const etlLag = df?.etlLag ?? null;
+  chips.push(`<div class="status-chip ${etlLag > 50 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 50 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 50 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
+
+  // Match chip â€” shows resolved/total
+  const pipe = infra?.pipeline;
+  const matchOk = pipe?.isAvailable && pipe?.matchRows > 0;
+  const matchResolved = pipe?.matchesResolved ?? 0;
+  const matchTotal = pipe?.matchRows ?? 0;
+  const matchLag = pipe?.matchLag ?? null;
+  const matchDot = !pipe?.isAvailable ? 'idle' : matchLag > 50 ? 'warn' : matchResolved > 0 ? 'up' : 'idle';
+  const matchChipCls = !pipe?.isAvailable ? '' : matchLag > 50 ? 'degraded' : 'healthy';
+  const matchValCls = !pipe?.isAvailable ? '' : matchResolved > 0 ? 'ok' : matchTotal > 0 ? 'warn' : '';
+  const matchText = !pipe?.isAvailable ? '--' : `${matchResolved}/${matchTotal}`;
+  chips.push(`<div class="status-chip ${matchChipCls}" onclick="drillStatus('match')"><div class="chip-dot ${matchDot}"></div><div class="chip-label">MATCH</div><div class="chip-value ${matchValCls}">${matchText}</div></div>`);
+
+  const secSince = health?.secondsSinceLastHit ?? null;
+  const hitDot = secSince === null ? 'idle' : secSince < 300 ? 'up' : secSince < 3600 ? 'warn' : 'down';
+  const hitVal = secSince === null ? '--' : secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago';
+  const hitCls = secSince === null ? '' : secSince < 300 ? 'ok' : secSince < 3600 ? 'warn' : 'bad';
+  const hitChipCls = secSince === null ? '' : secSince < 300 ? 'healthy' : secSince < 3600 ? 'degraded' : 'critical';
+  chips.push(`<div class="status-chip ${hitChipCls}" onclick="drillStatus('lasthit')"><div class="chip-dot ${hitDot}"></div><div class="chip-label">LAST HIT</div><div class="chip-value ${hitCls}">${hitVal}</div></div>`);
+
+  strip.innerHTML = chips.join('');
+}
+
+// â”€â”€â”€ Ops: Pipeline â”€â”€â”€
+function renderPipeline(health, infra) {
+  const df = infra?.dataFlow;
+  const sql = infra?.sql;
+  const pipe = infra?.pipeline;
+
+  // Node 1: INGEST
+  const queueDepth = df?.queueDepth ?? (infra?.app?.queueDepth ?? '--');
+  document.getElementById('pipe-ingest-val').textContent = queueDepth;
+  document.getElementById('pipe-ingest-sub').textContent = 'in queue';
+  document.getElementById('pipe-ingest').className = 'pipe-node' + (queueDepth > 100 ? ' stale' : queueDepth !== '--' ? ' healthy' : '');
+
+  // Node 2: SQL WRITE
+  const maxTestId = pipe?.maxTestId ?? (df?.maxTestId ?? (sql?.testRows ?? '--'));
+  document.getElementById('pipe-sql-val').textContent = typeof maxTestId === 'number' ? num(maxTestId) : maxTestId;
+  document.getElementById('pipe-sql-sub').textContent = 'PiXL.Raw';
+  document.getElementById('pipe-sql').className = 'pipe-node' + (sql?.isConnected === false ? ' down' : sql?.isConnected ? ' healthy' : '');
+  document.getElementById('pipe-arrow-1').className = 'pipe-arrow' + (sql?.isConnected === false ? ' dead' : '');
+
+  // Node 3: ETL PARSE
+  const parsedRows = pipe?.parsedRows ?? (sql?.parsedRows ?? (health?.totalHits ?? '--'));
+  document.getElementById('pipe-etl-val').textContent = typeof parsedRows === 'number' ? num(parsedRows) : parsedRows;
+  document.getElementById('pipe-etl-sub').textContent = pipe ? `lag ${pipe.parseLag}` : 'PiXL.Parsed';
+  const parseLag = pipe?.parseLag ?? (df?.etlLag ?? null);
+  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 50 ? ' stale' : parseLag !== null ? ' healthy' : '');
+  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 50 ? ' dead' : '');
+
+  // Node 4: DIMENSIONS (Device + IP)
+  const devCount = pipe?.deviceRows ?? '--';
+  const ipCount = pipe?.ipRows ?? '--';
+  document.getElementById('pipe-dim-val').textContent = typeof devCount === 'number' ? `${num(devCount)}+${num(ipCount)}` : '--';
+  document.getElementById('pipe-dim-sub').textContent = 'Device Â· IP';
+  document.getElementById('pipe-dim').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
+  document.getElementById('pipe-arrow-3').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
+
+  // Node 5: VISITS
+  const visitCount = pipe?.visitRows ?? '--';
+  document.getElementById('pipe-visit-val').textContent = typeof visitCount === 'number' ? num(visitCount) : visitCount;
+  document.getElementById('pipe-visit-sub').textContent = pipe ? `${num(pipe.visitsWithEmail||0)} w/email` : 'linked';
+  document.getElementById('pipe-visit').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
+  document.getElementById('pipe-arrow-4').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
+
+  // Node 6: MATCH
+  const matchTotal = pipe?.matchRows ?? '--';
+  const matchResolved = pipe?.matchesResolved ?? 0;
+  document.getElementById('pipe-match-val').textContent = typeof matchTotal === 'number' ? num(matchTotal) : matchTotal;
+  document.getElementById('pipe-match-sub').textContent = pipe ? `${matchResolved} resolved` : 'resolved';
+  const matchLag = pipe?.matchLag ?? null;
+  const matchOk = pipe?.isAvailable && matchLag !== null;
+  document.getElementById('pipe-match').className = 'pipe-node' + (matchLag > 50 ? ' stale' : matchOk ? ' healthy' : '');
+  document.getElementById('pipe-arrow-5').className = 'pipe-arrow' + (matchLag > 50 ? ' dead' : '');
+
+  // Flow stats bar
+  if (df) {
+    const staleStr = df.secondsSinceLastInsert > 0 ? formatDuration(df.secondsSinceLastInsert) + ' ago' : 'just now';
+    document.getElementById('flow-5min').textContent = df.hitsLast5Min;
+    document.getElementById('flow-5min').className = 'etl-val' + (df.hitsLast5Min === 0 ? ' bad' : '');
+    document.getElementById('flow-1hr').textContent = df.hitsLastHour;
+    document.getElementById('flow-1hr').className = 'etl-val' + (df.hitsLastHour === 0 ? ' warn' : '');
+    document.getElementById('flow-last-insert').textContent = staleStr;
+    document.getElementById('flow-last-insert').className = 'etl-val' + (df.secondsSinceLastInsert > 300 ? ' warn' : '');
+    document.getElementById('flow-last-insert').style.fontSize = '0.8rem';
+  }
+}
+
+// â”€â”€â”€ Ops: Error Log â”€â”€â”€
+function renderErrorLog(infra) {
+  const el = document.getElementById('error-log');
+  const re = infra?.recentErrors;
+  if (!re || !re.hasErrors) {
+    el.innerHTML = '<div style="color:var(--green); font-size:0.82rem; padding: 16px; text-align:center; letter-spacing: 2px;">NO ERRORS TODAY</div>';
+    return;
+  }
+  el.innerHTML = re.errors.map((e, i) => {
+    const isStale = e.isStale;
+    const countBadge = e.count > 1 ? `<span class="error-count">x${e.count}</span>` : '';
+    const ageStr = e.lastSeenUtc ? timeAgo(e.lastSeenUtc) : '';
+    return `<div class="error-entry ${isStale ? 'stale' : ''}" onclick="drillError(${i})">
+      <div class="error-source">${e.source || '?'}</div>
+      <div class="error-msg ${isStale ? 'stale' : ''}">${e.message?.substring(0, 150) || 'Unknown error'}${e.message?.length > 150 ? '...' : ''}</div>
+      ${countBadge}
+      <div class="error-age">${ageStr}</div>
+    </div>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Ops: ETL Health â”€â”€â”€
+function renderOpsETL(health, infra) {
+  const el = document.getElementById('etl-details');
+  const pipe = infra?.pipeline;
+  if (!health && !pipe) { el.innerHTML = '<div style="color:var(--text-dim)">No health data</div>'; return; }
+
+  const parseLag = pipe?.parseLag ?? 0;
+  const matchLag = pipe?.matchLag ?? 0;
+  const parseLagCls = parseLag > 50 ? ' warn' : parseLag > 100 ? ' bad' : '';
+  const matchLagCls = matchLag > 50 ? ' warn' : matchLag > 100 ? ' bad' : '';
+
+  el.innerHTML = `
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ParseNewHits)</div>
+    <div class="etl-grid">
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseTotalProcessed || health?.etL_TotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseWatermark || health?.etL_Watermark || 0)}</div><div class="etl-lbl">WATERMARK</div></div>
+      <div class="etl-stat"><div class="etl-val${parseLagCls}">${parseLag}</div><div class="etl-lbl">PARSE LAG</div></div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin:6px 0 14px;">Last run: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--')}</div>
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">MATCH (usp_MatchVisits)</div>
+    <div class="etl-grid">
+      <div class="etl-stat"><div class="etl-val">${num(pipe?.matchTotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
+      <div class="etl-stat"><div class="etl-val" style="color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${num(pipe?.matchTotalMatched || 0)}</div><div class="etl-lbl">MATCHED</div></div>
+      <div class="etl-stat"><div class="etl-val${matchLagCls}">${matchLag}</div><div class="etl-lbl">MATCH LAG</div></div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Last run: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
+  `;
+}
+
+// â”€â”€â”€ Ops: Pipeline Tables â”€â”€â”€
+function renderPipelineTables(infra) {
+  const el = document.getElementById('pipeline-tables');
+  const pipe = infra?.pipeline;
+  if (!pipe?.isAvailable) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:20px;text-align:center;">Pipeline data unavailable</div>'; return; }
+
+  const tbl = (label, rows, latest, color) => {
+    const age = latest ? timeAgo(latest) : '--';
+    return `<div class="etl-stat" style="cursor:pointer;" onclick="drillPipelineTable('${label.toLowerCase()}')">
+      <div class="etl-val" style="color:${color}">${num(rows)}</div>
+      <div class="etl-lbl">${label}</div>
+      <div style="font-size:0.62rem;color:var(--text-dim);margin-top:2px;">${age}</div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="etl-grid" style="grid-template-columns:repeat(3,1fr);">
+      ${tbl('TEST', pipe.testRows, pipe.testLatest, 'var(--text)')}
+      ${tbl('PARSED', pipe.parsedRows, pipe.parsedLatest, 'var(--cyan)')}
+      ${tbl('DEVICE', pipe.deviceRows, pipe.deviceLatest, 'var(--cyan)')}
+      ${tbl('IP', pipe.ipRows, pipe.ipLatest, 'var(--cyan)')}
+      ${tbl('VISIT', pipe.visitRows, pipe.visitLatest, 'var(--cyan)')}
+      ${tbl('MATCH', pipe.matchRows, pipe.matchLatest, 'var(--green)')}
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:10px;padding:8px 12px;background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);border-radius:4px;">
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${pipe.matchesResolved}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">RESOLVED</div>
+      </div>
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--yellow)">${pipe.matchesPending}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">PENDING</div>
+      </div>
+      <div style="text-align:center;flex:1;">
+        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--cyan)">${num(pipe.visitsWithEmail)}</div>
+        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">W/ EMAIL</div>
+      </div>
+    </div>
+    <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:6px;">${num(pipe.uniqueDevicesInVisits)} unique devices Â· ${num(pipe.uniqueIpsInVisits)} unique IPs in visits</div>
+  `;
+}
+
+
+// --- Ops: Xavier Sync Panel ---
+function renderXavierSync(data) {
+  const el = document.getElementById('xavier-sync-panel');
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:20px;text-align:center;">Xavier sync data unavailable</div>';
+    return;
+  }
+
+  const friendlyNames = { IpGeo: 'IP GEOLOCATION', Company: 'COMPANY', Pixel: 'PiXL CONFIG' };
+  const friendlyTargets = { IpGeo: 'IPAPI.IP \u2190 Xavier IPGEO', Company: 'PiXL.Company \u2190 Xavier', Pixel: 'PiXL.Pixel \u2190 Xavier' };
+
+  function getSyncClass(s) {
+    if (!s.lastSyncStarted) return 'sync-never';
+    if (s.lastStatus === 'Error') return 'sync-error';
+    if (s.secondsSinceLastRun > 90000) return 'sync-stale';
+    return 'sync-ok';
+  }
+
+  function getDotClass(s) {
+    if (!s.lastSyncStarted) return 'never';
+    if (s.lastStatus === 'Error') return 'error';
+    if (s.secondsSinceLastRun > 90000) return 'stale';
+    return 'ok';
+  }
+
+  function getStatusLabel(s) {
+    if (!s.lastSyncStarted) return 'NEVER RUN';
+    if (s.lastStatus === 'Error') return 'FAILED';
+    if (s.lastStatus === 'Running') return 'RUNNING';
+    if (s.secondsSinceLastRun > 90000) return 'STALE';
+    return 'SYNCED';
+  }
+
+  function getStatusCls(s) {
+    if (!s.lastSyncStarted) return 'never';
+    if (s.lastStatus === 'Error') return 'error';
+    if (s.secondsSinceLastRun > 90000) return 'stale';
+    return 'ok';
+  }
+
+  el.innerHTML = `<div class="sync-cards">${data.map((s, i) => {
+    const name = friendlyNames[s.syncType] || s.syncType;
+    const target = friendlyTargets[s.syncType] || s.targetTable;
+    const cls = getSyncClass(s);
+    const dot = getDotClass(s);
+    const statusLabel = getStatusLabel(s);
+    const statusCls = getStatusCls(s);
+    const lastRun = s.lastSyncStarted ? timeAgo(s.lastSyncStarted) : '--';
+    const durSec = s.lastDurationMs ? (s.lastDurationMs / 1000).toFixed(1) + 's' : '--';
+    const rows = typeof s.localRows === 'number' ? num(s.localRows) : '--';
+    const fresh = s.latestRecord ? timeAgo(s.latestRecord) : '--';
+    const ins = s.lastInserted ?? 0;
+    const upd = s.lastUpdated ?? 0;
+    const del = s.lastDeleted ?? 0;
+    const changeText = s.lastSyncStarted ? `+${ins} ~${upd} -${del}` : '--';
+    const errHtml = s.lastError ? `<div class="sync-card-error" title="${s.lastError}">${s.lastError.substring(0, 80)}${s.lastError.length > 80 ? '\u2026' : ''}</div>` : '';
+
+    return `<div class="sync-card ${cls}" onclick="drillXavierSync(${i})">
+      <div class="sync-card-header">
+        <div class="sync-card-dot ${dot}"></div>
+        <div class="sync-card-name">${name}</div>
+        <div class="sync-card-status ${statusCls}">${statusLabel}</div>
+      </div>
+      <div style="font-size:0.62rem;color:var(--text-dim);font-family:var(--mono);margin-bottom:10px;">${target}</div>
+      <div class="sync-card-grid">
+        <div><div class="sync-stat-label">LOCAL ROWS</div><div class="sync-stat-value">${rows}</div></div>
+        <div><div class="sync-stat-label">LAST RUN</div><div class="sync-stat-value${statusCls === 'error' ? ' bad' : statusCls === 'stale' ? ' warn' : ''}">${lastRun}</div></div>
+        <div><div class="sync-stat-label">DURATION</div><div class="sync-stat-value">${durSec}</div></div>
+        <div><div class="sync-stat-label">CHANGES</div><div class="sync-stat-value">${changeText}</div></div>
+        <div><div class="sync-stat-label">FRESHEST</div><div class="sync-stat-value">${fresh}</div></div>
+        <div><div class="sync-stat-label">WATERMARK</div><div class="sync-stat-value">${s.watermarkBefore ? timeAgo(s.watermarkBefore) : '--'}</div></div>
+      </div>
+      ${errHtml}
+    </div>`;
+  }).join('')}</div>`;
+
+  // Also update the status strip XAVIER chip
+  renderXavierChip(data);
+}
+
+function renderXavierChip(data) {
+  const chip = document.getElementById('xavier-chip');
+  if (!chip || !data) return;
+  const hasError = data.some(s => s.lastStatus === 'Error');
+  const hasNever = data.some(s => !s.lastSyncStarted);
+  const hasStale = data.some(s => s.secondsSinceLastRun > 90000);
+  const allOk = !hasError && !hasNever && !hasStale;
+
+  let dot, val, valCls, chipCls;
+  if (hasError) {
+    dot = 'down'; val = 'FAILED'; valCls = 'bad'; chipCls = 'critical';
+  } else if (hasNever) {
+    dot = 'warn'; val = 'NEVER'; valCls = 'warn'; chipCls = 'degraded';
+  } else if (hasStale) {
+    dot = 'warn'; val = 'STALE'; valCls = 'warn'; chipCls = 'degraded';
+  } else {
+    dot = 'up'; val = `${data.length}/${data.length} OK`; valCls = 'ok'; chipCls = 'healthy';
+  }
+  chip.className = `status-chip ${chipCls}`;
+  chip.innerHTML = `<div class="chip-dot ${dot}"></div><div class="chip-label">XAVIER</div><div class="chip-value ${valCls}">${val}</div>`;
+}
+
+function drillXavierSync(idx) {
+  const data = lastData.xavierSync;
+  if (!data || !data[idx]) return;
+  const s = data[idx];
+  const friendlyNames = { IpGeo: 'IP Geolocation Sync', Company: 'Company Sync', Pixel: 'PiXL Config Sync' };
+  const name = friendlyNames[s.syncType] || s.syncType;
+  const statusColor = s.lastStatus === 'Error' ? 'var(--red)' : s.lastStatus === 'Success' ? 'var(--green)' : 'var(--yellow)';
+
+  let html = `<div class="detail-grid">`;
+  html += di('Sync Type', s.syncType);
+  html += di('Target Table', s.targetTable);
+  html += di('Status', `<span style="color:${statusColor};font-weight:600">${s.lastStatus || 'Never Run'}</span>`);
+  html += di('Local Row Count', typeof s.localRows === 'number' ? num(s.localRows) : '--');
+  html += di('Latest Record', s.latestRecord ? new Date(s.latestRecord).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
+  html += di('Last Sync Started', s.lastSyncStarted ? new Date(s.lastSyncStarted).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : 'Never');
+  html += di('Last Sync Completed', s.lastSyncCompleted ? new Date(s.lastSyncCompleted).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
+  html += di('Duration', s.lastDurationMs ? (s.lastDurationMs / 1000).toFixed(1) + 's' : '--');
+  html += di('Rows Inserted', s.lastInserted ?? '--');
+  html += di('Rows Updated', s.lastUpdated ?? '--');
+  html += di('Rows Deleted', s.lastDeleted ?? '--');
+  html += di('Watermark Before', s.watermarkBefore ? new Date(s.watermarkBefore).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
+  html += di('Watermark After', s.watermarkAfter ? new Date(s.watermarkAfter).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
+  html += di('Seconds Since Last Run', s.secondsSinceLastRun ? num(s.secondsSinceLastRun) + 's (' + formatDuration(s.secondsSinceLastRun) + ')' : '--');
+  html += `</div>`;
+
+  if (s.lastError) {
+    html += `<div style="margin-top:16px;padding:12px;border-radius:4px;background:rgba(255,45,85,0.06);border:1px solid rgba(255,45,85,0.3);">
+      <div style="font-family:var(--display);font-size:0.68rem;color:var(--red);letter-spacing:2px;margin-bottom:6px;">ERROR MESSAGE</div>
+      <div style="font-family:var(--mono);font-size:0.78rem;color:var(--red);word-break:break-all;">${s.lastError}</div>
+    </div>`;
+  }
+
+  if (s.lastStatus === 'Error') {
+    const syncType = s.syncType;
+    let fix = '';
+    if (s.lastError?.includes('Login failed')) {
+      fix = 'The Xavier connection is failing authentication. Check Windows Auth trust between servers:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL access on Xavier.';
+    } else if (s.lastError?.includes('Timeout')) {
+      fix = 'The sync query timed out. Xavier may be under heavy load. Try running during off-peak.';
+    } else {
+      fix = 'Check the application log for detailed error info:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50 | Select-String "' + syncType + '"</code>';
+    }
+    html += sug(fix);
+  }
+
+  openModal(name, html);
+}
+
+// â”€â”€â”€ Ops: Infrastructure Detail â”€â”€â”€
+function renderInfraDetail(infra) {
+  const el = document.getElementById('infra-detail');
+  if (!infra) { el.innerHTML = '<div style="color:var(--text-dim)">Infrastructure probe unavailable</div>'; return; }
+  let html = '<div class="infra-grid">';
+
+  html += '<div>';
+  html += '<div class="infra-group-title">Windows Services</div>';
+  if (infra.services && infra.services.length) {
+    infra.services.forEach(s => {
+      const dotCls = s.isRunning ? 'up' : 'down';
+      const detail = s.isRunning ? s.status : (s.error || s.status);
+      const critTag = s.critical ? ' <span style="color:var(--red);font-size:0.65rem;font-weight:600;">CRITICAL</span>' : '';
+      html += `<div class="infra-item"><div class="infra-dot ${dotCls}"></div><div class="infra-item-name">${s.name}${critTag}</div><div class="infra-item-detail">${detail}</div></div>`;
+    });
+  } else { html += '<div style="color:var(--text-dim);font-size:0.78rem;">No service data</div>'; }
+  html += '</div>';
+
+  html += '<div>';
+  html += '<div class="infra-group-title">Website Endpoints</div>';
+  if (infra.websites && infra.websites.length) {
+    infra.websites.forEach(w => {
+      const dotCls = w.isHealthy ? 'up' : 'down';
+      const statusTxt = w.isHealthy ? `${w.statusCode} OK` : (w.error || `HTTP ${w.statusCode}`);
+      const critTag = w.critical ? ' <span style="color:var(--red);font-size:0.65rem;font-weight:600;">CRITICAL</span>' : '';
+      html += `<div class="infra-item"><div class="infra-dot ${dotCls}"></div><div class="infra-item-name">${w.name}${critTag}</div><div class="infra-item-detail">${statusTxt}</div><div class="infra-item-ms">${w.responseMs}ms</div></div>`;
+    });
+  } else { html += '<div style="color:var(--text-dim);font-size:0.78rem;">No website data</div>'; }
+  html += '</div>';
+
+  html += '<div>';
+  html += '<div class="infra-group-title">SQL Server</div>';
+  if (infra.sql) {
+    const s = infra.sql;
+    html += `<div class="infra-item"><div class="infra-dot ${s.isConnected ? 'up' : 'down'}"></div><div class="infra-item-name">${s.dataSource || 'SQL Server'} / ${s.database || '?'}</div><div class="infra-item-ms">${s.responseMs}ms</div></div>`;
+    if (s.isConnected) {
+      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Raw: ${num(s.testRows)} · PiXL.Parsed: ${num(s.parsedRows)} · Watermark: ${num(s.watermark)}</div>`;
+      if (s.lastEtlRun) html += `<div style="font-size:0.72rem;color:var(--text-dim);padding:2px 0 0 18px;">Last ETL: ${timeAgo(s.lastEtlRun)}</div>`;
+    } else {
+      html += `<div style="font-size:0.78rem;color:var(--red);padding:4px 0 0 18px;">${s.error || 'Connection failed'}</div>`;
+    }
+  }
+  html += '</div>';
+
+  html += '<div>';
+  html += '<div class="infra-group-title">App Runtime</div>';
+  if (infra.app) {
+    const a = infra.app;
+    const uptimeSec = a.uptime ? (a.uptime.totalSeconds || (a.uptime.hours * 3600 + a.uptime.minutes * 60 + a.uptime.seconds) || 0) : 0;
+    const uptimeStr = uptimeSec > 86400 ? Math.floor(uptimeSec/86400) + 'd ' + Math.floor((uptimeSec%86400)/3600) + 'h' :
+                      uptimeSec > 3600 ? Math.floor(uptimeSec/3600) + 'h ' + Math.floor((uptimeSec%3600)/60) + 'm' :
+                      Math.floor(uptimeSec/60) + 'm';
+    html += `<div class="infra-app-grid">
+      <div class="infra-app-stat"><div class="infra-app-val">${a.processId}</div><div class="infra-app-lbl">PID</div></div>
+      <div class="infra-app-stat"><div class="infra-app-val">${uptimeStr}</div><div class="infra-app-lbl">UPTIME</div></div>
+      <div class="infra-app-stat"><div class="infra-app-val">${a.workingSetMB}</div><div class="infra-app-lbl">MEM (MB)</div></div>
+      <div class="infra-app-stat"><div class="infra-app-val">${a.threadCount}</div><div class="infra-app-lbl">THREADS</div></div>
+      <div class="infra-app-stat"><div class="infra-app-val">${a.gcHeapMB}</div><div class="infra-app-lbl">GC HEAP</div></div>
+      <div class="infra-app-stat"><div class="infra-app-val" style="${a.queueDepth > 100 ? 'color:var(--yellow)' : ''}">${a.queueDepth}</div><div class="infra-app-lbl">WRITE QUEUE</div></div>
+    </div>`;
+    html += `<div style="font-size:0.68rem;color:var(--text-dim);margin-top:6px;">${a.machineName} Â· .NET ${a.dotNetVersion}</div>`;
+  }
+  html += '</div>';
+  html += '</div>';
+
+  const checkedAt = infra.checkedAt ? new Date(infra.checkedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) + ' UTC' : '--';
+  html += `<div style="text-align:right;font-size:0.68rem;color:var(--text-dim);margin-top:12px;letter-spacing:1px;">Probed in ${infra.probeTimeMs || 0}ms Â· ${checkedAt}</div>`;
+  el.innerHTML = html;
+}
+
+// â”€â”€â”€ Ops: Compact Live Feed â”€â”€â”€
+function renderOpsFeed(data) {
+  const tbody = document.getElementById('ops-feed-body');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">No recent hits</td></tr>'; return; }
+  tbody.innerHTML = data.slice(0, 15).map((r, i) => {
+    const t = r.threatLevel || 'OK';
+    const badgeClass = t === 'HIGH' ? 'high' : t === 'MED' ? 'med' : t === 'LOW' ? 'low' : 'ok';
+    const time = r.receivedAt ? new Date(r.receivedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '--';
+    return `<tr onclick="drillHit(${i})">
+      <td>${time}</td>
+      <td>${r.ipAddress || '--'}</td>
+      <td><span class="badge ${badgeClass}">${t}</span></td>
+      <td>${r.botScore ?? '--'}</td>
+      <td>${r.platform || '--'}</td>
+      <td>${r.browser || '--'}</td>
+      <td style="color:var(--cyan)">${r.fP_Short || '--'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Ops: Header Beacon â”€â”€â”€
+function updateOpsBeacon(health, infra) {
+  const beacon = document.getElementById('beacon');
+  const statusEl = document.getElementById('system-status');
+
+  if (infra?.overallStatus === 'critical') {
+    beacon.className = 'beacon-dot danger';
+    statusEl.textContent = 'CRITICAL';
+    statusEl.style.color = 'var(--red)';
+  } else if (infra?.overallStatus === 'degraded') {
+    beacon.className = 'beacon-dot warn';
+    statusEl.textContent = 'DEGRADED';
+    statusEl.style.color = 'var(--yellow)';
+  } else if (health) {
+    const secSince = health.secondsSinceLastHit || 9999;
+    if (secSince < 300) {
+      beacon.className = 'beacon-dot';
+      statusEl.textContent = 'ONLINE';
+      statusEl.style.color = '';
+    } else if (secSince < 3600) {
+      beacon.className = 'beacon-dot warn';
+      statusEl.textContent = 'IDLE â€” ' + formatDuration(secSince);
+      statusEl.style.color = 'var(--yellow)';
+    } else {
+      beacon.className = 'beacon-dot danger';
+      statusEl.textContent = 'STALE â€” ' + formatDuration(secSince);
+      statusEl.style.color = 'var(--red)';
+    }
+  }
+
+  if (health) {
+    document.getElementById('etl-status').textContent =
+      health.etL_Watermark ? `#${num(health.etL_Watermark)}` : '--';
+  }
+}
+
+// ============================================================================
+// â-ˆâ-ˆâ-ˆâ-ˆâ-ˆâ-ˆ  ANALYTICS RENDERERS & DRILL-DOWNS
+// ============================================================================
+
+// â”€â”€â”€ Drill-Down: Hit (shared by both views) â”€â”€â”€
+function drillHit(idx) {
+  const hits = lastData.recent;
+  if (!hits || !hits[idx]) return;
+  const r = hits[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Time', r.receivedAt ? new Date(r.receivedAt).toISOString() : '--');
+  html += di('IP Address', r.ipAddress || '--');
+  html += di('Threat Level', r.threatLevel || 'OK', r.threatLevel === 'HIGH' ? 'bad' : r.threatLevel === 'MED' ? 'warn' : 'ok');
+  html += di('Bot Score', r.botScore ?? '--', r.botScore >= 50 ? 'bad' : r.botScore >= 20 ? 'warn' : 'ok');
+  html += di('Platform', r.platform || '--');
+  html += di('Browser', r.browser || '--');
+  html += di('Resolution', r.resolution || '--');
+  html += di('Fingerprint', r.fP_Short || '--', 'cyan');
+  html += '</div>';
+  if (r.botSignalsList) {
+    html += '<div style="margin-top:16px;"><div class="detail-label" style="margin-bottom:8px;">BOT SIGNALS</div>';
+    html += '<div class="full-text">' + r.botSignalsList + '</div></div>';
+  }
+  openModal('HIT DETAIL', html);
+}
+
+// â”€â”€â”€ Drill-Down: Hero Cards â”€â”€â”€
+function drillHero(type) {
+  const h = lastData.health;
+  if (!h) return;
+  let html = '<div class="detail-grid">';
+  if (type === 'total') {
+    html += di('Total All Time', num(h.totalHits));
+    html += di('Last 7 Days', num(h.hits_7d));
+    html += di('Last 24 Hours', num(h.hits_24h));
+    html += di('Last 1 Hour', num(h.hits_1h));
+    html += di('ETL Processed', num(h.etL_TotalProcessed));
+    html += di('Synthetic', num(h.syntheticHits));
+  } else if (type === '24h') {
+    html += di('24h Hits', num(h.hits_24h));
+    html += di('1h Hits', num(h.hits_1h));
+    html += di('7d Hits', num(h.hits_7d));
+    html += di('Seconds Since Last', h.secondsSinceLastHit ?? '--');
+    html += di('Bots 24h', num(h.bots_24h));
+    html += di('Bot Rate 24h', (h.botPct_24h||0).toFixed(1) + '%');
+  } else if (type === 'bots') {
+    html += di('Bots 24h', num(h.bots_24h));
+    html += di('High Risk Bots', num(h.highRiskBots_24h));
+    html += di('Bot Rate', (h.botPct_24h||0).toFixed(1) + '%');
+    html += di('Avg Bot Score', (h.avgBotScore_24h||0).toFixed(1));
+    html += di('WebDriver Hits', num(h.webDriverHits));
+    html += di('Evasion Detected', num(h.evasionDetected_AllTime));
+  } else if (type === 'botpct') {
+    html += di('Bot Rate 24h', (h.botPct_24h||0).toFixed(1) + '%', h.botPct_24h > 30 ? 'bad' : h.botPct_24h > 10 ? 'warn' : 'ok');
+    html += di('Avg Bot Score', (h.avgBotScore_24h||0).toFixed(1));
+    html += di('Total Bots 24h', num(h.bots_24h));
+    html += di('Total Hits 24h', num(h.hits_24h));
+  } else if (type === 'fp') {
+    html += di('Unique FP 24h', num(h.uniqueFP_24h));
+    html += di('Unique FP All Time', num(h.uniqueFP_AllTime));
+    html += di('Total Hits', num(h.totalHits));
+    html += di('Hits per FP (avg)', h.uniqueFP_AllTime ? (h.totalHits / h.uniqueFP_AllTime).toFixed(1) : '--');
+  } else if (type === 'evasion') {
+    html += di('Evasion Detected', num(h.evasionDetected_AllTime));
+    html += di('WebDriver Hits', num(h.webDriverHits));
+    html += di('Bot Rate', (h.botPct_24h||0).toFixed(1) + '%');
+    html += di('High Risk Bots', num(h.highRiskBots_24h));
+  }
+  html += '</div>';
+  openModal(type.toUpperCase() + ' DETAIL', html);
+}
+
+// â”€â”€â”€ Drill-Down: Risk Row â”€â”€â”€
+function drillRisk(idx) {
+  const bots = lastData.bots;
+  if (!bots || !bots[idx]) return;
+  const b = bots[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Risk Bucket', b.riskBucket);
+  html += di('Hit Count', num(b.hitCount));
+  html += di('Unique Devices', num(b.uniqueDevices));
+  html += di('Unique IPs', num(b.uniqueIPs));
+  html += '</div>';
+  openModal(b.riskBucket.toUpperCase(), html);
+}
+
+// â”€â”€â”€ Drill-Down: Fingerprint â”€â”€â”€
+function drillFP(idx) {
+  const fps = lastData.fingerprints;
+  if (!fps || !fps[idx]) return;
+  const fp = fps[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Canvas Fingerprint', fp.canvasFingerprint || '--', 'cyan');
+  html += di('Hit Count', num(fp.hitCount));
+  html += di('Unique IPs', num(fp.uniqueIPs));
+  html += di('Avg Bot Score', fp.avgBotScore != null ? fp.avgBotScore.toFixed(1) : '--', fp.avgBotScore >= 50 ? 'bad' : fp.avgBotScore >= 20 ? 'warn' : 'ok');
+  html += di('Primary Platform', fp.primaryPlatform || '--');
+  html += di('First Seen', fp.firstSeen ? new Date(fp.firstSeen).toLocaleDateString() : '--');
+  html += '</div>';
+  openModal('FINGERPRINT CLUSTER', html);
+}
+
+// â”€â”€â”€ Drill-Down: Signal â”€â”€â”€
+function drillSignal(idx) {
+  const signals = lastData.signals;
+  if (!signals || !signals[idx]) return;
+  const s = signals[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Signal Name', s.signal, 'cyan');
+  html += di('Times Triggered', num(s.timesTriggered));
+  html += di('Unique Devices', num(s.uniqueDevices));
+  html += '</div>';
+  openModal('SIGNAL DETAIL', html);
+}
+
+// â”€â”€â”€ Drill-Down: Hourly â”€â”€â”€
+function drillHour(idx) {
+  const rows = lastData._hourlyRows;
+  if (!rows || !rows[idx]) return;
+  const r = rows[idx];
+  let html = '<div class="detail-grid">';
+  html += di('Hour', r.hourBucket);
+  html += di('Total Hits', num(r.totalHits));
+  html += di('Bot Hits', num(r.botHits), r.botHits > 0 ? 'bad' : 'ok');
+  html += di('Human Hits', num((r.totalHits||0) - (r.botHits||0)), 'ok');
+  html += '</div>';
+  openModal('HOURLY DETAIL', html);
+}
+
+// â”€â”€â”€ Analytics: Hero â”€â”€â”€
+function renderAnalyticsHero(h) {
+  if (!h) return;
+  const set = (id, val, sub) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+    const subEl = document.getElementById(id + '-sub');
+    if (subEl && sub) subEl.textContent = sub;
+  };
+  set('h-total', num(h.totalHits), `${num(h.hits_7d)} last 7d`);
+  set('h-24h', num(h.hits_24h), `${num(h.hits_1h)} last hour`);
+  set('h-bots', num(h.bots_24h), `${num(h.highRiskBots_24h)} high risk`);
+
+  const pct = h.botPct_24h || 0;
+  const pctEl = document.getElementById('h-botpct');
+  pctEl.textContent = pct.toFixed(1) + '%';
+  pctEl.className = 'hero-value' + (pct > 30 ? ' danger' : pct > 10 ? ' warn' : ' good');
+  document.getElementById('h-botpct-sub').textContent = `avg score ${(h.avgBotScore_24h||0).toFixed(1)}`;
+
+  set('h-fp', num(h.uniqueFP_24h), `${num(h.uniqueFP_AllTime)} all time`);
+
+  const evEl = document.getElementById('h-evasion');
+  evEl.textContent = num(h.evasionDetected_AllTime);
+  evEl.className = 'hero-value' + (h.evasionDetected_AllTime > 0 ? ' warn' : ' good');
+  document.getElementById('h-evasion-sub').textContent = `${num(h.webDriverHits)} webdriver`;
+
+  document.getElementById('a-pipe-raw').textContent = num(h.etL_TotalProcessed || h.totalHits);
+  document.getElementById('a-pipe-parsed').textContent = num(h.totalHits);
+
+  // Pipeline nodes (updated from infra if available)
+  const pipe = lastData.infra?.pipeline;
+  if (pipe?.isAvailable) {
+    document.getElementById('a-pipe-visits').textContent = num(pipe.visitRows);
+    document.getElementById('a-pipe-match').textContent = num(pipe.matchRows);
+    document.getElementById('a-pipe-resolved').textContent = num(pipe.matchesResolved);
+    document.getElementById('a-pipe-resolved').style.color = pipe.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
+  }
+}
+
+// â”€â”€â”€ Analytics: Beacon â”€â”€â”€
+function updateAnalyticsBeacon(h) {
+  if (!h) return;
+  const beacon = document.getElementById('beacon');
+  const statusEl = document.getElementById('system-status');
+  const secSince = h.secondsSinceLastHit || 9999;
+  if (secSince < 300) {
+    beacon.className = 'beacon-dot';
+    statusEl.textContent = 'SYSTEM ONLINE';
+    statusEl.style.color = '';
+  } else if (secSince < 3600) {
+    beacon.className = 'beacon-dot warn';
+    statusEl.textContent = 'IDLE â€” ' + formatDuration(secSince);
+    statusEl.style.color = 'var(--yellow)';
+  } else {
+    beacon.className = 'beacon-dot danger';
+    statusEl.textContent = 'STALE â€” ' + formatDuration(secSince);
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+// â”€â”€â”€ Analytics: ETL Details â”€â”€â”€
+function renderAnalyticsETL(h) {
+  const el = document.getElementById('a-etl-details');
+  if (!h) return;
+  const pipe = lastData.infra?.pipeline;
+  el.innerHTML = `
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseTotalProcessed || h.etL_TotalProcessed||0)}</div><div class="evasion-lbl">ROWS PROCESSED</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseWatermark || h.etL_Watermark||0)}</div><div class="evasion-lbl">WATERMARK ID</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(h.totalHits)}</div><div class="evasion-lbl">PARSED ROWS</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.visitRows||0)}</div><div class="evasion-lbl">VISITS</div></div>
+      <div class="evasion-card"><div class="evasion-val" style="color:var(--green)">${num(pipe?.matchesResolved||0)}</div><div class="evasion-lbl">MATCHED</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(pipe?.deviceRows||0)}</div><div class="evasion-lbl">DEVICES</div></div>
+    </div>
+    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Parse: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (h.etL_LastRunAt ? timeAgo(h.etL_LastRunAt) : '--')} Â· Match: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
+  `;
+}
+
+// â”€â”€â”€ Analytics: Hourly Chart â”€â”€â”€
+function renderHourlyChart(data) {
+  const container = document.getElementById('hourly-chart');
+  if (!data || !data.length) { container.innerHTML = '<div class="loading">NO DATA</div>'; return; }
+  const rows = [...data].reverse().slice(-48);
+  const maxHits = Math.max(...rows.map(r => r.totalHits || 1));
+
+  container.innerHTML = rows.map((r, i) => {
+    const total = r.totalHits || 0;
+    const bots = r.botHits || 0;
+    const humans = total - bots;
+    const humanH = Math.max(1, (humans / maxHits) * 180);
+    const botH = Math.max(0, (bots / maxHits) * 180);
+    const hour = new Date(r.hourBucket).getUTCHours();
+    const label = hour === 0 ? new Date(r.hourBucket).toLocaleDateString('en',{month:'short',day:'numeric',timeZone:'UTC'}) : `${hour}h`;
+    return `<div class="chart-bar-group" title="${total} hits (${bots} bots) at ${r.hourBucket}" onclick="drillHour(${i})">
+      <div class="chart-bar bot" style="height:${botH}px"></div>
+      <div class="chart-bar human" style="height:${humanH}px"></div>
+      ${hour % 6 === 0 ? `<div class="chart-label">${label}</div>` : ''}
+    </div>`;
+  }).join('');
+  lastData._hourlyRows = rows;
+}
+
+// â”€â”€â”€ Analytics: Risk List â”€â”€â”€
+function renderRiskList(data) {
+  const el = document.getElementById('risk-list');
+  if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;">No data</div>'; return; }
+  const indicatorClass = b => {
+    if (b.riskBucket === 'High Risk') return 'high';
+    if (b.riskBucket === 'Medium Risk') return 'medium';
+    if (b.riskBucket === 'Low Risk') return 'low';
+    return 'ok';
+  };
+  el.innerHTML = data.map((b, i) => `
+    <div class="risk-row" onclick="drillRisk(${i})">
+      <div class="risk-indicator ${indicatorClass(b)}"></div>
+      <div class="risk-info">
+        <div class="risk-label">${b.riskBucket}</div>
+        <div class="risk-meta">${num(b.uniqueDevices)} devices Â· ${num(b.uniqueIPs)} IPs</div>
+      </div>
+      <div class="risk-count">${num(b.hitCount)}</div>
+    </div>
+  `).join('');
+}
+
+// â”€â”€â”€ Analytics: Live Feed (full, 30 hits) â”€â”€â”€
+function renderAnalyticsFeed(data) {
+  const tbody = document.getElementById('a-feed-body');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim)">No recent hits</td></tr>'; return; }
+  tbody.innerHTML = data.slice(0, 30).map((r, i) => {
+    const t = r.threatLevel || 'OK';
+    const badgeClass = t === 'HIGH' ? 'high' : t === 'MED' ? 'med' : t === 'LOW' ? 'low' : 'ok';
+    const time = r.receivedAt ? new Date(r.receivedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '--';
+    return `<tr onclick="drillHit(${i})">
+      <td>${time}</td>
+      <td>${r.ipAddress || '--'}</td>
+      <td><span class="badge ${badgeClass}">${t}</span></td>
+      <td>${r.botScore ?? '--'}</td>
+      <td>${r.platform || '--'}</td>
+      <td>${r.browser || '--'}</td>
+      <td>${r.resolution || '--'}</td>
+      <td style="color:var(--cyan)">${r.fP_Short || '--'}</td>
+      <td style="max-width:200px;color:var(--text-dim)">${r.botSignalsList || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Analytics: Signals â”€â”€â”€
+function renderSignals(data) {
+  const el = document.getElementById('signal-list');
+  if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No signals</div>'; return; }
+  const maxCount = Math.max(...data.map(s => s.timesTriggered || 1));
+  el.innerHTML = data.slice(0, 12).map((s, i) => {
+    const pct = ((s.timesTriggered || 0) / maxCount * 100).toFixed(0);
+    return `<div class="signal-row" onclick="drillSignal(${i})">
+      <div class="signal-name" title="${s.signal}">${s.signal}</div>
+      <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${pct}%"></div></div>
+      <div class="signal-count">${num(s.timesTriggered)}</div>
+    </div>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Analytics: Evasion â”€â”€â”€
+function renderEvasion(data) {
+  const el = document.getElementById('evasion-grid');
+  if (!data) { el.innerHTML = '<div>No data</div>'; return; }
+  const items = [
+    ['CANVAS', data.canvasEvasion], ['WEBGL', data.webGLEvasion],
+    ['AUDIO NOISE', data.audioNoise], ['FONT SPOOF', data.fontSpoof],
+    ['STEALTH', data.stealthDetected], ['EVASION TOOLS', data.evasionToolsFound],
+    ['PROXY BLOCK', data.proxyBlocked], ['EVASION V2', data.evasionV2Signals],
+    ['DNT ENABLED', data.dnT_Enabled],
+  ];
+  el.innerHTML = items.map(([label, val]) => {
+    const v = val || 0;
+    return `<div class="evasion-card"><div class="evasion-val ${v > 0 ? 'alert' : ''}">${num(v)}</div><div class="evasion-lbl">${label}</div></div>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Analytics: Behavior â”€â”€â”€
+function renderBehavior(data) {
+  const el = document.getElementById('behavior-compare');
+  if (!data || !data.length) { el.innerHTML = '<div>No data</div>'; return; }
+  const human = data.find(d => d.classification && d.classification.includes('<50'));
+  const bot = data.find(d => d.classification && d.classification.includes('50'));
+  const stat = (label, hv) => `<div class="behavior-stat"><span>${label}</span><span class="val">${hv??'--'}</span></div>`;
+  const col = (title, cls, d) => `
+    <div class="behavior-col">
+      <div class="behavior-col-title ${cls}">${title}</div>
+      ${stat('Hits', num(d?.hitCount))}
+      ${stat('Avg Mouse Moves', (d?.avgMouseMoves||0).toFixed(0))}
+      ${stat('Avg Entropy', (d?.avgMouseEntropy||0).toFixed(0))}
+      ${stat('No Mouse', num(d?.noMouseHits))}
+      ${stat('Zero Entropy', num(d?.zeroEntropyHits))}
+      ${stat('Scrolled', num(d?.scrolledHits))}
+      ${stat('Contradictions', num(d?.scrollContradictions))}
+      ${stat('Flagged', num(d?.flaggedHits))}
+    </div>
+  `;
+  el.innerHTML = col('HUMAN', 'human', human) + col('BOT', 'bot', bot);
+}
+
+// â”€â”€â”€ Analytics: Fingerprints â”€â”€â”€
+function renderFingerprints(data) {
+  const el = document.getElementById('fp-clusters');
+  if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No clusters</div>'; return; }
+  el.innerHTML = data.slice(0, 10).map((fp, i) => {
+    const hash = (fp.canvasFingerprint || '--').substring(0, 12);
+    const score = fp.avgBotScore != null ? fp.avgBotScore.toFixed(0) : '--';
+    const scoreColor = score >= 50 ? 'var(--red)' : score >= 20 ? 'var(--yellow)' : 'var(--green)';
+    return `<div class="fp-row" onclick="drillFP(${i})">
+      <div class="fp-hash">${hash}</div>
+      <div class="fp-meta">${num(fp.uniqueIPs)} IPs Â· ${fp.primaryPlatform||'?'} Â· <span style="color:${scoreColor}">score ${score}</span></div>
+      <div class="fp-hits">${num(fp.hitCount)}</div>
+    </div>`;
+  }).join('');
+}
+
+// â”€â”€â”€ Analytics: Devices â”€â”€â”€
+function renderDevices(data) {
+  const el = document.getElementById('device-breakdown');
+  if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No data</div>'; return; }
+  const byPlatform = {};
+  data.forEach(d => {
+    const p = d.platform || 'Unknown';
+    if (!byPlatform[p]) byPlatform[p] = { hits: 0, devices: 0, browsers: new Set() };
+    byPlatform[p].hits += d.hitCount || 0;
+    byPlatform[p].devices += d.uniqueDevices || 0;
+    if (d.browser) byPlatform[p].browsers.add(d.browser);
+  });
+  const maxHits = Math.max(...Object.values(byPlatform).map(v => v.hits || 1));
+  el.innerHTML = '<div class="signal-list">' + Object.entries(byPlatform)
+    .sort((a, b) => b[1].hits - a[1].hits)
+    .slice(0, 10)
+    .map(([platform, info]) => {
+      const pct = (info.hits / maxHits * 100).toFixed(0);
+      return `<div class="signal-row">
+        <div class="signal-name">${platform}</div>
+        <div class="signal-bar-track"><div class="signal-bar-fill" style="width:${pct}%"></div></div>
+        <div class="signal-count">${num(info.hits)}</div>
+      </div>`;
+    }).join('') + '</div>';
+}
+
+// ============================================================================
+// REFRESH LOOP â€” Only active view fetches & renders
+// ============================================================================
+// ============================================================================
+// STAGGERED API ORCHESTRA â€” Sequential calls, progressive rendering, grid orbs
+// Each API call fires in sequence. On completion its data renders immediately
+// and a named Tron light-cycle orb spawns on the grid background.
+// ============================================================================
+const REFRESH_INTERVAL = 10;
+let countdown = REFRESH_INTERVAL;
+
+// Ops view: 7 sequential calls - one cycle per service health tile
+const OPS_STEPS = [
+  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
+    render() {
+      const h = lastData.health;
+      if (h) document.getElementById('etl-status').textContent = h.etL_Watermark ? `#${num(h.etL_Watermark)}` : '--';
+    }},
+  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
+    render() {
+      const { health, infra } = lastData;
+      renderCriticalZone(buildIssues(health, infra));
+      renderStatusStrip(health, infra);
+      renderPipeline(health, infra);
+      renderErrorLog(infra);
+    }},
+  { name: 'SQL', contestant: 'RINZLER', fn: () => Promise.resolve(lastData.infra), key: '_sqlReuse',
+    render() {
+      renderOpsETL(lastData.health, lastData.infra);
+    }},
+  { name: 'IIS', contestant: 'QUORRA', fn: () => Promise.resolve(lastData.infra), key: '_iisReuse',
+    render() {
+      renderInfraDetail(lastData.infra);
+    }},
+  { name: 'ETL', contestant: 'SARK', fn: () => Promise.resolve(lastData.infra), key: '_etlReuse',
+    render() {
+      renderPipelineTables(lastData.infra);
+    }},
+  { name: 'MATCH', contestant: 'YORI', fn: () => Promise.resolve(lastData.infra), key: '_matchReuse',
+    render() {
+      updateOpsBeacon(lastData.health, lastData.infra);
+    }},
+  { name: 'XAVIER', contestant: 'FLYNN', fn: API.xavierSync, key: 'xavierSync',
+    render() { renderXavierSync(lastData.xavierSync); }},
+  { name: 'FEED', contestant: 'GEM', fn: API.recent, key: 'recent',
+    render() { renderOpsFeed(lastData.recent); }},
+];
+
+// Analytics view: 10 sequential calls â€” each section pops in as data arrives
+const ANALYTICS_STEPS = [
+  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
+    render() { renderAnalyticsHero(lastData.health); updateAnalyticsBeacon(lastData.health); }},
+  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
+    render() { renderAnalyticsHero(lastData.health); renderAnalyticsETL(lastData.health); }},
+  { name: 'HOURLY', contestant: 'GEM', fn: () => API.hourly(48), key: 'hourly',
+    render() { renderHourlyChart(lastData.hourly); }},
+  { name: 'BOTS', contestant: 'RINZLER', fn: API.bots, key: 'bots',
+    render() { renderRiskList(lastData.bots); }},
+  { name: 'SIGNALS', contestant: 'SARK', fn: API.signals, key: 'signals',
+    render() { renderSignals(lastData.signals); }},
+  { name: 'EVASION', contestant: 'CASTOR', fn: API.evasion, key: 'evasion',
+    render() { renderEvasion(lastData.evasion); }},
+  { name: 'BEHAVIOR', contestant: 'YORI', fn: API.behavior, key: 'behavior',
+    render() { renderBehavior(lastData.behavior); }},
+  { name: 'FEED', contestant: 'QUORRA', fn: API.recent, key: 'recent',
+    render() { renderAnalyticsFeed(lastData.recent); }},
+  { name: 'FP', contestant: 'RAM', fn: API.fingerprints, key: 'fingerprints',
+    render() { renderFingerprints(lastData.fingerprints); }},
+  { name: 'DEVICES', contestant: 'FLYNN', fn: API.devices, key: 'devices',
+    render() { renderDevices(lastData.devices); }},
+];
+
+async function runPipeline(steps) {
+  isRefreshing = true;
+  refreshAbort = false;
+  Grid.derezzAll();
+  const countdownEl = document.getElementById('countdown');
+  for (let i = 0; i < steps.length; i++) {
+    if (refreshAbort) break;
+    countdownEl.textContent = `${i + 1}/${steps.length}`;
+    countdownEl.style.color = 'var(--cyan)';
+    const step = steps[i];
+    try {
+      const data = await step.fn();
+      if (refreshAbort) break;
+      lastData[step.key] = data;
+      Grid.spawnOrb(step.name, step.contestant);
+      // Only render DOM when dashboard is visible (not on landing)
+      if (currentView !== 'landing' && step.render) step.render();
+    } catch (e) {
+      console.warn(`Pipeline step ${step.name} failed:`, e);
+    }
+  }
+  countdownEl.style.color = '';
+  isRefreshing = false;
+  countdown = REFRESH_INTERVAL;
+  countdownEl.textContent = countdown;
+}
+
+async function refreshAll() {
+  if (isRefreshing) return;
+  // Always run the pipeline â€” cycles track API health regardless of view.
+  // On landing or ops, run the ops pipeline (health/infra/recent).
+  // On analytics, run the full analytics pipeline.
+  if (currentView === 'analytics') await runPipeline(ANALYTICS_STEPS);
+  else await runPipeline(OPS_STEPS);
+}
+
+setInterval(() => {
+  document.getElementById('utc-clock').textContent = new Date().toISOString().substring(11, 19);
+  if (!isRefreshing) {
+    countdown--;
+    document.getElementById('countdown').textContent = Math.max(0, countdown);
+    if (countdown <= 0) refreshAll();
+  }
+}, 1000);
+
+// Always start the pipeline â€” cycles race from the moment the page loads
+refreshAll();
+</script>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+     THREE.JS 3D TRON ARENA â€” Modular architecture (wwwroot/tron/*.mjs)
+     scene.mjs â†’ arena.mjs, cycles.mjs, trails.mjs, particles.mjs,
+                 camera.mjs, api.mjs
+     Cinema-fidelity: Reflector floor, wireframe cycles, GLSL trail walls,
+     5 camera presets (keys 1-5), enhanced bloom.
+     â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<script type="module">
+import { initScene } from './tron/scene.mjs';
+initScene(document.getElementById('grid-canvas'));
+</script>
+</body>
+</html>

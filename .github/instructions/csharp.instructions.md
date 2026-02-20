@@ -58,17 +58,31 @@ The pixel endpoint (`_SMART.GIF`) must return in <10ms. These rules apply to eve
 |---------|-----------|---------|
 | Services | `{Name}Service.cs` | `GeoCacheService.cs` |
 | Background workers | `{Name}Service.cs` (inherits BackgroundService) | `EtlBackgroundService.cs` |
+| Enrichment services (Forge) | `Services/Enrichments/{Name}Service.cs` | `BotUaDetectionService.cs` |
 | Endpoints | `{Domain}Endpoints.cs` | `DashboardEndpoints.cs` |
 | Models | `{Name}.cs` | `TrackingData.cs` |
-| SQL scripts | `{NN}_{Description}.sql` (numbered migrations) | `27_MatchTypeConfig.sql` |
-| Config | `TrackingSettings.cs` with `IOptions<TrackingSettings>` | — |
+| SQL scripts | `{NN}_{Description}.sql` (numbered migrations) | `41_ScreenExtendedMousePath.sql` |
+| Config | `TrackingSettings.cs` / `ForgeSettings.cs` with `IOptions<T>` | — |
+
+## Project Boundaries
+
+| Project | Purpose | Rules |
+|---------|---------|-------|
+| `SmartPiXL` | IIS Edge — pixel capture hot path | Zero-alloc request pipeline, named pipe client, GIF response <10ms |
+| `SmartPiXL.Forge` | Windows Service — enrichment + ETL | Named pipe server, Tier 1-3 enrichments, SqlBulkCopy, Channel<T> pipeline |
+| `SmartPiXL.Shared` | Shared library — models, config, interfaces | Zero NuGet dependencies, referenced by all projects |
+| `SmartPiXL.Worker-Deprecated` | **DEPRECATED** — read-only reference | DO NOT MODIFY. Port functionality to the Forge. |
+| `SmartPiXL.SqlClr` | CLR assembly for SQL Server 2025 | Minimal dependencies, target net10.0 (fallback net9.0/net8.0) |
 
 ## Patterns to Follow
 
 - Fire-and-forget pixel response: enqueue to Channel, return GIF immediately
+- Edge → Forge: named pipe (`NamedPipeClientStream` / `NamedPipeServerStream`)
+- JSONL failover: when pipe unavailable, write JSON lines to disk for catch-up
 - Server-side enrichment: append `_srv_*` query params before DB write
 - Configuration: `IOptions<TrackingSettings>` bound from `appsettings.json` `Tracking` section
 - IP classification: static `IpClassificationService.Classify()` — pure function, no instance
+- Enrichment pipeline: `Channel<T>` → sequential enrichment per record → `Channel<T>` → SQL writer
 
 ## Anti-Patterns
 
