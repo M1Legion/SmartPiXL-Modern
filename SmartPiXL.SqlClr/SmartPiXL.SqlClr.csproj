@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- SQL Server 2025 CLR is .NET Framework 4.x (v4.0.30319).
+         .NET 10 assemblies cannot be loaded — validated 2026-02-20.
+         net48 is the required target for CLR assemblies. -->
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>SmartPiXL.SqlClr</AssemblyName>
+    <RootNamespace>SmartPiXL.SqlClr</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- CLR assemblies must be self-contained — no project references -->
+    <NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Provides [SqlFunction], SqlString, SqlInt32, etc. for SDK-style projects -->
+    <PackageReference Include="Microsoft.SqlServer.Server" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>

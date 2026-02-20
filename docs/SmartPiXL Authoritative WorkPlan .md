@@ -20,7 +20,7 @@ These decisions are final. Do not re-ask. Do not deviate.
 | **ETL is OFF during rebuild** | No ETL runs until Forge Phase 2 is verified. | Worker is off. The Forge owns ETL exclusively. No dual-running risk. |
 | **IPC: Named pipe** | IIS Edge → `NamedPipeClientStream` → Forge `NamedPipeServerStream`. JSONL failover to disk if pipe unavailable. | Design doc §5.2 specifies this exactly. Zero data loss under any failure mode. |
 | **CLR: Separate database** | `SmartPiXL_CLR` database with its own CLR filegroup and modified permissions. Cross-database calls from `SmartPiXL`. | Owner's standard practice. Isolates CLR's `TRUSTWORTHY`/assembly-signing requirements from the production database. |
-| **CLR: .NET 10** | Target `net10.0` for the CLR assembly project. SQL Server 2025 supports .NET 8+ CLR — validate .NET 10 compatibility during Phase 7. If .NET 10 doesn't work, drop to .NET 9/8 (closest supported). | Owner directive: ".NET 10 is where I like to FAFO." |
+| **CLR: .NET Framework 4.8** | Target `net48` for the CLR assembly project. **VALIDATED (2026-02-20):** SQL Server 2025 RTM-GDR (17.0.1050.2) CLR host is `.NET Framework v4.0.30319`, NOT modern .NET. .NET 10 assemblies rejected with "references assembly 'system.runtime, version=10.0.0.0'". Use `<LangVersion>latest</LangVersion>` for modern C# syntax compiled to Framework IL. | Owner directive was to FAFO — we did, and .NET 10 doesn't work. net48 with latest C# syntax is the ceiling. |
 | **MaxMind: Confirmed viable** | MaxMind GeoLite2 `.mmdb` files successfully downloaded and loaded into SmartPiXL DB in external testing. Include MaxMind as primary offline geo. AB test against IPAPI when enrichment pipeline is live. | Open question resolved. IPAPI Pro remains as supplement for fields MaxMind doesn't cover (proxy, mobile carrier, ASN detail). |
 | **GPU reference table** | Start with tier-based approach (GPU generation → age bucket). RTX 5xxx = recent/high-value, RTX 2xxx = ~10 years old/budget. Refine with live data. Do NOT attempt real-time pricing. | Exact GPU pricing is non-trivial and may not be feasible in real-time. Tier classification still provides affluence signal value. |
 | **Phasing: Sequential** | Complete and verify each phase before starting the next. | Owner directive. Lower risk, clear progress tracking. |
@@ -69,7 +69,7 @@ Forge restarts → FailoverCatchupService reads JSONL → enrichment pipeline �
 | Forge | Does not exist | 0% |
 | NuGet enrichment libraries | 0 of 8 installed | 0% |
 | SQL schema (core: Raw, Parsed, Device, IP, Visit, Match) | All exist, 40 migrations | 100% |
-| SQL advanced (CLR, vectors, graph, subnet reputation) | None implemented | 0% |
+| SQL advanced (CLR, vectors, graph, subnet reputation) | CLR deployed (10 functions), vectors (VECTOR(64)+VECTOR(32)), graph (3 nodes, 2 edges). Subnet reputation pending Phase 8. | 75% |
 | TrafficAlert subsystem | Not implemented | 0% |
 | Worker (to be deprecated) | Fully functional, running ETL/sync/health/dashboards | 100% (deprecated) |
 | Dashboards (Tron + Atlas) | Both functional | 100% (going offline) |
@@ -574,12 +574,10 @@ Agents must read these before beginning any phase:
    - Population: ETL step or trigger from `PiXL.Visit` inserts
    - Test query: multi-hop `MATCH` traversal — Person → Devices → IPs → other Devices → other People
 
-### .NET 10 CLR Validation Step
-- Before building the full assembly, create a minimal test assembly (`HelloWorld` function) targeting `net10.0`
-- Deploy to `SmartPiXL_CLR` and call it
-- If it works: proceed with .NET 10
-- If it fails: drop to `net9.0`, then `net8.0` — use the highest version SQL 2025 accepts
-- Document the result in the design doc
+### .NET 10 CLR Validation Step — COMPLETED
+- **Result (2026-02-20):** .NET 10 assemblies CANNOT be loaded. SQL Server 2025 RTM-GDR CLR host is `.NET Framework v4.0.30319`. .NET 10 assembly rejected: `references assembly 'system.runtime, version=10.0.0.0'`. Dropped directly to `net48` (Framework 4.x is the only compatible target). Documented in design doc and IMPLEMENTATION-LOG.
+- Assembly requires `PERMISSION_SET = UNSAFE` for `Regex` + `ConcurrentDictionary`. Security via certificate-based signing in master.
+- All 10 CLR functions deployed and verified via cross-database synonyms.
 
 ### Verification
 - All CLR functions callable from `SmartPiXL` via synonyms

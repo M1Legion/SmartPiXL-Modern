@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);NU1702</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,9 @@
     <ProjectReference Include="..\SmartPiXL\SmartPiXL.csproj" />
     <ProjectReference Include="..\SmartPiXL.Forge\SmartPiXL.Forge.csproj" />
     <ProjectReference Include="..\SmartPiXL.Shared\SmartPiXL.Shared.csproj" />
+    <ProjectReference Include="..\SmartPiXL.SqlClr\SmartPiXL.SqlClr.csproj">
+      <NoWarn>NU1702</NoWarn>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

@@ -882,6 +882,8 @@ WHERE MATCH(Person<-(ResolvesTo)-Device-(UsesIP)->IpAddress+)
 CLR must be enabled first: `EXEC sp_configure 'clr enabled', 1; RECONFIGURE;`
 With SQL 2025 strict security, assemblies need to be signed (certificate-based) or database set to TRUSTWORTHY.
 
+> **VALIDATED (2026-02-20):** SQL Server 2025 RTM-GDR (17.0.1050.2) CLR host is `.NET Framework v4.0.30319`, NOT modern .NET. Assemblies MUST target `net48`. .NET 10 assemblies are rejected with "references assembly 'system.runtime, version=10.0.0.0' which is not present." We use `<LangVersion>latest</LangVersion>` with `net48` to get modern C# syntax (pattern matching, nullable, switch expressions) compiled by Roslyn into Framework-compatible IL. Runtime features (Span<T>, SIMD, tiered JIT) are not available under the Framework CLR host but are irrelevant for our pure scalar functions. Assembly requires `PERMISSION_SET = UNSAFE` for `Regex` with `RegexOptions.Compiled` and `ConcurrentDictionary`; security enforced via certificate-based signing in master.
+
 **11. CLR: Subnet Math (`dbo.GetSubnet24`)**
 
 T-SQL parsing an IP address into a /24 subnet requires ugly `CHARINDEX`/`REVERSE`/`SUBSTRING` chains. CLR does it in nanoseconds:

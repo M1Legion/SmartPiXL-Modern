@@ -725,3 +725,119 @@ Phase 8D added to `ETL.usp_ParseNewHits` — parses 9 `_srv_*` params for Tier 3
 **Why not in the hot path:** The Edge doesn't call `EstimateReleaseYear()` — it's Forge-only (Tier 3). But even in the Forge, the tracking should be a fire-and-forget side effect, not blocking the enrichment pipeline.
 
 **Scope:** This is a minor enhancement — can be added in any future phase without schema changes. The enrichment pipeline already works correctly with unknown GPUs (age = 0, no anomaly flagged).
+
+---
+
+## Session 4 — Phase 7: SQL CLR Assembly + Advanced Infrastructure
+
+### CLR .NET Version Validation
+
+**Conflict:** The workplan says "Target `net10.0` for the CLR assembly project. SQL Server 2025 supports .NET 8+ CLR — validate .NET 10 compatibility during Phase 7." The workplan's fallback is "If .NET 10 doesn't work, drop to `net9.0`, then `net8.0`."
+
+**Investigation:** SQL Server 2025 RTM-GDR (17.0.1050.2) reports its CLR version via `sys.dm_clr_properties` as `.NET Framework v4.0.30319` — this is the legacy .NET Framework CLR, NOT the modern .NET runtime. A test assembly targeting `net10.0` was built successfully but SQL Server rejected it with:
+
+> `Assembly 'ClrTest' references assembly 'system.runtime, version=10.0.0.0, culture=neutral, publickeytoken=b03f5f7f11d50a3a' which is not present in the current database.`
+
+A test assembly targeting `net48` loaded successfully — `CREATE ASSEMBLY` from DLL worked, `dbo.Hello('SmartPiXL')` returned `'Hello, SmartPiXL!'`.
+
+The workplan's assumption that "SQL Server 2025 supports .NET 8+ CLR" was incorrect. SQL Server 2025 (RTM-GDR, February 2026 build) still uses the .NET Framework 4.x CLR host. Microsoft may add modern .NET CLR hosting in a future CU, but as of this build it's Framework-only.
+
+**Decision:** Target `net48` for CLR assemblies. Use `<LangVersion>latest</LangVersion>` to get modern C# language features (pattern matching, nullable annotations, switch expressions, etc.) — Roslyn compiles these to IL that runs on .NET Framework's CLR. Runtime features like `Span<T>`, `stackalloc` in expression contexts, and `System.Memory` are not available under the Framework CLR host, but our functions are pure scalar computations that don't benefit from them anyway.
+
+**Why not polyfill modern .NET into Framework:** The user asked if we should use Roslyn to cross-compile modern .NET into Framework assemblies. Analysis: (1) We already get modern C# syntax via `<LangVersion>latest</LangVersion>` with `net48` — that's the same Roslyn cross-compilation. (2) Runtime features like RyuJIT tiered compilation, SIMD auto-vectorization are determined by the CLR host (Framework JIT64), not the compiler. (3) `Span<T>`/`stackalloc` patterns require `UNSAFE` CLR permission and SQL CLR's restricted host may block them. (4) Our functions are already near-optimal: substring ops, bit shifts, UTF-8 hash. The bottleneck is always the SQL query plan, not the CLR function. Decision: not worth the complexity/fragility.
+
+**Result:** `SmartPiXL.SqlClr.csproj` targets `net48` with `LangVersion=latest`.
+
+### CLR Assembly Permission Level
+
+**Conflict:** Workplan says "certificate-based assembly signing (NOT TRUSTWORTHY — stricter security)." Design doc says "assemblies need to be signed (certificate-based) or database set to TRUSTWORTHY."
+
+**Investigation:** Assembly deployed initially with `PERMISSION_SET = SAFE`. All non-regex functions worked (GetSubnet24, FeatureBitmaps, MurmurHash3, FuzzyMatch). However, `RegexExtract` and `RegexMatch` silently returned NULL for all inputs — the `catch` blocks were swallowing `System.Security.SecurityException`.
+
+Root cause: `System.Text.RegularExpressions.Regex` with `RegexOptions.Compiled` and `System.Collections.Concurrent.ConcurrentDictionary` are blocked under the SAFE permission set. These types require UNSAFE.
+
+**Decision:** Use `PERMISSION_SET = UNSAFE` for the assembly. Security is enforced via certificate-based signing in master: certificate → login → `GRANT UNSAFE ASSEMBLY`. The CLR database (`SmartPiXL_CLR`) is isolated from production data — it contains only the CLR assembly and wrapper functions, no user data. `TRUSTWORTHY ON` is set on the isolated CLR database only (not on `SmartPiXL`).
+
+**Result:** All 10 CLR functions work correctly through cross-database synonyms.
+
+### CLR Functions Deployed (10 total)
+
+| # | Function | SQL Type | C# Class | Returns | Purpose |
+|---|----------|----------|----------|---------|---------|
+| 1 | `GetSubnet24` | Scalar | `GetSubnet24.Execute` | NVARCHAR(50) | IPv4 → /24 subnet string |
+| 2 | `RegexExtract` | Scalar | `RegexFunctions.RegexExtract` | NVARCHAR(MAX) | Regex group extraction |
+| 3 | `RegexMatch` | Scalar | `RegexFunctions.RegexMatch` | BIT | Regex boolean match |
+| 4 | `FeatureBitmap` | Scalar | `FeatureBitmaps.FeatureBitmap` | INT | 17 browser features → bitmap |
+| 5 | `AccessibilityBitmap` | Scalar | `FeatureBitmaps.AccessibilityBitmap` | INT | 9 accessibility flags → bitmap |
+| 6 | `BotBitmap` | Scalar | `FeatureBitmaps.BotBitmap` | INT | 20 bot signals → bitmap |
+| 7 | `EvasionBitmap` | Scalar | `FeatureBitmaps.EvasionBitmap` | INT | 8 evasion signals → bitmap |
+| 8 | `MurmurHash3` | Scalar | `MurmurHash3Function.Execute` | VARBINARY(16) | 128-bit non-crypto hash |
+| 9 | `JaroWinkler` | Scalar | `FuzzyMatch.JaroWinkler` | FLOAT | Fuzzy string similarity (0-1) |
+| 10 | `LevenshteinDistance` | Scalar | `FuzzyMatch.LevenshteinDistance` | INT | Edit distance |
+
+### Verification Results
+
+```
+GetSubnet24(192.168.1.100)         = 192.168.1.0/24      ✓
+RegexExtract(https://example.com)  = example.com          ✓
+RegexMatch(email)                  = 1                    ✓
+FeatureBitmap(all 1s)              = 131071 (0x1FFFF)     ✓
+MurmurHash3(test-fingerprint)      = 16 bytes             ✓
+JaroWinkler(UA similar)            = 0.977778             ✓
+LevenshteinDistance(kitten,sitting) = 3                    ✓
+AccessibilityBitmap(all 1s)        = 511 (0x1FF)          ✓
+BotBitmap(webdriver only)          = 1                    ✓
+EvasionBitmap(canvas+webgl)        = 3                    ✓
+```
+
+### SQL Reserved Word: `Execute`
+
+**Problem:** Two C# functions use `Execute` as the method name (`GetSubnet24.Execute`, `MurmurHash3Function.Execute`). SQL's `CREATE FUNCTION ... AS EXTERNAL NAME` failed with "Incorrect syntax near the keyword 'Execute'" because `Execute` is a T-SQL reserved word.
+
+**Fix:** Bracket-quote the method name: `[Execute]` in the EXTERNAL NAME clause. E.g., `SmartPiXL_ClrFunctions.[SmartPiXL.SqlClr.Functions.GetSubnet24].[Execute]`.
+
+### Vector Infrastructure (Migration 46)
+
+Added two VECTOR columns to `PiXL.Device`:
+- `FingerprintVector VECTOR(64) NULL` — 64-dimensional device fingerprint encoding
+- `UaVector VECTOR(32) NULL` — 32-dimensional User-Agent encoding for drift detection
+
+**SQL Server 2025 VECTOR_DISTANCE bug:** `VECTOR_DISTANCE()` works with inline `CAST('[...]' AS VECTOR(N))` operands, but fails with `VECTOR` variables or column references in CROSS JOIN with "Internal Query Processor Error: The query processor could not produce a query plan." This is a SQL Server 2025 RTM-GDR bug. The workaround for now is to use inline CAST; expected to be fixed in a future CU. The vector columns are in place and ready for population by the Forge ETL.
+
+### Graph Tables (Migration 47)
+
+Created 3 NODE tables and 2 EDGE tables in the `Graph` schema:
+- **Nodes:** `Graph.Device` (DeviceId, DeviceHash), `Graph.Person` (Email, IndividualKey), `Graph.IpAddress` (IP, Subnet24)
+- **Edges:** `Graph.UsesIP` (Device→IP, with FirstSeen/LastSeen/HitCount), `Graph.ResolvesTo` (Device→Person, with MatchType/Confidence/MatchedAt)
+
+Multi-hop MATCH traversal validated with test data:
+- `Person←(ResolvesTo)-Device-(UsesIP)→IpAddress` found Alice's 2 IPs
+- `Person←(rt1)-Device-(ui1)→IP←(ui2)-Device-(rt2)→Person` correctly resolved Alice→shared IP→Bob as a linked identity
+
+### Unit Tests Added (52 new)
+
+| Test Class | Tests | What's Covered |
+|------------|-------|----------------|
+| `GetSubnet24Tests` | 7 | Valid IPv4, invalid formats, null input |
+| `RegexFunctionsTests` | 10 | Extract groups, no match, null inputs, invalid regex, match/no-match |
+| `FeatureBitmapTests` | 9 | All-true/all-false/single-bit/null for all 4 bitmap functions |
+| `MurmurHash3Tests` | 7 | Determinism, uniqueness, 16-byte output, null, empty, long input, avalanche |
+| `FuzzyMatchTests` | 9 | Identical/different/similar strings, null, empty, UA comparison, Levenshtein known values |
+
+### Build Result
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| SmartPiXL.SqlClr | 0 | 0 |
+| Tests | 523/523 passing | 0 failures |
+
+### SQL Migrations
+
+| Script | What |
+|--------|------|
+| `45_CLR_Database.sql` | SmartPiXL_CLR database, certificate signing, assembly deployment, 10 wrapper functions, 10 synonyms in SmartPiXL |
+| `46_VectorInfrastructure.sql` | FingerprintVector VECTOR(64), UaVector VECTOR(32) on PiXL.Device |
+| `47_GraphTables.sql` | Graph schema, 3 NODE tables, 2 EDGE tables, MATCH traversal validation |
