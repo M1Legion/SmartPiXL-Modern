@@ -15,10 +15,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="DeviceDetector.NET" Version="6.4.7" />
+    <PackageReference Include="DnsClient" Version="1.8.0" />
+    <PackageReference Include="FuzzySharp" Version="2.0.2" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MaxMind.GeoIP2" Version="5.4.1" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="NetCrawlerDetect" Version="1.2.113" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.2" />
+    <PackageReference Include="UAParser" Version="3.1.47" />
+    <PackageReference Include="Whois" Version="3.0.1" />
   </ItemGroup>
 
   <ItemGroup>

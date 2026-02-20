@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
 using SmartPiXL.Forge.Services;
+using SmartPiXL.Forge.Services.Enrichments;
 using SmartPiXL.Services;
 
 // ============================================================================
@@ -102,6 +103,15 @@ builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, cli
     client.BaseAddress = new Uri(settings.EdgeBaseUrl ?? "http://127.0.0.1:6000");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
+
+// ── Tier 1 Enrichment services (Phase 4) ──────────────────────────────────
+// Registered as singletons — injected into EnrichmentPipelineService.
+builder.Services.AddSingleton<BotUaDetectionService>();
+builder.Services.AddSingleton<UaParsingService>();
+builder.Services.AddSingleton<DnsLookupService>();
+builder.Services.AddSingleton<MaxMindGeoService>();
+builder.Services.AddSingleton<IpApiLookupService>();
+builder.Services.AddSingleton<WhoisAsnService>();
 
 // ── Forge-specific pipeline services ──────────────────────────────────────
 

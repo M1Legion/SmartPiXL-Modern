@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SmartPiXL\SmartPiXL.csproj" />
+    <ProjectReference Include="..\SmartPiXL.Forge\SmartPiXL.Forge.csproj" />
     <ProjectReference Include="..\SmartPiXL.Shared\SmartPiXL.Shared.csproj" />
   </ItemGroup>
 

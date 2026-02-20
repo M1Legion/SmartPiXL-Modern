@@ -376,3 +376,159 @@ The `bool TryEnqueue` approach uses `Channel<T>.Writer.TryWrite` — a lock-free
 | SmartPiXL (Edge) | 0 | 0 |
 | SmartPiXL.Forge | 0 | 0 |
 | Tests | 169/169 passing | 0 failures |
+
+---
+
+## Session 6 — Phase 4: Tier 1 Enrichments (Forge Day 1 Libraries)
+
+### Scope
+
+Install NuGet packages and build 6 enrichment services for the Forge's Tier 1 pipeline: bot detection, user-agent parsing, reverse DNS, MaxMind offline geo, IPAPI real-time geo, and WHOIS ASN lookups. Wire them into `EnrichmentPipelineService`, create SQL migration 42 with 19 new parsed columns, and add unit tests.
+
+### NuGet Packages Installed (Forge)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| NetCrawlerDetect | 1.2.113 | Bot/crawler user-agent detection |
+| UAParser | 3.1.47 | Primary user-agent string parser |
+| DeviceDetector.NET | 6.4.7 | Secondary UA parser (device type/model/brand) |
+| DnsClient | 1.8.0 | Async reverse DNS (PTR) lookups |
+| MaxMind.GeoIP2 | 5.4.1 | Offline GeoIP2 (.mmdb) lookups |
+| Whois | 3.0.1 | WHOIS ASN/org lookups |
+| MathNet.Numerics | 5.0.0 | Statistical analysis (Tier 2 prep) |
+| FuzzySharp | 2.0.2 | Fuzzy string matching (Tier 2 prep) |
+
+### Enrichment Services Created
+
+All services are in `SmartPiXL.Forge/Services/Enrichments/`:
+
+#### 1. `BotUaDetectionService.cs`
+- Singleton, uses `NetCrawlerDetect.CrawlerDetect`
+- `(bool IsCrawler, string? BotName) Check(string? userAgent)`
+- Appends: `_srv_knownBot=1`, `_srv_botName={name}`
+
+#### 2. `UaParsingService.cs` (149 lines)
+- Two-pass architecture: UAParser (browser/OS) → DeviceDetector.NET (device type/model/brand)
+- Returns `readonly record struct UaParseResult` with 7 fields
+- Appends: `_srv_browser`, `_srv_browserVer`, `_srv_os`, `_srv_osVer`, `_srv_deviceType`, `_srv_deviceModel`, `_srv_deviceBrand`
+
+#### 3. `DnsLookupService.cs`
+- `sealed partial class` with 7 `[GeneratedRegex]` patterns for cloud hostname detection (AWS, GCP, Azure, DigitalOcean, Akamai, Cloudflare, EU providers)
+- `async Task<DnsLookupResult> LookupAsync(string?, CancellationToken)` via `LookupClient`
+- 2-second timeout, no retry, DnsClient internal caching
+- Appends: `_srv_rdns`, `_srv_rdnsCloud=1`
+
+#### 4. `MaxMindGeoService.cs`
+- Loads 3 `.mmdb` files from `MaxMind/` at startup (City, ASN, Country)
+- `MaxMindResult Lookup(string?)` — synchronous O(1) trie lookup
+- Graceful degradation: missing `.mmdb` files → no results (not an error)
+- Implements `IDisposable` for `DatabaseReader` cleanup
+- Appends: `_srv_mmCC`, `_srv_mmReg`, `_srv_mmCity`, `_srv_mmLat`, `_srv_mmLon`, `_srv_mmASN`, `_srv_mmASNOrg`
+
+#### 5. `IpApiLookupService.cs`
+- `ConcurrentDictionary<string, DateTime>` for known IPs with 90-day staleness check
+- Rate-limited to ~28.5 req/min via `SemaphoreSlim` + 2100ms delay
+- Loads known IPs from `IPAPI.IP` at startup via `LoadKnownIpsAsync()`
+- MERGE upsert to `IPAPI.IP` table after each API call
+- Skipped entirely for IPs already in `IPAPI.IP` (< 90 days old)
+- Appends: `_srv_ipapiCC`, `_srv_ipapiISP`, `_srv_ipapiProxy`, `_srv_ipapiMobile`, `_srv_ipapiReverse`, `_srv_ipapiASN`
+
+#### 6. `WhoisAsnService.cs`
+- `async Task<WhoisAsnResult> LookupAsync(string?, CancellationToken)`
+- 5-second timeout, field extraction via string line parsing
+- Only called when MaxMind ASN is empty (conditional in pipeline)
+- Appends: `_srv_whoisASN`, `_srv_whoisOrg`
+
+### Pipeline Wiring
+
+`EnrichmentPipelineService.cs` rewritten to run the full Tier 1 chain per record:
+1. **Bot Detection** → skip-flag potential for future optimization
+2. **UA Parsing** → browser, OS, device info
+3. **DNS Lookup** → reverse hostname + cloud detection
+4. **MaxMind Geo** → offline country/region/city/coords/ASN
+5. **IPAPI Lookup** → conditional (skipped if IP already known < 90 days)
+6. **WHOIS ASN** → conditional (only if MaxMind ASN was empty)
+
+Each enrichment appends `_srv_*` query string parameters to `TrackingData.QueryString`. The ETL proc (`usp_ParseNewHits`) extracts them during Phase 8B.
+
+### SQL Migration 42 — `42_ForgeTier1Columns.sql`
+
+19 new columns on `PiXL.Parsed` (each with `IF NOT EXISTS` guard):
+
+| Group | Columns |
+|-------|---------|
+| Bot | `KnownBot BIT`, `BotName VARCHAR(200)` |
+| UA Parse | `ParsedBrowser VARCHAR(100)`, `ParsedBrowserVersion VARCHAR(50)`, `ParsedOS VARCHAR(100)`, `ParsedOSVersion VARCHAR(50)`, `ParsedDeviceType VARCHAR(50)`, `ParsedDeviceModel VARCHAR(100)`, `ParsedDeviceBrand VARCHAR(100)` |
+| DNS | `ReverseDNS VARCHAR(500)`, `ReverseDNSCloud BIT` |
+| MaxMind | `MaxMindCountry CHAR(2)`, `MaxMindRegion VARCHAR(100)`, `MaxMindCity VARCHAR(200)`, `MaxMindLat DECIMAL(9,6)`, `MaxMindLon DECIMAL(9,6)`, `MaxMindASN INT`, `MaxMindASNOrg VARCHAR(200)` |
+| WHOIS | `WhoisASN VARCHAR(50)`, `WhoisOrg VARCHAR(200)` |
+
+Full `CREATE OR ALTER PROCEDURE ETL.usp_ParseNewHits` updated with Phase 8B extracting all `_srv_*` params via `dbo.GetQueryParam()`.
+
+### Program.cs Registration
+
+Added 6 singleton registrations in `SmartPiXL.Forge/Program.cs`:
+```csharp
+builder.Services.AddSingleton<BotUaDetectionService>();
+builder.Services.AddSingleton<UaParsingService>();
+builder.Services.AddSingleton<DnsLookupService>();
+builder.Services.AddSingleton<MaxMindGeoService>();
+builder.Services.AddSingleton<IpApiLookupService>();
+builder.Services.AddSingleton<WhoisAsnService>();
+```
+
+### Unit Tests Created (48 new tests)
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `BotUaDetectionServiceTests.cs` | ~10 | Bot detection for known crawlers + human browsers + edge cases |
+| `UaParsingServiceTests.cs` | ~8 | Chrome/Safari/Firefox/Edge + mobile + null/garbage |
+| `DnsLookupServiceTests.cs` | ~10 | Invalid input, real DNS (8.8.8.8), cloud patterns, cancellation |
+| `MaxMindGeoServiceTests.cs` | ~10 | Invalid input, graceful degradation (no .mmdb), IDisposable |
+| `WhoisAsnServiceTests.cs` | ~10 | Null/empty, private IP skip, real WHOIS (8.8.8.8), cancellation |
+
+### Conflicts Resolved
+
+#### 1. Workplan says "Whois.NET" — actual package is "Whois"
+- **Conflict:** Workplan references `Whois.NET` as the NuGet package name
+- **Decision:** Installed `Whois` (version 3.0.1) — this is the actual package on NuGet. `Whois.NET` does not exist as a separate package.
+- **Why:** Package name in workplan was slightly inaccurate; the correct NuGet ID is `Whois`
+
+#### 2. Whois API: `WhoisLookup.For()` does not exist
+- **Conflict:** Initial implementation used `WhoisLookup.For(ip)` (static method) based on common patterns
+- **Decision:** Changed to instance-based `new Whois.WhoisLookup().Lookup(ip)` — discovered via reflection that `WhoisLookup` is instance-based with a `Lookup()` method
+- **Why:** API discovery showed no static `For()` method; `Lookup()` is the correct instance method
+
+#### 3. Whois response property: `.RawText` does not exist
+- **Conflict:** Initial code used `response.RawText` for the WHOIS response body
+- **Decision:** Changed to `response.Content` — discovered via reflection on `WhoisResponse` properties
+- **Why:** `Content` is the actual property containing the raw WHOIS text
+
+#### 4. CrawlerDetect: `.GetMatches()` does not exist
+- **Conflict:** Initial code used `_detector.GetMatches()` to retrieve matched bot names
+- **Decision:** Changed to `_detector.Matches?.FirstOrDefault()?.Value` — `Matches` is a property returning `MatchCollection`
+- **Why:** API discovery showed `Matches` is a property (get-only), not a method
+
+#### 5. MaxMind `FileAccessMode` namespace
+- **Conflict:** `FileAccessMode.MemoryMapped` wouldn't resolve — it's in `MaxMind.Db`, not `MaxMind.GeoIP2`
+- **Decision:** Added `using MaxMind.Db;` to the file
+- **Why:** The enum is defined in the lower-level `MaxMind.Db` package (dependency of `MaxMind.GeoIP2`)
+
+#### 6. DnsClient `PtrRecord.DomainName` vs `PtrDomainName`
+- **Conflict:** Initial code used `ptrRecord.DomainName.Value` which returns the query name (e.g., `8.8.8.8.in-addr.arpa`), not the answer
+- **Decision:** Changed to `ptrRecord.PtrDomainName.Value` which returns the actual PTR answer (e.g., `dns.google`)
+- **Why:** `DomainName` is the record's owner name (query), `PtrDomainName` is the PTR target (answer)
+
+#### 7. `TrackingSettings.FallbackConnectionString` does not exist
+- **Conflict:** IpApiLookupService used `TrackingSettings.FallbackConnectionString` for a static default
+- **Decision:** Changed to inject `IOptions<TrackingSettings>` and use `settings.Value.ConnectionString`
+- **Why:** `TrackingSettings` has no static constant — the default connection string is baked into the property initializer
+
+### Build Result
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| Tests | 217/217 passing | 0 failures |
