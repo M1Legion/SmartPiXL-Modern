@@ -86,15 +86,15 @@ public sealed class IpApiLookupService : IDisposable
             await conn.OpenAsync(ct);
 
             await using var cmd = new SqlCommand(
-                "SELECT IP, UpdatedAt FROM IPAPI.IP WITH (NOLOCK)", conn);
+                "SELECT IP, LastSeen FROM IPAPI.IP WITH (NOLOCK) WHERE LastSeen IS NOT NULL", conn);
 
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             var count = 0;
             while (await reader.ReadAsync(ct))
             {
                 var ip = reader.GetString(0);
-                var updatedAt = reader.GetDateTime(1);
-                _knownIps[ip] = updatedAt;
+                var lastSeen = reader.GetDateTime(1);
+                _knownIps[ip] = lastSeen;
                 count++;
             }
 
@@ -194,14 +194,14 @@ public sealed class IpApiLookupService : IDisposable
                     RegionName = @RegionName, City = @City, Zip = @Zip,
                     Lat = @Lat, Lon = @Lon, Timezone = @Timezone,
                     ISP = @ISP, Org = @Org, [AS] = @AS, Reverse = @Reverse,
-                    Mobile = @Mobile, Proxy = @Proxy, Hosting = @Hosting,
-                    UpdatedAt = GETUTCDATE()
+                    Mobile = @Mobile, Proxy = @Proxy,
+                    LastSeen = GETUTCDATE()
                 WHEN NOT MATCHED THEN INSERT
                     (IP, Country, CountryCode, RegionName, City, Zip, Lat, Lon,
-                     Timezone, ISP, Org, [AS], Reverse, Mobile, Proxy, Hosting, UpdatedAt)
+                     Timezone, ISP, Org, [AS], Reverse, Mobile, Proxy, FirstSeen, LastSeen)
                 VALUES
                     (@IP, @Country, @CountryCode, @RegionName, @City, @Zip, @Lat, @Lon,
-                     @Timezone, @ISP, @Org, @AS, @Reverse, @Mobile, @Proxy, @Hosting, GETUTCDATE());
+                     @Timezone, @ISP, @Org, @AS, @Reverse, @Mobile, @Proxy, GETUTCDATE(), GETUTCDATE());
                 """;
 
             await using var cmd = new SqlCommand(sql, conn);
@@ -220,7 +220,6 @@ public sealed class IpApiLookupService : IDisposable
             cmd.Parameters.AddWithValue("@Reverse", (object?)response.Reverse ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Mobile", response.Mobile);
             cmd.Parameters.AddWithValue("@Proxy", response.Proxy);
-            cmd.Parameters.AddWithValue("@Hosting", response.Hosting);
 
             await cmd.ExecuteNonQueryAsync(ct);
         }

@@ -1118,3 +1118,50 @@ The detection loop and auto-remediation logic stays in the Forge's `SelfHealingS
 | **SmartPiXL Forge** | — (Windows Service) | Named pipe server, Tier 1-3 enrichments, ETL, SQL writer | BUILT |
 | **SmartPiXL Sentinel** | 7500 | Tron dashboard, Atlas portal, TrafficAlert API | BUILT |
 | SmartPiXL Worker | — | **DEPRECATED — removed from solution** | OFF |
+
+---
+
+## Session 8 — First Deployment: Forge + Sentinel Online
+
+### Deployment
+
+**What:** Published Forge and Sentinel as Windows Services for the first time. Registered with `sc.exe create`, set to `start= auto`.
+
+**Deploy targets:**
+- `C:\Services\SmartPiXL-Forge\` (Forge)
+- `C:\Services\SmartPiXL-Sentinel\` (Sentinel)
+
+### Bug Fixes
+
+#### 1. SQL Login for NT AUTHORITY\SYSTEM
+Windows Services run as Local System by default. Created SQL login/user with db_datareader, db_datawriter, and EXECUTE permissions.
+
+#### 2. EdgeBaseUrl Mismatch
+Source `appsettings.json` had `http://127.0.0.1:7000` (dev port). But Edge runs InProcess inside IIS — only accessible on IIS-bound port 80. Changed source `EdgeBaseUrl` to `http://192.168.88.176` in both Forge and Sentinel `appsettings.json` so future `dotnet publish` won't require manual patching.
+
+**Conflict:** The copilot-instructions.md says Kestrel port 6000 is the internal port. But IIS InProcess hosting means Kestrel ports are NOT exposed externally — the w3wp.exe process handles everything through IIS bindings.
+
+**Decision:** `EdgeBaseUrl` = `http://192.168.88.176` (IIS port 80) for all cross-process communication.
+
+#### 3. QUOTED_IDENTIFIER on ETL.usp_ParseNewHits
+The stored procedure was created with `QUOTED_IDENTIFIER OFF`, causing failures when INSERT touches indexed views. Fixed by ALTER through `sqlcmd.exe` with `SET QUOTED_IDENTIFIER ON` prefix. Verified `OBJECTPROPERTY(ExecIsQuotedIdentOn) = 1`.
+
+#### 4. Int32 vs Int64 Cast in EtlBackgroundService
+ETL stored procs return a mix of `int` and `bigint` columns. Changed all `reader.GetInt64(N)` calls to `Convert.ToInt64(reader.GetValue(N))` which safely handles both types.
+
+#### 5. IpApiLookupService — Invalid Column Names
+The MERGE statement referenced `UpdatedAt` and `Hosting` columns that don't exist in `IPAPI.IP`. Actual columns: `LastSeen` (not `UpdatedAt`), no `Hosting` column. Also added `WHERE LastSeen IS NOT NULL` to the startup cache load to avoid null value exceptions on the 344M row table.
+
+### Files Changed
+- `SmartPiXL.Forge/Services/EtlBackgroundService.cs` — `GetInt64` → `Convert.ToInt64(GetValue)`
+- `SmartPiXL.Forge/Services/Enrichments/IpApiLookupService.cs` — Fixed column names, null filter
+- `SmartPiXL.Forge/appsettings.json` — EdgeBaseUrl → `http://192.168.88.176`
+- `SmartPiXL.Sentinel/appsettings.json` — EdgeBaseUrl → `http://192.168.88.176`
+- `docs/DEPLOYMENT.md` — **NEW** — Full deployment reference doc
+
+### Verified Working
+- Edge: Pixel capture on IIS port 80 — 200 OK, image/gif ✓
+- Forge: ETL processing 10K rows/cycle — parsing PiXL.Raw → PiXL.Parsed ✓
+- Forge: Geo enrichment running ✓
+- Sentinel: `/tron` (200, 156KB HTML), `/atlas` (200), `/api/dash/health` (200) ✓
+- Pipeline: 14.1M Raw rows, watermark advancing, 11M+ backlog processing ✓

@@ -81,9 +81,9 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var reader = await parseCmd.ExecuteReaderAsync(ct);
         if (await reader.ReadAsync(ct))
         {
-            var rowsParsed = reader.GetInt32(0);
-            var fromId = reader.GetInt32(1);
-            var toId = reader.GetInt32(2);
+            var rowsParsed = Convert.ToInt64(reader.GetValue(0));
+            var fromId = Convert.ToInt64(reader.GetValue(1));
+            var toId = Convert.ToInt64(reader.GetValue(2));
 
             if (rowsParsed > 0)
                 _logger.Info($"ETL parsed {rowsParsed} rows (Id {fromId}–{toId})");
@@ -100,8 +100,8 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var matchReader = await matchCmd.ExecuteReaderAsync(ct);
         if (await matchReader.ReadAsync(ct))
         {
-            var rowsProcessed = matchReader.GetInt32(0);
-            var rowsMatched = matchReader.GetInt32(1);
+            var rowsProcessed = Convert.ToInt64(matchReader.GetValue(0));
+            var rowsMatched = Convert.ToInt64(matchReader.GetValue(1));
 
             if (rowsProcessed > 0)
                 _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched");
@@ -118,9 +118,9 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var geoReader = await geoCmd.ExecuteReaderAsync(ct);
         if (await geoReader.ReadAsync(ct))
         {
-            var parsedEnriched = geoReader.GetInt32(0);
-            var srvFallback = geoReader.GetInt32(1);
-            var ipEnriched = geoReader.GetInt32(2);
+            var parsedEnriched = Convert.ToInt64(geoReader.GetValue(0));
+            var srvFallback = Convert.ToInt64(geoReader.GetValue(1));
+            var ipEnriched = Convert.ToInt64(geoReader.GetValue(2));
 
             if (parsedEnriched > 0 || ipEnriched > 0)
                 _logger.Info($"ETL geo: {parsedEnriched} parsed + {srvFallback} srv fallback + {ipEnriched} IPs enriched");
@@ -137,8 +137,8 @@ public sealed class EtlBackgroundService : BackgroundService
         await using var legacyReader = await legacyCmd.ExecuteReaderAsync(ct);
         if (await legacyReader.ReadAsync(ct))
         {
-            var rowsProcessed = legacyReader.GetInt32(0);
-            var rowsMatched = legacyReader.GetInt32(1);
+            var rowsProcessed = Convert.ToInt64(legacyReader.GetValue(0));
+            var rowsMatched = Convert.ToInt64(legacyReader.GetValue(1));
 
             if (rowsProcessed > 0)
                 _logger.Info($"ETL legacy match: {rowsProcessed} processed, {rowsMatched} matched by IP");
