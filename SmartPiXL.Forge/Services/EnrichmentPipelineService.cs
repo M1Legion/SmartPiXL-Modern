@@ -27,8 +27,13 @@ namespace SmartPiXL.Forge.Services;
 //   5. IpApiLookup      — real-time IPAPI Pro for new/stale IPs (rate-limited)
 //   6. WhoisAsn         — WHOIS ASN/org (supplementary, only if MaxMind empty)
 //
-// Future phases add Tier 2-3:
-//   Tier 2: Cross-customer intel, lead scoring, session stitching, affluence
+// ENRICHMENT CHAIN (Phase 5 — Tier 2):
+//   7. SessionStitching — in-memory session graph, 30-min timeout
+//   8. CrossCustomerIntel — sliding window cross-customer scraper detection
+//   9. DeviceAffluence  — GPU tier + CPU/RAM/screen/platform → affluence
+//  10. LeadQualityScoring — 0-100 score from positive human signals
+//
+// Future phases add Tier 3:
 //   Tier 3: Cultural arbitrage, device age, contradiction matrix, behavioral replay
 //
 // DESIGN:
@@ -40,7 +45,7 @@ namespace SmartPiXL.Forge.Services;
 
 /// <summary>
 /// Background service that reads <see cref="TrackingData"/> from the enrichment
-/// channel, applies Tier 1 enrichment processing, and enqueues enriched records to
+/// channel, applies Tier 1-2 enrichment processing, and enqueues enriched records to
 /// the SQL writer channel via <see cref="ForgeChannels"/>.
 /// </summary>
 public sealed class EnrichmentPipelineService : BackgroundService
@@ -58,6 +63,12 @@ public sealed class EnrichmentPipelineService : BackgroundService
     private readonly IpApiLookupService _ipApiLookup;
     private readonly WhoisAsnService _whoisAsn;
 
+    // ── Tier 2 enrichment services ──────────────────────────────────────
+    private readonly SessionStitchingService _sessionStitching;
+    private readonly CrossCustomerIntelService _crossCustomerIntel;
+    private readonly DeviceAffluenceService _deviceAffluence;
+    private readonly LeadQualityScoringService _leadQualityScoring;
+
     public EnrichmentPipelineService(
         ForgeChannels channels,
         IOptions<ForgeSettings> forgeSettings,
@@ -67,7 +78,11 @@ public sealed class EnrichmentPipelineService : BackgroundService
         DnsLookupService dnsLookup,
         MaxMindGeoService maxMindGeo,
         IpApiLookupService ipApiLookup,
-        WhoisAsnService whoisAsn)
+        WhoisAsnService whoisAsn,
+        SessionStitchingService sessionStitching,
+        CrossCustomerIntelService crossCustomerIntel,
+        DeviceAffluenceService deviceAffluence,
+        LeadQualityScoringService leadQualityScoring)
     {
         _enrichmentChannel = channels.Enrichment;
         _sqlWriterChannel = channels.SqlWriter;
@@ -79,6 +94,10 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _maxMindGeo = maxMindGeo;
         _ipApiLookup = ipApiLookup;
         _whoisAsn = whoisAsn;
+        _sessionStitching = sessionStitching;
+        _crossCustomerIntel = crossCustomerIntel;
+        _deviceAffluence = deviceAffluence;
+        _leadQualityScoring = leadQualityScoring;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -195,6 +214,61 @@ public sealed class EnrichmentPipelineService : BackgroundService
             if (whoisResult.Asn is not null) qs = AppendParam(qs, "_srv_whoisASN", Uri.EscapeDataString(whoisResult.Asn));
             if (whoisResult.Organization is not null) qs = AppendParam(qs, "_srv_whoisOrg", Uri.EscapeDataString(whoisResult.Organization));
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // TIER 2 — Cross-Request Intelligence (Phase 5)
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── 7. Session Stitching ──────────────────────────────────────────
+        // Key: DeviceHash or canvasFP from the query string
+        var deviceHash = QueryParamReader.Get(qs, "deviceHash")
+                      ?? QueryParamReader.Get(qs, "canvasFP");
+        var pagePath = record.RequestPath;
+        var sessionResult = _sessionStitching.RecordHit(deviceHash, pagePath);
+        qs = AppendParam(qs, "_srv_sessionId", sessionResult.SessionId);
+        qs = AppendParam(qs, "_srv_sessionHitNum", sessionResult.HitNumber.ToString(CultureInfo.InvariantCulture));
+        qs = AppendParam(qs, "_srv_sessionDurationSec", sessionResult.DurationSec.ToString(CultureInfo.InvariantCulture));
+        qs = AppendParam(qs, "_srv_sessionPages", sessionResult.PageCount.ToString(CultureInfo.InvariantCulture));
+
+        // ── 8. Cross-Customer Intelligence ────────────────────────────────
+        var crossResult = _crossCustomerIntel.RecordHit(record.IPAddress, deviceHash, record.CompanyID);
+        qs = AppendParam(qs, "_srv_crossCustHits", crossResult.DistinctCompanies.ToString(CultureInfo.InvariantCulture));
+        qs = AppendParam(qs, "_srv_crossCustWindow", crossResult.WindowMinutes.ToString(CultureInfo.InvariantCulture));
+        if (crossResult.IsAlert)
+            qs = AppendParam(qs, "_srv_crossCustAlert", "1");
+
+        // ── 9. Device Affluence ───────────────────────────────────────────
+        var gpu = QueryParamReader.Get(qs, "gpu");
+        var cores = QueryParamReader.GetInt(qs, "cores");
+        var mem = QueryParamReader.GetInt(qs, "mem");
+        var sw = QueryParamReader.GetInt(qs, "sw");
+        var sh = QueryParamReader.GetInt(qs, "sh");
+        var platform = QueryParamReader.Get(qs, "plt") ?? QueryParamReader.Get(qs, "uaPlatform");
+        var affluenceResult = _deviceAffluence.Classify(gpu, cores, mem, sw, sh, platform);
+        if (affluenceResult.Affluence is not null) qs = AppendParam(qs, "_srv_affluence", affluenceResult.Affluence);
+        if (affluenceResult.GpuTierStr is not null) qs = AppendParam(qs, "_srv_gpuTier", affluenceResult.GpuTierStr);
+
+        // ── 10. Lead Quality Scoring ──────────────────────────────────────
+        var isProxy = QueryParamReader.GetBool(qs, "_srv_ipapiProxy");
+        var isMobile = QueryParamReader.GetBool(qs, "_srv_ipapiMobile");
+        var isHosting = dnsResult.IsCloud;
+        var fpAlert = QueryParamReader.GetBool(qs, "_srv_fpAlert");
+        var mouseEntropy = QueryParamReader.GetDouble(qs, "mouseEntropy");
+        var fontCount = QueryParamReader.GetInt(qs, "fontCount");
+        var canvasNoise = QueryParamReader.GetBool(qs, "canvasNoise");
+        // TODO: timezone mismatch detection (Phase 6 — ContradictionMatrixService)
+        var leadSignals = new LeadQualityScoringService.LeadSignals(
+            IsResidentialIp: !isProxy && !isMobile && !isHosting && !dnsResult.IsCloud,
+            HasConsistentFingerprint: !fpAlert,
+            MouseEntropy: mouseEntropy,
+            FontCount: fontCount,
+            HasCleanCanvas: !canvasNoise,
+            HasMatchingTimezone: true, // placeholder until Phase 6
+            SessionHitNumber: sessionResult.HitNumber,
+            IsKnownBot: isCrawler,
+            ContradictionCount: 0);    // placeholder until Phase 6
+        var leadScore = _leadQualityScoring.Score(in leadSignals);
+        qs = AppendParam(qs, "_srv_leadScore", leadScore.ToString(CultureInfo.InvariantCulture));
 
         // Return enriched record with updated query string
         return record with { QueryString = qs };

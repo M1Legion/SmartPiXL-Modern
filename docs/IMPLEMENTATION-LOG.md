@@ -532,3 +532,82 @@ builder.Services.AddSingleton<WhoisAsnService>();
 | SmartPiXL (Edge) | 0 | 0 |
 | SmartPiXL.Forge | 0 | 0 |
 | Tests | 217/217 passing | 0 failures |
+
+---
+
+## Session 7 — Phase 5: Tier 2 Enrichments (Cross-Request Intelligence)
+
+**Scope:** 4 stateful enrichment services + GpuTierReference + QueryParamReader utility + SQL migration 43 + unit tests.
+
+### Services Created
+
+| Service | Type | Role |
+|---------|------|------|
+| `GpuTierReference` | Static class | ~50 GPU renderer patterns → HIGH/MID/LOW tier classification |
+| `DeviceAffluenceService` | Singleton (stateless) | GPU + cores + memory + screen + platform → affluence signal |
+| `CrossCustomerIntelService` | Singleton (stateful) | ConcurrentDictionary sliding window, 3+ companies in 5min = alert |
+| `LeadQualityScoringService` | Singleton (stateless) | 9 weighted human-visitor signals → 0-100 lead quality score |
+| `SessionStitchingService` | Singleton (stateful) | Fingerprint-keyed sessions, 30-min timeout, GUID session IDs |
+| `QueryParamReader` | Internal static | QS param extraction utility for Forge enrichment services |
+
+### Pipeline Integration
+
+- `EnrichmentPipelineService` extended with Tier 2 chain (steps 7-10):
+  - Step 7: Session stitching (fingerprint → session ID, hit number, duration, page count)
+  - Step 8: Cross-customer intel (IP + fingerprint + company → alert)
+  - Step 9: Device affluence (GPU + hardware signals → affluence tier)
+  - Step 10: Lead quality scoring (assembled from Tier 1 + Tier 2 results)
+- `Program.cs` updated with 4 singleton registrations
+
+### SQL Migration 43
+
+- 10 new columns on `PiXL.Parsed`: `CrossCustomerHits`, `CrossCustomerAlert`, `LeadQualityScore`, `SessionId`, `SessionHitNumber`, `SessionDurationSec`, `SessionPageCount`, `AffluenceSignal`, `GpuTier`
+- `ETL.usp_ParseNewHits` updated: Phase 8C added for Tier 2 `_srv_*` params
+- Full `CREATE OR ALTER` with all 13 phases + new Phase 8C
+
+### Conflicts & Decisions
+
+#### 1. GpuTierReference: "RX 5" catch-all subsumes old RX 5xx LOW GPUs
+- **Conflict:** `"RX 5"` (MID, for RX 5000-series) substring-matched `"RX 580"`, `"RX 570"` etc (should be LOW)
+- **Decision:** Moved specific RX 580/570/560/550 (LOW) patterns BEFORE the `"RX 5"` catch-all
+- **Why:** First-match-wins pattern ordering — specific models must precede catch-all patterns
+
+#### 2. GpuTierReference: Quadro RTX caught by consumer RTX patterns
+- **Conflict:** `"Quadro RTX 5000"` matched `"RTX 50"` (HIGH) before reaching `"Quadro RTX"` (MID)
+- **Decision:** Moved Quadro patterns to the very top of the array, before all RTX consumer patterns
+- **Why:** Professional workstation GPUs must be identified before consumer GPU pattern matching
+
+#### 3. GpuTierReference: Intel Arc(TM) not matching Arc patterns
+- **Conflict:** Real WebGL strings use `"Intel(R) Arc(TM) A770"` but pattern was `"Arc A770"` — `(TM)` breaks substring match
+- **Decision:** Changed Arc patterns to just model numbers: `"A770"`, `"A750"`, `"A580"`, `"A380"` — unique enough for GPU context
+- **Why:** WebGL UNMASKED_RENDERER_OES strings include trademark symbols that vary by driver version
+
+#### 4. QueryParamReader: `+` not decoded as space
+- **Conflict:** `Uri.UnescapeDataString` only decodes `%xx` sequences, not `+` (form URL encoding for spaces)
+- **Decision:** Added `.Replace('+', ' ')` before `UnescapeDataString` call
+- **Why:** PiXL Script uses `encodeURIComponent` which encodes spaces as `%20`, but some paths produce `+` instead
+
+#### 5. InternalsVisibleTo for test project
+- **Conflict:** `QueryParamReader` is `internal` (intentionally — utility class, not part of public API) but tests need access
+- **Decision:** Added `<InternalsVisibleTo Include="TrackingPixel.Tests" />` to `SmartPiXL.Forge.csproj`
+- **Why:** Test assembly name is `TrackingPixel.Tests` (derived from csproj filename), not `SmartPiXL.Tests`
+
+### Unit Tests Added (165 new)
+
+| Test Class | Tests | What's Covered |
+|------------|-------|----------------|
+| `GpuTierReferenceTests` | 42 | All tiers (HIGH/MID/LOW/Unknown), case insensitivity, TierToString |
+| `DeviceAffluenceServiceTests` | 12 | HIGH/MID/LOW scoring, platform bonus, screen resolution, edge cases |
+| `CrossCustomerIntelServiceTests` | 11 | Alert threshold, sliding window, null inputs, independent tracking |
+| `LeadQualityScoringServiceTests` | 15 | Individual signal weights, perfect/zero scores, combined scenarios |
+| `SessionStitchingServiceTests` | 13 | Session creation, extension, page tracking, null/empty, GUID format |
+| `QueryParamReaderTests` | 22 | Get/GetInt/GetDouble/GetBool, URL decoding, case insensitive, _srv_* |
+
+### Build Result
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| Tests | 382/382 passing | 0 failures |

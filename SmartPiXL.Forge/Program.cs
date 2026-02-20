@@ -113,6 +113,13 @@ builder.Services.AddSingleton<MaxMindGeoService>();
 builder.Services.AddSingleton<IpApiLookupService>();
 builder.Services.AddSingleton<WhoisAsnService>();
 
+// ── Tier 2 Enrichment services (Phase 5) ──────────────────────────────────
+// Stateful services — singletons with in-memory sliding windows / sessions.
+builder.Services.AddSingleton<SessionStitchingService>();
+builder.Services.AddSingleton<CrossCustomerIntelService>();
+builder.Services.AddSingleton<DeviceAffluenceService>();
+builder.Services.AddSingleton<LeadQualityScoringService>();
+
 // ── Forge-specific pipeline services ──────────────────────────────────────
 
 // PipeListenerService: Named pipe server receiving TrackingData from Edge.
