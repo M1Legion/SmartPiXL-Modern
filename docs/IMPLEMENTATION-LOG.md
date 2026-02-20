@@ -951,9 +951,12 @@ Phase 9 creates the TrafficAlert subsystem — a unified traffic quality scoring
 
 ### Conflict 3: PiXL.Match Column Name Mismatch
 
-**What the conflict was:** CustomerSummary proc referenced `m.MatchEmail` but PiXL.Match uses `IndividualKey` for identity resolution keys.
+**What the conflict was:** The CustomerSummary materialization proc counted matched visitors with `COUNT(DISTINCT m.MatchEmail)`, but PiXL.Match has no `MatchEmail` column. The actual columns are:
+- `MatchType` VARCHAR(20) — discriminator: IP, Email, or Geo match method
+- `MatchKey` VARCHAR(256) — the matched value (an IP, email, or geo key)
+- `IndividualKey` VARCHAR(35) — the AutoConsumer individual this resolved to
 
-**What the decision was:** Changed to `COUNT(DISTINCT m.IndividualKey)`.
+**What the decision was:** Changed to `COUNT(DISTINCT m.IndividualKey)`. We want unique *people* matched (not unique match keys), so `IndividualKey` is correct — it's the FK back to a specific individual in AutoConsumer. Multiple match keys (different IPs, emails) can resolve to the same `IndividualKey`.
 
 ### Scoring Algorithms Implemented
 
