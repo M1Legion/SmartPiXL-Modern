@@ -611,3 +611,97 @@ builder.Services.AddSingleton<WhoisAsnService>();
 | SmartPiXL (Edge) | 0 | 0 |
 | SmartPiXL.Forge | 0 | 0 |
 | Tests | 382/382 passing | 0 failures |
+
+---
+
+## Session 8 — Phase 6: Tier 3 Enrichments (Asymmetric Detection)
+
+**Scope:** Five new enrichment services that detect bot/emulation behavior through cross-signal contradiction analysis, cultural fingerprint verification, device age anomalies, behavioral replay detection, and dead internet indexing.
+
+### Architecture Decisions
+
+#### 1. Pipeline Restructuring — Lead Scoring Moved to Step 15
+- **Conflict:** Lead Quality Scoring (Phase 5) had two placeholder values: `HasMatchingTimezone: true` and `ContradictionCount: 0`. These need real data from Tier 3 services.
+- **Decision:** Moved Lead Scoring from step 10 to step 15 (after all Tier 3 enrichments at steps 10-14). Now uses `arbitrageResult.TimezoneMatch` and `contradictionResult.Count` for real values.
+- **Why:** Lead scoring must run after Tier 3 to consume real contradiction counts and timezone match results.
+
+#### 2. Service Visibility — `public sealed class` (not `internal`)
+- **Conflict:** Coding standards prefer `internal sealed class`, but `EnrichmentPipelineService` is `public` (from Phase 4). Internal Tier 3 services as constructor parameters cause CS0051 (inconsistent accessibility).
+- **Decision:** Made all 5 Tier 3 services `public sealed class` to match existing Phase 4 services.
+- **Why:** Consistency with existing services and required by compiler for public constructor parameters.
+
+#### 3. InternalsVisibleTo Updated — `SmartPiXL.Tests` (not `TrackingPixel.Tests`)
+- **Conflict:** Solution references `SmartPiXL.Tests.csproj` (assembly name `SmartPiXL.Tests`) but Forge's InternalsVisibleTo declared `TrackingPixel.Tests` (matching the old csproj filename).
+- **Decision:** Updated to `InternalsVisibleTo Include="SmartPiXL.Tests"`. Also added Forge project reference to `SmartPiXL.Tests.csproj`.
+- **Why:** The solution file uses `SmartPiXL.Tests.csproj` → default assembly name is `SmartPiXL.Tests`.
+
+#### 4. FNV-1a Hash for Behavioral Replay (not MurmurHash3)
+- **Decision:** Used FNV-1a (32-bit) for mouse path hashing — offset basis 2166136261, prime 16777619.
+- **Why:** Zero-allocation, no NuGet dependency, 32-bit is sufficient for replay detection (not cryptographic). Inline implementation in 5 lines.
+
+#### 5. Time-Independent Test Assertions
+- **Conflict:** Tests used hardcoded year bounds (e.g., `AgeYears <= 3`) that broke when system clock advanced beyond 2025.
+- **Decision:** Changed assertions to use `DateTime.UtcNow.Year - expectedReleaseYear + margin` for dynamic bounds.
+- **Why:** Tests must pass regardless of the year they run.
+
+### New Files Created (8)
+
+| File | Purpose |
+|------|---------|
+| `SmartPiXL.Forge/Services/Enrichments/CulturalReference.cs` | Static cultural fingerprint reference data — fonts, languages, timezones, calendars |
+| `SmartPiXL.Forge/Services/Enrichments/ContradictionMatrixService.cs` | 13 cross-signal contradiction rules (7 IMPOSSIBLE, 3 IMPROBABLE, 3 SUSPICIOUS) |
+| `SmartPiXL.Forge/Services/Enrichments/GeographicArbitrageService.cs` | 7-signal cultural consistency scoring (fonts, language, timezone, calendar, etc.) |
+| `SmartPiXL.Forge/Services/Enrichments/DeviceAgeEstimationService.cs` | GPU/OS/browser triangulation with 3 anomaly detection rules |
+| `SmartPiXL.Forge/Services/Enrichments/BehavioralReplayService.cs` | FNV-1a hash of quantized mouse paths to detect replayed recordings |
+| `SmartPiXL.Forge/Services/Enrichments/DeadInternetService.cs` | Per-company compound bot traffic index (24-hour sliding window) |
+| `SmartPiXL/SQL/44_ForgeTier3Columns.sql` | 9 new columns on PiXL.Parsed + Phase 8D in ETL proc |
+| (Tests — 5 files) | See unit tests table below |
+
+### Modified Files (5)
+
+| File | Change |
+|------|--------|
+| `GpuTierReference.cs` | Added `EstimateReleaseYear()` + `s_releaseYears` array (~70 GPU→year entries) |
+| `EnrichmentPipelineService.cs` | Added 5 Tier 3 fields/constructor params; pipeline restructured to 15 steps |
+| `Program.cs` (Forge) | Added 5 singleton DI registrations for Tier 3 services |
+| `SmartPiXL.Tests.csproj` | Added Forge project reference |
+| `SmartPiXL.Forge.csproj` | Fixed InternalsVisibleTo from `TrackingPixel.Tests` → `SmartPiXL.Tests` |
+
+### Creative Enhancements Beyond Workplan
+
+1. **ContradictionMatrix**: 13 rules (workplan had ~5 examples) with severity tiers; uses `stackalloc` for zero-allocation rule evaluation
+2. **GeographicArbitrage**: 7 weighted signals (fonts by platform AND region, number format via separator detection, BCP47 calendar extraction, voice synthesis detection placeholder)
+3. **DeviceAgeEstimation**: GPU release year database covering ~70 GPUs (NVIDIA RTX 50→GTX 7, AMD RX 9000→Radeon R, Apple M1-M4, Intel Arc + integrated); 3 anomaly types
+4. **BehavioralReplay**: Mouse path quantization (10px grid, 100ms buckets) before FNV-1a hash; fingerprint correlation to distinguish revisit from replay
+5. **DeadInternet**: Compound index with 5 weighted signals (bot 0.30, zero-engage 0.20, datacenter 0.20, contradiction 0.15, FP diversity 0.15); per-company per-hour bucketing with 24-hour sliding window
+
+### SQL Migration 44 — Tier 3 Columns
+
+9 new columns on `PiXL.Parsed`:
+- `ContradictionCount INT`, `ContradictionList VARCHAR(500)`
+- `CulturalConsistencyScore INT`, `CulturalFlags VARCHAR(500)`
+- `DeviceAgeYears INT`, `DeviceAgeAnomaly BIT`
+- `ReplayDetected BIT`, `ReplayMatchFingerprint VARCHAR(200)`
+- `DeadInternetIndex INT`
+
+Phase 8D added to `ETL.usp_ParseNewHits` — parses 9 `_srv_*` params for Tier 3 columns.
+
+### Unit Tests Added (89 new)
+
+| Test Class | Tests | What's Covered |
+|------------|-------|----------------|
+| `ContradictionMatrixServiceTests` | 17 | Clean profile, all 13 rules individually, multiple contradictions, null safety |
+| `GeographicArbitrageServiceTests` | 22 | Full consistency, each signal type, maximal inconsistency, CulturalReference helpers |
+| `DeviceAgeEstimationServiceTests` | 22 | GPU/OS/browser dating, 3 anomaly types, legitimate old devices, ~70 GPU release years |
+| `BehavioralReplayServiceTests` | 9 | First visit, replay detection, normalization, null inputs, long paths |
+| `DeadInternetServiceTests` | 8 | Clean/all-bot/mixed traffic, per-company isolation, minimum hits threshold |
+| (GpuReleaseYear sub-tests) | 12 | Known GPU release years, unknown GPUs, virtual GPUs return 0 |
+
+### Build Result
+
+| Project | Warnings | Errors |
+|---------|----------|--------|
+| SmartPiXL.Shared | 0 | 0 |
+| SmartPiXL (Edge) | 0 | 0 |
+| SmartPiXL.Forge | 0 | 0 |
+| Tests | 471/471 passing | 0 failures |

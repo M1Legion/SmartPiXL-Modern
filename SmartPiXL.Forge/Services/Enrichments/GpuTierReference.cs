@@ -207,4 +207,78 @@ public static class GpuTierReference
         GpuTier.Low => "LOW",
         _ => null
     };
+
+    // ========================================================================
+    // GPU RELEASE YEAR ESTIMATION — Used by DeviceAgeEstimationService
+    // ========================================================================
+    // Separate array optimized for release-year lookup. More specific patterns
+    // than the tier classification (e.g., individual models with exact years).
+    // First match wins, most specific patterns first.
+    // ========================================================================
+
+    private static readonly (string Pattern, int Year)[] s_releaseYears =
+    [
+        // ── NVIDIA RTX 50-series (2025) ──────────────────────────────────
+        ("RTX 5090", 2025), ("RTX 5080", 2025), ("RTX 5070", 2025), ("RTX 50", 2025),
+        // ── NVIDIA RTX 40-series (2022-2023) ─────────────────────────────
+        ("RTX 4090", 2022), ("RTX 4080", 2022), ("RTX 4070", 2023), ("RTX 4060", 2023), ("RTX 40", 2022),
+        // ── NVIDIA RTX 30-series (2020-2022) ─────────────────────────────
+        ("RTX 3090", 2020), ("RTX 3080", 2020), ("RTX 3070", 2020),
+        ("RTX 3060", 2021), ("RTX 3050", 2022), ("RTX 30", 2020),
+        // ── NVIDIA RTX 20-series (2018-2019) ─────────────────────────────
+        ("RTX 2080", 2018), ("RTX 2070", 2018), ("RTX 2060", 2019), ("RTX 20", 2018),
+        // ── NVIDIA GTX 16-series (2019) ──────────────────────────────────
+        ("GTX 1660", 2019), ("GTX 1650", 2019), ("GTX 16", 2019),
+        // ── NVIDIA GTX 10-series (2016) ──────────────────────────────────
+        ("GTX 1080", 2016), ("GTX 1070", 2016), ("GTX 1060", 2016), ("GTX 1050", 2016), ("GTX 10", 2016),
+        // ── NVIDIA GTX 9-series (2014-2015) ──────────────────────────────
+        ("GTX 980", 2014), ("GTX 970", 2014), ("GTX 960", 2015), ("GTX 9", 2014),
+        // ── NVIDIA GTX 7-series (2013) ───────────────────────────────────
+        ("GTX 780", 2013), ("GTX 770", 2013), ("GTX 760", 2013), ("GTX 7", 2013),
+        // ── NVIDIA GT (budget/OEM) ───────────────────────────────────────
+        ("GT 1030", 2017), ("GT 730", 2014), ("GT 710", 2014), ("GT 6", 2012),
+        // ── NVIDIA Quadro (professional) ─────────────────────────────────
+        ("Quadro RTX", 2018), ("Quadro P", 2016),
+        // ── AMD RX 9000-series (2025) ────────────────────────────────────
+        ("RX 9070", 2025), ("RX 90", 2025),
+        // ── AMD RX 7000-series (2022-2023) ───────────────────────────────
+        ("RX 7900", 2022), ("RX 7800", 2023), ("RX 7700", 2023), ("RX 7600", 2023), ("RX 7", 2022),
+        // ── AMD RX 6000-series (2020-2022) ───────────────────────────────
+        ("RX 6900", 2020), ("RX 6800", 2020), ("RX 6700", 2021),
+        ("RX 6600", 2021), ("RX 6500", 2022), ("RX 6", 2020),
+        // ── AMD RX 5000-series (2019-2020) ───────────────────────────────
+        ("RX 5700", 2019), ("RX 5600", 2020), ("RX 5500", 2019),
+        // ── AMD RX 400/500-series (2016-2017) ────────────────────────────
+        ("RX 580", 2017), ("RX 570", 2017), ("RX 560", 2017), ("RX 550", 2017),
+        ("RX 480", 2016), ("RX 470", 2016), ("RX 460", 2016),
+        // ── AMD Radeon R-series (2013) ───────────────────────────────────
+        ("Radeon R9", 2013), ("Radeon R7", 2013), ("Radeon R5", 2013),
+        // ── Apple Silicon ────────────────────────────────────────────────
+        ("Apple M4", 2024), ("Apple M3", 2023), ("Apple M2", 2022), ("Apple M1", 2020),
+        // ── Intel Arc (discrete, 2022-2023) ──────────────────────────────
+        ("A770", 2022), ("A750", 2022), ("A580", 2023), ("A380", 2022),
+        // ── Intel integrated (generational estimates) ────────────────────
+        ("Iris Xe", 2020), ("UHD Graphics 7", 2020), ("UHD Graphics 6", 2017),
+        ("HD Graphics 6", 2015), ("HD Graphics 5", 2013), ("HD Graphics 4", 2012),
+        ("Iris Plus", 2016), ("Iris Pro", 2014),
+    ];
+
+    /// <summary>
+    /// Estimates the GPU release year based on model pattern matching.
+    /// Returns 0 if the GPU is unrecognized, virtual, or mobile integrated.
+    /// Used by <c>DeviceAgeEstimationService</c> for device age anomaly detection.
+    /// </summary>
+    public static int EstimateReleaseYear(string? gpuRenderer)
+    {
+        if (string.IsNullOrEmpty(gpuRenderer))
+            return 0;
+
+        for (var i = 0; i < s_releaseYears.Length; i++)
+        {
+            if (gpuRenderer.Contains(s_releaseYears[i].Pattern, StringComparison.OrdinalIgnoreCase))
+                return s_releaseYears[i].Year;
+        }
+
+        return 0;
+    }
 }

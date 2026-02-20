@@ -120,6 +120,14 @@ builder.Services.AddSingleton<CrossCustomerIntelService>();
 builder.Services.AddSingleton<DeviceAffluenceService>();
 builder.Services.AddSingleton<LeadQualityScoringService>();
 
+// ── Tier 3 Enrichment services (Phase 6 — Asymmetric Detection) ───────────
+// Stateless rule engines + stateful replay/aggregation services.
+builder.Services.AddSingleton<ContradictionMatrixService>();
+builder.Services.AddSingleton<GeographicArbitrageService>();
+builder.Services.AddSingleton<DeviceAgeEstimationService>();
+builder.Services.AddSingleton<BehavioralReplayService>();
+builder.Services.AddSingleton<DeadInternetService>();
+
 // ── Forge-specific pipeline services ──────────────────────────────────────
 
 // PipeListenerService: Named pipe server receiving TrackingData from Edge.

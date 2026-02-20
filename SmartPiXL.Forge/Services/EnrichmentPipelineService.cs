@@ -31,10 +31,17 @@ namespace SmartPiXL.Forge.Services;
 //   7. SessionStitching — in-memory session graph, 30-min timeout
 //   8. CrossCustomerIntel — sliding window cross-customer scraper detection
 //   9. DeviceAffluence  — GPU tier + CPU/RAM/screen/platform → affluence
-//  10. LeadQualityScoring — 0-100 score from positive human signals
 //
-// Future phases add Tier 3:
-//   Tier 3: Cultural arbitrage, device age, contradiction matrix, behavioral replay
+// ENRICHMENT CHAIN (Phase 6 — Tier 3: Asymmetric Detection):
+//  10. ContradictionMatrix — impossible/improbable field combination rules
+//  11. GeographicArbitrage — cultural fingerprint vs geo-IP consistency
+//  12. DeviceAgeEstimation — GPU/OS/browser age triangulation + anomalies
+//  13. BehavioralReplay — mouse path FNV-1a hashing, cross-FP replay detection
+//  14. DeadInternet — per-customer bot/engagement/diversity aggregate index
+//
+// FINAL SCORING:
+//  15. LeadQualityScoring — 0-100 score from positive human signals
+//                          (runs last to consume real Tier 3 values)
 //
 // DESIGN:
 //   Each enrichment service appends _srv_* params to TrackingData.QueryString.
@@ -45,8 +52,8 @@ namespace SmartPiXL.Forge.Services;
 
 /// <summary>
 /// Background service that reads <see cref="TrackingData"/> from the enrichment
-/// channel, applies Tier 1-2 enrichment processing, and enqueues enriched records to
-/// the SQL writer channel via <see cref="ForgeChannels"/>.
+/// channel, applies Tier 1-3 enrichment processing (15 steps), and enqueues
+/// enriched records to the SQL writer channel via <see cref="ForgeChannels"/>.
 /// </summary>
 public sealed class EnrichmentPipelineService : BackgroundService
 {
@@ -69,6 +76,13 @@ public sealed class EnrichmentPipelineService : BackgroundService
     private readonly DeviceAffluenceService _deviceAffluence;
     private readonly LeadQualityScoringService _leadQualityScoring;
 
+    // ── Tier 3 enrichment services (Asymmetric Detection) ───────────────
+    private readonly ContradictionMatrixService _contradictionMatrix;
+    private readonly GeographicArbitrageService _geographicArbitrage;
+    private readonly DeviceAgeEstimationService _deviceAgeEstimation;
+    private readonly BehavioralReplayService _behavioralReplay;
+    private readonly DeadInternetService _deadInternet;
+
     public EnrichmentPipelineService(
         ForgeChannels channels,
         IOptions<ForgeSettings> forgeSettings,
@@ -82,7 +96,12 @@ public sealed class EnrichmentPipelineService : BackgroundService
         SessionStitchingService sessionStitching,
         CrossCustomerIntelService crossCustomerIntel,
         DeviceAffluenceService deviceAffluence,
-        LeadQualityScoringService leadQualityScoring)
+        LeadQualityScoringService leadQualityScoring,
+        ContradictionMatrixService contradictionMatrix,
+        GeographicArbitrageService geographicArbitrage,
+        DeviceAgeEstimationService deviceAgeEstimation,
+        BehavioralReplayService behavioralReplay,
+        DeadInternetService deadInternet)
     {
         _enrichmentChannel = channels.Enrichment;
         _sqlWriterChannel = channels.SqlWriter;
@@ -98,6 +117,11 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _crossCustomerIntel = crossCustomerIntel;
         _deviceAffluence = deviceAffluence;
         _leadQualityScoring = leadQualityScoring;
+        _contradictionMatrix = contradictionMatrix;
+        _geographicArbitrage = geographicArbitrage;
+        _deviceAgeEstimation = deviceAgeEstimation;
+        _behavioralReplay = behavioralReplay;
+        _deadInternet = deadInternet;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -248,25 +272,129 @@ public sealed class EnrichmentPipelineService : BackgroundService
         if (affluenceResult.Affluence is not null) qs = AppendParam(qs, "_srv_affluence", affluenceResult.Affluence);
         if (affluenceResult.GpuTierStr is not null) qs = AppendParam(qs, "_srv_gpuTier", affluenceResult.GpuTierStr);
 
-        // ── 10. Lead Quality Scoring ──────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════════
+        // TIER 3 — Asymmetric Detection (Phase 6)
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── 10. Contradiction Matrix ──────────────────────────────────────
+        var mouseMovesRaw = QueryParamReader.GetInt(qs, "mouseMoves");
+        var mouseEntropy = QueryParamReader.GetDouble(qs, "mouseEntropy");
+        var touchRaw = QueryParamReader.GetInt(qs, "touch");
+        var touchEventRaw = QueryParamReader.GetBool(qs, "touchEvent");
+        var batteryLevel = QueryParamReader.GetDouble(qs, "batteryLevel");
+        var gpuVendor = QueryParamReader.Get(qs, "gpuVendor");
+        var webDriver = QueryParamReader.GetBool(qs, "webdr");
+        var coresRaw = QueryParamReader.GetInt(qs, "cores");
+        var memRaw = QueryParamReader.GetDouble(qs, "mem");
+        var hoverRaw = QueryParamReader.GetBool(qs, "hover");
+        var fonts = QueryParamReader.Get(qs, "fonts");
+        var isMobileUA = string.Equals(uaResult.DeviceType, "smartphone", StringComparison.OrdinalIgnoreCase)
+                      || string.Equals(uaResult.DeviceType, "tablet", StringComparison.OrdinalIgnoreCase);
+        var isMacOS = platform is not null && platform.Contains("Mac", StringComparison.OrdinalIgnoreCase);
+        var isLinux = platform is not null && platform.Contains("Linux", StringComparison.OrdinalIgnoreCase);
+        var isWindows = platform is not null && platform.Contains("Win", StringComparison.OrdinalIgnoreCase);
+        var isSafari = string.Equals(uaResult.Browser, "Safari", StringComparison.OrdinalIgnoreCase);
+        var isChrome = uaResult.Browser is not null && uaResult.Browser.Contains("Chrome", StringComparison.OrdinalIgnoreCase);
+
+        var sigSnapshot = new ContradictionMatrixService.SignalSnapshot(
+            IsMobileUA: isMobileUA,
+            IsMacOS: isMacOS,
+            IsLinux: isLinux,
+            IsWindows: isWindows,
+            IsSafari: isSafari,
+            IsChrome: isChrome,
+            ScreenWidth: sw,
+            ScreenHeight: sh,
+            MouseMoves: mouseMovesRaw,
+            MouseEntropy: mouseEntropy,
+            TouchPoints: touchRaw,
+            TouchEventsSupported: touchEventRaw,
+            HasBatteryAPI: batteryLevel > 0,
+            GpuString: gpu,
+            GpuVendor: gpuVendor,
+            Platform: platform,
+            Fonts: fonts,
+            WebDriverDetected: webDriver,
+            HardwareConcurrency: coresRaw,
+            DeviceMemoryGB: memRaw,
+            HoverCapable: hoverRaw);
+
+        var contradictionResult = _contradictionMatrix.Evaluate(in sigSnapshot);
+        if (contradictionResult.Count > 0)
+        {
+            qs = AppendParam(qs, "_srv_contradictions", contradictionResult.Count.ToString(CultureInfo.InvariantCulture));
+            if (contradictionResult.FlagList is not null)
+                qs = AppendParam(qs, "_srv_contradictionList", Uri.EscapeDataString(contradictionResult.FlagList));
+        }
+
+        // ── 11. Geographic Arbitrage (Cultural Consistency) ───────────────
+        var country = QueryParamReader.Get(qs, "_srv_mmCC");
+        var lang = QueryParamReader.Get(qs, "lang");
+        var timezone = QueryParamReader.Get(qs, "tz");
+        var numberFormat = QueryParamReader.Get(qs, "numberFormat");
+        var tzLocale = QueryParamReader.Get(qs, "tzLocale");
+        var voices = QueryParamReader.Get(qs, "voices");
+
+        var arbitrageResult = _geographicArbitrage.Analyze(
+            country, platform, fonts, lang, timezone, numberFormat, tzLocale, voices, uaResult.OS);
+        qs = AppendParam(qs, "_srv_culturalScore", arbitrageResult.CulturalScore.ToString(CultureInfo.InvariantCulture));
+        if (arbitrageResult.Flags is not null)
+            qs = AppendParam(qs, "_srv_culturalFlags", Uri.EscapeDataString(arbitrageResult.Flags));
+
+        // ── 12. Device Age Estimation ─────────────────────────────────────
+        var isDatacenter = dnsResult.IsCloud || QueryParamReader.GetBool(qs, "_srv_rdnsCloud");
+        var ageResult = _deviceAgeEstimation.Estimate(
+            gpu, uaResult.OS, uaResult.OSVersion, uaResult.Browser, uaResult.BrowserVersion,
+            isDatacenter, mouseEntropy);
+        if (ageResult.AgeYears > 0)
+            qs = AppendParam(qs, "_srv_deviceAge", ageResult.AgeYears.ToString(CultureInfo.InvariantCulture));
+        if (ageResult.IsAnomaly)
+            qs = AppendParam(qs, "_srv_deviceAgeAnomaly", "1");
+
+        // ── 13. Behavioral Replay Detection ───────────────────────────────
+        var mousePath = QueryParamReader.Get(qs, "mousePath");
+        var replayResult = _behavioralReplay.Check(mousePath, deviceHash);
+        if (replayResult.Detected)
+        {
+            qs = AppendParam(qs, "_srv_replayDetected", "1");
+            if (replayResult.MatchFingerprint is not null)
+                qs = AppendParam(qs, "_srv_replayMatchFP", Uri.EscapeDataString(replayResult.MatchFingerprint));
+        }
+
+        // ── 14. Dead Internet Index ───────────────────────────────────────
+        var deadIdx = _deadInternet.RecordHit(
+            record.CompanyID,
+            isBotHit: isCrawler,
+            hasMouseMoves: mouseMovesRaw > 0,
+            isDatacenter: isDatacenter,
+            contradictionCount: contradictionResult.Count,
+            isReplay: replayResult.Detected,
+            fingerprint: deviceHash);
+        if (deadIdx > 0)
+            qs = AppendParam(qs, "_srv_deadInternetIdx", deadIdx.ToString(CultureInfo.InvariantCulture));
+
+        // ═══════════════════════════════════════════════════════════════════
+        // FINAL SCORING — Lead Quality (runs last to consume Tier 3 results)
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── 15. Lead Quality Scoring ──────────────────────────────────────
         var isProxy = QueryParamReader.GetBool(qs, "_srv_ipapiProxy");
-        var isMobile = QueryParamReader.GetBool(qs, "_srv_ipapiMobile");
+        var isMobileIp = QueryParamReader.GetBool(qs, "_srv_ipapiMobile");
         var isHosting = dnsResult.IsCloud;
         var fpAlert = QueryParamReader.GetBool(qs, "_srv_fpAlert");
-        var mouseEntropy = QueryParamReader.GetDouble(qs, "mouseEntropy");
         var fontCount = QueryParamReader.GetInt(qs, "fontCount");
         var canvasNoise = QueryParamReader.GetBool(qs, "canvasNoise");
-        // TODO: timezone mismatch detection (Phase 6 — ContradictionMatrixService)
+
         var leadSignals = new LeadQualityScoringService.LeadSignals(
-            IsResidentialIp: !isProxy && !isMobile && !isHosting && !dnsResult.IsCloud,
+            IsResidentialIp: !isProxy && !isMobileIp && !isHosting,
             HasConsistentFingerprint: !fpAlert,
             MouseEntropy: mouseEntropy,
             FontCount: fontCount,
             HasCleanCanvas: !canvasNoise,
-            HasMatchingTimezone: true, // placeholder until Phase 6
+            HasMatchingTimezone: arbitrageResult.TimezoneMatch,
             SessionHitNumber: sessionResult.HitNumber,
             IsKnownBot: isCrawler,
-            ContradictionCount: 0);    // placeholder until Phase 6
+            ContradictionCount: contradictionResult.Count);
         var leadScore = _leadQualityScoring.Score(in leadSignals);
         qs = AppendParam(qs, "_srv_leadScore", leadScore.ToString(CultureInfo.InvariantCulture));
 

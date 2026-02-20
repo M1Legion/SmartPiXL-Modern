@@ -16,7 +16,7 @@
 
   <!-- Allow test project to access internal types (e.g., QueryParamReader) -->
   <ItemGroup>
-    <InternalsVisibleTo Include="TrackingPixel.Tests" />
+    <InternalsVisibleTo Include="SmartPiXL.Tests" />
   </ItemGroup>
 
   <ItemGroup>
