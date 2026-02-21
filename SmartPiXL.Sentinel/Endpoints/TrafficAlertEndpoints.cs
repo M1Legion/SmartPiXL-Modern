@@ -217,7 +217,7 @@ public static class TrafficAlertEndpoints
                     SUM(CASE WHEN QualityGrade = 'F' THEN 1 ELSE 0 END) AS GradeF
                 FROM dbo.vw_TrafficAlert_CustomerOverview
                 WHERE PeriodType = 'D'
-                  AND PeriodStart = CAST(GETUTCDATE() AS date)");
+                  AND PeriodStart = (SELECT MAX(PeriodStart) FROM dbo.vw_TrafficAlert_CustomerOverview WHERE PeriodType = 'D')");
 
             await WriteJsonAsync(ctx, rows.Count > 0 ? rows[0] : new Dictionary<string, object?>());
         });

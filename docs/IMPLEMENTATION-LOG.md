@@ -1165,3 +1165,522 @@ The MERGE statement referenced `UpdatedAt` and `Hosting` columns that don't exis
 - Forge: Geo enrichment running ✓
 - Sentinel: `/tron` (200, 156KB HTML), `/atlas` (200), `/api/dash/health` (200) ✓
 - Pipeline: 14.1M Raw rows, watermark advancing, 11M+ backlog processing ✓
+
+---
+
+## Session 7 — SQL Auth Migration + Edge Crash Loop Fix
+
+### SQL Auth Migration: NT AUTHORITY\SYSTEM → SmartPiXL SQL Login
+
+**Problem:** All three SmartPiXL services (Edge, Forge, Sentinel) used `Integrated Security=True` connecting as `NT AUTHORITY\SYSTEM`. This caused:
+- No granular permission control (SYSTEM has broad access)
+- `AutoUpdate` database access denied errors during ETL
+- Inability to audit which application is making SQL calls
+- Xavier sync failures due to missing permissions
+
+**Decision:** Created a dedicated `SmartPiXL` SQL login (SQL Authentication) on both `localhost\SQL2025` and Xavier (`192.168.88.35`). Password stored in machine-level environment variables, never in source code. Config files use `Password=OVERRIDE_VIA_ENV` as placeholder.
+
+**Implementation:**
+1. **SQL Login created** on `localhost\SQL2025` with strong 32-char password, `CHECK_POLICY = OFF`
+2. **Permissions granted** on local instance:
+   - SmartPiXL db: `db_datareader`, `db_datawriter`, `EXECUTE`, `ALTER ON SCHEMA::PiXL`, `ALTER ON SCHEMA::ETL`, `ALTER ON SCHEMA::Ops`
+   - AutoUpdate db: `db_datareader`
+   - SmartPiXL_CLR db: `db_datareader`, `db_datawriter`, `EXECUTE`
+   - Server: `VIEW SERVER STATE`, `ALTER ANY DATABASE`
+3. **SQL Login created** on Xavier (`192.168.88.35`):
+   - IPGEO db: `db_datareader` (read-only sync)
+   - SmartPiXL db: `db_datareader`, `db_datawriter`, `EXECUTE` (bidirectional Company/Pixel sync)
+4. **Machine environment variables set:**
+   - `SMARTPIXL_SQL_USER` = SmartPiXL
+   - `SMARTPIXL_SQL_PASSWORD` = (stored securely)
+   - `SMARTPIXL_SQL_CONNSTR` = full local connection string
+   - `Tracking__ConnectionString` = same (ASP.NET Core auto-reads this)
+   - `Tracking__XavierConnectionString` = Xavier IPGEO with SQL auth
+   - `Tracking__XavierSmartPiXLConnectionString` = Xavier SmartPiXL with SQL auth
+5. **Config files updated** (all use `Password=OVERRIDE_VIA_ENV` placeholder):
+   - `SmartPiXL.Shared/Configuration/TrackingSettings.cs` (compiled default)
+   - `SmartPiXL/appsettings.json` (Edge)
+   - `SmartPiXL.Forge/appsettings.json`
+   - `SmartPiXL.Sentinel/appsettings.json`
+
+### Edge Crash Loop #1: DatabaseWriterService Not Registered
+
+**Problem:** `InternalEndpoints.cs` referenced `DatabaseWriterService` as a minimal API parameter, but `DatabaseWriterService` was removed from Edge DI in Phase 3 (all writes go through pipe to Forge). In .NET 10, ASP.NET Core validates endpoint parameter bindings at startup, causing `System.InvalidOperationException: Body was inferred but the method does not allow inferred body parameters` on every request.
+
+**Decision:** Replaced `DatabaseWriterService` with `PipeClientService` in the health endpoint. The circuit state now reflects pipe connectivity (`Closed` = connected, `Open` = disconnected). The circuit-reset endpoint is now a no-op (pipe reconnection is automatic) but kept for API compatibility.
+
+**Files changed:** `SmartPiXL/Endpoints/InternalEndpoints.cs`
+
+### Edge Crash Loop #2: JsonlFailoverService — Directory Access Denied
+
+**Problem:** `JsonlFailoverService` tried to create `C:\inetpub\Smartpixl.info\Failover\` at startup. The IIS app pool identity (`IIS APPPOOL\Smartpixl.info`) didn't have write permission, throwing `System.UnauthorizedAccessException` which killed the host (`BackgroundServiceExceptionBehavior = StopHost`).
+
+**Decision:** Created the `Failover` directory manually and granted `FullControl` to `IIS APPPOOL\Smartpixl.info`.
+
+### Edge Crash Loop #3: Named Pipe Access Denied
+
+**Problem:** `PipeClientService` threw `UnauthorizedAccessException` when connecting to the named pipe `SmartPiXL-Enrichment`. The pipe was created by the Forge (running as `NT AUTHORITY\SYSTEM`) with default security ACLs — the IIS identity couldn't connect. The exception bubbled up unhandled to `ExecuteAsync`, crashing the host.
+
+**Decision (two-part fix):**
+1. **Forge `PipeListenerService.cs`**: Changed pipe creation from `new NamedPipeServerStream(...)` to `NamedPipeServerStreamAcl.Create(...)` with explicit `PipeSecurity` granting `LocalSystem` FullControl and `IIS APPPOOL\Smartpixl.info` ReadWrite access.
+2. **Edge `PipeClientService.cs`**: Added `UnauthorizedAccessException` catch in `EnsureConnectedAsync()` to treat pipe access denied as a transient error (backoff + retry + failover to JSONL) instead of crashing the host.
+
+**Files changed:**
+- `SmartPiXL.Forge/Services/PipeListenerService.cs` — `PipeSecurity` ACLs added
+- `SmartPiXL/Services/PipeClientService.cs` — `UnauthorizedAccessException` handler added
+
+### Production Config: Port Override Required After Publish
+
+**Conflict:** `dotnet publish` copies the source `appsettings.json` (dev ports 7000/7001) over the production copy (ports 6000/6001). This requires manual port patching after every publish.
+
+**Decision:** This is a known issue documented in `copilot-instructions.md`. Post-publish port fix is part of the deployment procedure. A future improvement would be to use `appsettings.Production.json` for port overrides.
+
+### Files Changed
+- `SmartPiXL/Endpoints/InternalEndpoints.cs` — `DatabaseWriterService` → `PipeClientService`, comments updated
+- `SmartPiXL/Services/PipeClientService.cs` — `UnauthorizedAccessException` catch added
+- `SmartPiXL.Forge/Services/PipeListenerService.cs` — Pipe security ACLs for IIS identity
+- `SmartPiXL.Shared/Configuration/TrackingSettings.cs` — SQL auth default connection string
+- `SmartPiXL/appsettings.json` — SQL auth for all connection strings
+- `SmartPiXL.Forge/appsettings.json` — SQL auth for all connection strings
+- `SmartPiXL.Sentinel/appsettings.json` — SQL auth connection string
+
+### Verified Working
+- Edge: Pixel capture 200 OK ✓
+- Edge: Internal health endpoint — `circuit: Closed`, pipe connected ✓
+- Edge: No crash loop — single startup, stable ✓
+- Edge: GeoCacheService prewarmed 2000 IPs ✓
+- Edge: JsonlFailoverService started (Failover directory accessible) ✓
+- Edge: PipeClient connected to Forge ✓
+- Forge: Running as Windows Service ✓
+- Sentinel: Running, Tron dashboard accessible ✓
+- SQL Login: Verified working on both localhost\SQL2025 and Xavier (192.168.88.35) ✓
+
+---
+
+## Session 9 — V1.0.0 QA Sweep (2025-02-20)
+
+Full QA sweep of SmartPiXL Sentinel V1.0.0. Tested 36 endpoints across all 4 surfaces (Tron Ops, Tron Metrics, Atlas, TrafficAlert). Cross-referenced API responses against SQL views. Reviewed all frontend code (tron.html 3542 lines, atlas.html 1531 lines) and all backend endpoint files.
+
+**Test Environment:** Sentinel http://localhost:7500 | SQL Server localhost\SQL2025 → SmartPiXL | 4,731,629 rows in PiXL.Parsed
+
+### Summary
+
+- Endpoints tested: 36
+- Bugs found: 14 (4 critical, 5 moderate, 5 minor)
+- Data accuracy issues: 6 endpoints return 500 due to SQL timeouts
+
+---
+
+### QA Bug Reports — Organized by Agent
+
+---
+
+#### 🔧 `sql-janitor` — 5 bugs (4 critical, 1 moderate)
+
+These are the highest priority. Six dashboard views perform full-table scans on 4.7M rows without date filters, causing 30s+ query times that surface as HTTP 500s.
+
+**BUG-Q1 (CRITICAL): Six `vw_Dash_*` views timeout — 500 errors on 6 dashboard endpoints**
+
+| Field | Detail |
+|-------|--------|
+| Endpoints | `/api/dash/hourly`, `/api/dash/bots`, `/api/dash/bot-signals`, `/api/dash/devices`, `/api/dash/evasion`, `/api/dash/behavior` |
+| Root Cause | Views scan ALL 4.7M rows in `PiXL.Parsed` with no `WHERE` clause. Query CPU exceeds 7s, exceeds the 30s `CommandTimeout`. |
+| Evidence | `vw_Dash_HourlyRollup`: 6,938ms CPU. `vw_Dash_BotBreakdown`: 7,624ms CPU. All 6 return HTTP 500. |
+| Fix | Add `WHERE ReceivedAt >= DATEADD(DAY, -30, GETUTCDATE())` (or appropriate window) to each view. The clustered index on `(ReceivedAt, SourceId)` will then be used. |
+| Views to fix | `vw_Dash_HourlyRollup`, `vw_Dash_BotBreakdown`, `vw_Dash_TopBotSignals`, `vw_Dash_DeviceBreakdown`, `vw_Dash_EvasionSummary`, `vw_Dash_BehavioralAnalysis` |
+| SQL files | `SmartPiXL/SQL/` — find and update the CREATE VIEW statements, then run against `localhost\SQL2025` |
+
+**BUG-Q2 (CRITICAL): `InfraHealthService` SQL probe reports false "disconnected"**
+
+| Field | Detail |
+|-------|--------|
+| Endpoint | `/api/dash/infra` |
+| Root Cause | `InfraHealthService.cs` line ~178 runs `SELECT COUNT(*) FROM PiXL.Raw` with `CommandTimeout = 5`. On 4.7M+ rows, this always times out, so SQL is reported as disconnected and overall status becomes "critical". |
+| Evidence | `/api/dash/infra` returns `sqlServer.status = "disconnected"` and `overallStatus = "critical"` even though SQL is running fine. |
+| Fix | Replace `SELECT COUNT(*) FROM PiXL.Raw` with `SELECT 1` (existence check) or `SELECT SUM(row_count) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Raw') AND index_id IN (0,1)` for fast row count. |
+| File | `SmartPiXL.Sentinel/Services/InfraHealthService.cs` ~line 178 |
+| Note | This is a C# fix but the root cause is a bad SQL query, so `sql-janitor` + `csharp-janitor` should coordinate. |
+
+**BUG-Q3 (CRITICAL): TrafficAlert `/api/traffic-alert/summary` returns all nulls**
+
+| Field | Detail |
+|-------|--------|
+| Endpoint | `/api/traffic-alert/summary` |
+| Root Cause | `TrafficAlertEndpoints.cs` query filters `WHERE PeriodStart = CAST(GETUTCDATE() AS date)` — requires data materialized for today specifically. If no rows exist for today's date, all aggregate KPIs return null. |
+| Evidence | Response: `{"totalVisitors":null,"averageScore":null,"highRiskCount":null,...}` |
+| Fix | Change to `WHERE PeriodStart = (SELECT MAX(PeriodStart) FROM TrafficAlert.CustomerSummary)` or add a fallback that returns the most recent period's data when today has none. |
+| File | `SmartPiXL.Sentinel/Endpoints/TrafficAlertEndpoints.cs` |
+
+**BUG-Q4 (CRITICAL): No try/catch on dashboard SQL queries — unhandled exceptions become 500s**
+
+| Field | Detail |
+|-------|--------|
+| Endpoints | All `/api/dash/*` endpoints |
+| Root Cause | `DashboardEndpoints.cs` `QueryAsync` / `QuerySingleRowAsync` methods execute SQL with no try/catch. When a query times out or fails, `SqlException` propagates unhandled and ASP.NET returns a raw 500. |
+| Evidence | The 6 timed-out endpoints return generic 500 with no structured error response. |
+| Fix | Wrap all query executions in try/catch that returns `Results.Json(new { error = "...", data = Array.Empty<object>() }, statusCode: 503)` or similar graceful degradation. |
+| File | `SmartPiXL.Sentinel/Endpoints/DashboardEndpoints.cs` |
+| Note | This is a C# fix. Assigning to `csharp-janitor` but listing here since the SQL timeouts are the trigger. |
+
+**BUG-Q9 (MODERATE): PiXL.Parsed missing covering index for dashboard view predicates**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | Even after adding date filters (BUG-Q1), views that filter on `BotScore`, `IsBot`, `BrowserFamily`, `OsFamily`, `DeviceType`, `Classification` will benefit from filtered/covering indexes. |
+| Fix | After BUG-Q1 date filters are added, profile the 6 views and add filtered indexes as needed. Consider: `IX_Parsed_ReceivedAt_BotScore`, `IX_Parsed_ReceivedAt_DeviceType`. |
+| Priority | Do after BUG-Q1 is fixed — measure first, then index. |
+
+---
+
+#### 🔧 `csharp-janitor` — 3 bugs (1 critical from above, 2 moderate)
+
+**BUG-Q4 — See above (sql-janitor section).** Add try/catch to `DashboardEndpoints.cs` query methods.
+
+**BUG-Q2 — Coordinate with sql-janitor.** Fix the SQL probe in `InfraHealthService.cs`.
+
+**BUG-Q5 (MODERATE): Mermaid diagram rendering broken in Atlas — closing tag mismatch**
+
+| Field | Detail |
+|-------|--------|
+| Surface | Atlas documentation portal |
+| Root Cause | `MarkdownAtlasService.cs` line ~339: the Mermaid fix replaces the opening `<code class="language-mermaid">` with `<pre class="mermaid">` but does NOT fix the closing `</code>` tag. Result: `<pre class="mermaid">graph TD...;</code></pre>` — mismatched HTML tags. |
+| Evidence | Atlas sections with Mermaid diagrams may not render correctly depending on browser tolerance. |
+| Fix | Also replace the closing `</code></pre>` with just `</pre>` for Mermaid blocks. |
+| File | `SmartPiXL.Sentinel/Services/MarkdownAtlasService.cs` ~line 339 |
+
+**BUG-Q8 (MODERATE): 11 dashboard API endpoints have no frontend consumers**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | `tron.html` `API` object (line ~1921) only maps 11 of 22 endpoints. Missing: `sessions`, `dead-internet`, `customer-quality`, `cross-customer`, `cross-customer/detail`, `impossible-travel`, `device-lifecycle`, `device-hops`, `subnet-clusters`, `pipeline`, `remediations`. |
+| Evidence | These endpoints return valid JSON when hit directly, but no panel in the Tron dashboard displays them. |
+| Fix | This requires frontend work — assign to `javascript-janitor` to wire the panels. Listed here for awareness. |
+
+---
+
+#### 🔧 `javascript-janitor` — 4 bugs (3 moderate, 1 minor)
+
+**BUG-Q6 (MODERATE): `renderBehavior()` ambiguous classification selector**
+
+| Field | Detail |
+|-------|--------|
+| Surface | Tron Ops dashboard |
+| Root Cause | `tron.html` `renderBehavior()` uses `d.classification.includes('50')` to distinguish bots from humans. The SQL view uses `'Bot (50+)'` and `'Human (<50)'` — BOTH strings contain `'50'`, so the filter matches everything. |
+| Evidence | SQL view definition confirmed: `CASE WHEN BotScore >= 50 THEN 'Bot (50+)' ELSE 'Human (<50)' END AS Classification` |
+| Fix | Change `d.classification.includes('50')` to `d.classification.startsWith('Bot')` or `d.classification.includes('Bot')`. |
+| File | `SmartPiXL.Sentinel/wwwroot/tron.html` ~line 3370 |
+
+**BUG-Q8 (MODERATE): Wire 11 missing endpoint panels into Tron dashboard**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | The `API` object and `OPS_STEPS`/`ANALYTICS_STEPS` arrays in `tron.html` don't include the 11 enrichment endpoints added in Phases 5-9. |
+| Fix | Add API mappings, step entries, and renderer functions for: `sessions`, `dead-internet`, `customer-quality`, `cross-customer`, `cross-customer/detail`, `impossible-travel`, `device-lifecycle`, `device-hops`, `subnet-clusters`, `pipeline`, `remediations`. |
+| File | `SmartPiXL.Sentinel/wwwroot/tron.html` |
+| Note | Large task — may warrant splitting into sub-tasks per panel. |
+
+**BUG-Q10 (MODERATE): Refresh timer persists across view switches**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | `tron.html` `setInterval` for ops refresh isn't cleared when switching to analytics view and vice versa. Could cause duplicate API calls and stale data rendering. |
+| Fix | Store interval ID and call `clearInterval()` in the view-switch handler before starting the new view's refresh cycle. |
+| File | `SmartPiXL.Sentinel/wwwroot/tron.html` |
+
+**BUG-Q11 (MINOR): UTF-8 mojibake throughout tron.html source**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | Em-dashes (`—`), right quotes (`'`), and other Unicode characters are encoded as `â€"`, `â€™`, etc. File was likely saved or copied with wrong encoding. |
+| Fix | Re-save `tron.html` as UTF-8 (no BOM). Search-replace common mojibake sequences: `â€"` → `—`, `â€™` → `'`, `â€œ` → `"`, `â€` → `"`. |
+| File | `SmartPiXL.Sentinel/wwwroot/tron.html` |
+
+---
+
+#### 🔧 `testing-specialist` — 1 minor
+
+**BUG-Q14 (MINOR): No integration tests for Sentinel API endpoints**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | `SmartPiXL.Tests/` has unit tests for core services but no integration tests that hit Sentinel endpoints with a test database. |
+| Fix | Add `WebApplicationFactory<Program>`-based integration tests for at least `/api/dash/health`, `/api/atlas/sections`, and `/api/traffic-alert/summary`. |
+
+---
+
+#### 🔧 `doc-specialist` — 1 minor
+
+**BUG-Q13 (MINOR): Atlas documentation references may not match current schema**
+
+| Field | Detail |
+|-------|--------|
+| Root Cause | Atlas markdown files in `docs/atlas/` reference SQL table names, column names, and schema structures. After Phases 7-9 added new schemas (Graph, TrafficAlert, Geo), some docs may be stale. |
+| Fix | Cross-reference each Atlas markdown file against the actual database schema. Update table/column references, add missing schemas. |
+| Files | `docs/atlas/database/schema-map.md`, `docs/atlas/subsystems/*.md` |
+
+---
+
+### Passed Tests (Verified Working)
+
+- Health endpoint (`/api/dash/health`): 200 OK, data matches `vw_Dash_SystemHealth` SQL exactly
+- Recent hits (`/api/dash/recent`): 200 OK, returns latest 50 rows
+- Fingerprint clusters (`/api/dash/fingerprints`): 200 OK
+- Infra probe (`/api/dash/infra`): 200 OK (structure correct, but SQL probe false-negative — see BUG-Q2)
+- Xavier sync (`/api/dash/xavier-sync`): 200 OK
+- Dead internet (`/api/dash/dead-internet`): 200 OK
+- Customer quality (`/api/dash/customer-quality`): 200 OK
+- Cross-customer (`/api/dash/cross-customer`): 200 OK
+- Impossible travel (`/api/dash/impossible-travel`): 200 OK
+- Device lifecycle (`/api/dash/device-lifecycle`): 200 OK
+- Device hops (`/api/dash/device-hops`): 200 OK
+- Subnet clusters (`/api/dash/subnet-clusters`): 200 OK
+- Pipeline (`/api/dash/pipeline`): 200 OK
+- Sessions (`/api/dash/sessions`): 200 OK
+- Remediations (`/api/dash/remediations`): 200 OK
+- All Atlas endpoints: 200 OK (20 sections, 4 categories, 28 statuses, 11 metrics)
+- TrafficAlert visitors: 200 OK (100 rows)
+- TrafficAlert customers: 200 OK (3 rows)
+- TrafficAlert trend: 200 OK (3 rows)
+- Static pages: `/tron` 200, `/atlas` 200
+- Error handling: 404 for invalid IDs/slugs (correct behavior)
+
+### Recommended Fix Priority
+
+1. **BUG-Q1** (sql-janitor) — Add date filters to 6 views → unblocks 6 dead endpoints
+2. **BUG-Q2** (csharp-janitor + sql-janitor) — Fix infra SQL probe → fixes false "critical" status
+3. **BUG-Q4** (csharp-janitor) — Add try/catch → graceful degradation instead of 500s
+4. **BUG-Q3** (sql-janitor) — Fix summary date filter → unblocks TrafficAlert summary
+5. **BUG-Q6** (javascript-janitor) — Fix classification selector → correct bot/human split
+6. **BUG-Q5** (csharp-janitor) — Fix Mermaid tag → correct diagram rendering
+7. **BUG-Q8** (javascript-janitor) — Wire missing panels → complete dashboard coverage
+8. Remaining moderate/minor bugs in priority order
+
+---
+
+## Session 10 — SQL Janitor: BUG-Q1, Q2, Q3, Q9 Fixes (2026-02-20)
+
+Addressed all 5 sql-janitor bugs from the V1.0.0 QA sweep (Session 9). Fixed 6 slow dashboard views, InfraHealthService false disconnection, TrafficAlert summary nulls, and the PipelineHealth view. Profiled and deferred index work (BUG-Q9).
+
+### BUG-Q1 FIXED: Six `vw_Dash_*` views — 30-day rolling window
+
+**Root Cause:** All 6 views scanned the entire `PiXL.Parsed` table (4.8M+ rows) with no `WHERE` clause. Combined with the Sentinel's 30s `CommandTimeout`, queries timed out and returned HTTP 500.
+
+**Fix:** Added `WHERE ReceivedAt >= DATEADD(DAY, -30, GETUTCDATE())` to all 6 views. The clustered index `CIX_PiXL_Parsed_ReceivedAt (ReceivedAt, SourceId)` enables an efficient range seek. Used `CREATE OR ALTER VIEW` for idempotency.
+
+**Migration:** `SmartPiXL/SQL/60_FixDashboardViewPerformance.sql`
+
+**Views fixed:**
+
+| View | Before (cold) | After (cold) | After (warm) |
+|------|--------------|-------------|-------------|
+| `vw_Dash_HourlyRollup` | 6,938ms+ timeout | 20,620ms | 139ms |
+| `vw_Dash_BotBreakdown` | 7,624ms+ timeout | 109ms | <50ms |
+| `vw_Dash_TopBotSignals` | timeout | 110ms | <50ms |
+| `vw_Dash_DeviceBreakdown` | timeout | 654ms | <50ms |
+| `vw_Dash_EvasionSummary` | timeout | 596ms | <50ms |
+| `vw_Dash_BehavioralAnalysis` | timeout | 670ms | <50ms |
+
+**Note on HourlyRollup cold-cache:** The 20s first-run is because ALL 4.8M rows currently fall within the 30-day window (data only spans Feb 2-18). As data ages past 30 days, the window will reduce scan size and performance self-corrects. The 30s timeout is not hit.
+
+### BUG-Q2 FIXED: InfraHealthService — false SQL disconnection
+
+**Root Cause:** `SELECT COUNT(*) FROM PiXL.Raw` with `CommandTimeout = 5` on 16.5M rows = guaranteed timeout. The probe reported SQL as disconnected, which set `overallStatus = "critical"`.
+
+**Fix (both Sentinel and Forge — identical code):**
+1. Replaced `COUNT(*)` with `sys.dm_db_partition_stats` DMV lookup — instant metadata read, no table scan
+2. Changed `reader.GetInt32()` to `Convert.ToInt32(reader.GetValue())` for DMV's BIGINT return type
+3. Bumped `CommandTimeout` from 5 to 10 for safety margin
+
+**Before:** `sqlServer.isConnected = false`, `overallStatus = "critical"`
+**After:** `sqlServer.isConnected = true`, `testRows = 16,469,489`, `overallStatus = "degraded"` (legitimate — data flow paused)
+
+### BUG-Q3 FIXED: TrafficAlert summary returns all nulls
+
+**Root Cause:** `WHERE PeriodStart = CAST(GETUTCDATE() AS date)` — filters for today's date only. Most recent data in `TrafficAlert.CustomerSummary` is Feb 16 (4 days old). No rows match, all aggregate KPIs return null.
+
+**Fix:** Changed to `WHERE PeriodStart = (SELECT MAX(PeriodStart) FROM dbo.vw_TrafficAlert_CustomerOverview WHERE PeriodType = 'D')` — always returns the most recent daily period regardless of date.
+
+**Before:** `{"totalVisitors":null,"averageScore":null,...}`
+**After:** `{"customerCount":1,"totalHits":3,"gradeA":1,...}`
+
+### BUG-Q9 DEFERRED: PiXL.Parsed covering indexes
+
+**Assessment:** After applying date filters (BUG-Q1), profiled all 6 views:
+- 5 of 6 are under 1s even cold. Only HourlyRollup is slow (20s cold, 139ms warm).
+- Current state is the **worst case** — all 4.8M rows are within 30-day window because data only spans 16 days.
+- As data ages past 30 days, the filter narrows and performance improves automatically.
+- Adding covering indexes on a 4.8M x 300-column table carries significant storage/write overhead for marginal read benefit.
+
+**Decision:** No indexes added now. Re-evaluate when PiXL.Parsed exceeds 10M rows with data spanning 60+ days.
+
+### BONUS FIX: `vw_Dash_PipelineHealth` — DMV-based row counts
+
+**Found during audit:** The `PipelineHealth` view used `COUNT(*)` on PiXL.Raw (16.5M), PiXL.Parsed (4.8M), PiXL.Visit (4.8M), and other tables. With the Sentinel's 10s timeout, this was at risk of timing out as tables grow.
+
+**Fix:** Replaced all 6 `COUNT(*)` calls with `sys.dm_db_partition_stats` DMV lookups. Kept filtered counts on smaller tables (PiXL.Match WHERE IndividualKey IS NOT NULL, etc.) as-is since they use indexes.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `SmartPiXL/SQL/60_FixDashboardViewPerformance.sql` | **NEW** — Migration 60: 7 views fixed (6 dashboard + PipelineHealth) |
+| `SmartPiXL.Sentinel/Services/InfraHealthService.cs` | SQL probe: COUNT(*) to DMV, GetInt32 to Convert.ToInt32, timeout 5 to 10 |
+| `SmartPiXL.Forge/Services/InfraHealthService.cs` | Same SQL probe fix as Sentinel (identical code) |
+| `SmartPiXL.Sentinel/Endpoints/TrafficAlertEndpoints.cs` | Summary: GETUTCDATE() to MAX(PeriodStart) |
+
+### Verification — All Previously-Failing Endpoints
+
+| Endpoint | Before | After |
+|----------|--------|-------|
+| `/api/dash/hourly` | 500 (timeout) | **200** (20KB) |
+| `/api/dash/bots` | 500 (timeout) | **200** (1KB) |
+| `/api/dash/bot-signals` | 500 (timeout) | **200** (3KB) |
+| `/api/dash/devices` | 500 (timeout) | **200** (5KB) |
+| `/api/dash/evasion` | 500 (timeout) | **200** (234B) |
+| `/api/dash/behavior` | 500 (timeout) | **200** (538B) |
+| `/api/dash/infra` | 200 (SQL=disconnected) | **200** (SQL=connected, 16.5M rows) |
+| `/api/dash/pipeline` | timeout risk | **200** (824B, instant) |
+| `/api/traffic-alert/summary` | 200 (all nulls) | **200** (real data) |
+
+### Remaining QA Bugs (other agents)
+
+| Bug | Agent | Status |
+|-----|-------|--------|
+| BUG-Q4 | `csharp-janitor` | **FIXED** — Session 11 |
+| BUG-Q5 | `csharp-janitor` | **FIXED** — Session 11 |
+| BUG-Q6 | `javascript-janitor` | Pending — Fix `includes('50')` classification selector |
+| BUG-Q8 | `javascript-janitor` | Pending — Wire 11 missing endpoint panels |
+| BUG-Q10 | `javascript-janitor` | Pending — Fix refresh timer across view switches |
+| BUG-Q11 | `javascript-janitor` | Pending — Fix UTF-8 mojibake in tron.html |
+| BUG-Q13 | `doc-specialist` | Pending — Cross-reference Atlas docs vs schema |
+| BUG-Q14 | `testing-specialist` | Pending — Add Sentinel integration tests |
+
+---
+
+## Session 11 — C# Janitor: BUG-Q4 + BUG-Q5
+
+**Agent:** `csharp-janitor`
+**Scope:** Fix 2 remaining C# bugs from Session 9 QA sweep (BUG-Q2 already fixed by sql-janitor in Session 10).
+
+### BUG-Q4 (CRITICAL) — Graceful error handling for dashboard SQL queries
+
+**Problem:** All 22+ `/api/dash/*` endpoints in `DashboardEndpoints.cs` had no try/catch. When a SQL query timed out or a view didn't exist, `SqlException` propagated unhandled and ASP.NET returned a raw 500 with stack trace — no structured error response.
+
+**Fix:** Added three helper methods with built-in error handling:
+
+| Method | Purpose |
+|--------|---------|
+| `QueryViewAsync` | Multi-row SQL view query → JSON response. Catches exceptions, returns HTTP 503 with `{ error, detail }`. |
+| `QueryViewSingleRowAsync` | Single-row SQL view query → JSON response. Same error handling. |
+| `SafeExecuteAsync` | General-purpose wrapper for non-query endpoints (infra, remediation, notifications). Same error handling. |
+
+All 22+ endpoint lambdas were refactored to use these helpers:
+- 17 simple query endpoints → `QueryViewAsync` (reduced from 4 lines to 1 line each)
+- 2 single-row endpoints → `QueryViewSingleRowAsync`
+- 6 complex endpoints (cached, infra, remediation, circuit-reset, test-notify) → `SafeExecuteAsync`
+
+**Error response format (verified live):**
+```json
+{"error":"Query failed","detail":"Execution Timeout Expired. The timeout period elapsed prior to completion of the operation or the server is not responding."}
+```
+HTTP 503 status code, structured JSON — frontend can display meaningful error messages.
+
+**Note:** `vw_Dash_RecentHits` still times out (needs 30-day window like the other 6 views fixed in Session 10). Now returns graceful 503 instead of raw 500. SQL fix deferred to sql-janitor.
+
+### BUG-Q5 (MODERATE) — Mermaid diagram rendering broken in Atlas
+
+**Problem:** `MarkdownAtlasService.ConvertTierToHtml()` replaced `<code class="language-mermaid">` with `<pre class="mermaid">` but left the closing `</code></pre>` intact. Markdig outputs `<pre><code class="language-mermaid">...</code></pre>` — so after the fix: `<pre><pre class="mermaid">...</code></pre>` — doubly nested `<pre>`, stray `</code>`.
+
+**Fix:** Replaced the single `string.Replace()` with a `[GeneratedRegex]` that matches the full Mermaid HTML block and replaces both opening and closing tags correctly:
+- Match: `<pre><code class="language-mermaid">(.*?)</code></pre>`
+- Replace: `<pre class="mermaid">$1</pre>`
+
+### Bonus: `new Regex()` → `[GeneratedRegex]` cleanup
+
+Converted all 3 existing `new Regex(..., RegexOptions.Compiled)` instances to source-generated `[GeneratedRegex]` per coding standards:
+- `TierHeaderRegex` — tier section header matching
+- `FrontmatterRegex` — YAML frontmatter extraction
+- `MermaidBlockRegex` — raw markdown Mermaid block extraction
+- `MermaidHtmlBlockRegex` — **NEW** — HTML Mermaid block replacement
+
+Class changed from `sealed class` to `sealed partial class` (required by `[GeneratedRegex]`).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `SmartPiXL.Sentinel/Endpoints/DashboardEndpoints.cs` | Added `QueryViewAsync`, `QueryViewSingleRowAsync`, `SafeExecuteAsync`. Refactored all 25 endpoints to use safe wrappers. |
+| `SmartPiXL.Sentinel/Services/MarkdownAtlasService.cs` | Fixed Mermaid HTML replacement. Converted 3 `new Regex()` → `[GeneratedRegex]`. Added `MermaidHtmlBlockRegex`. Class → `sealed partial class`. |
+
+### Build & Test Results
+
+| Metric | Result |
+|--------|--------|
+| Sentinel build | **0 warnings, 0 errors** |
+| Unit tests | **523/523 passed** (0 failures) |
+| Deployed to | `C:\Services\SmartPiXL-Sentinel\` |
+| Service status | **Running** |
+
+### Verification
+
+| Endpoint | Status |
+|----------|--------|
+| `/api/dash/health` | 200 OK |
+| `/api/dash/bots` | 200 OK |
+| `/api/dash/evasion` | 200 OK |
+| `/api/dash/pipeline` | 200 OK |
+| `/api/dash/infra` | 200 OK |
+| `/api/dash/hourly` | 200 OK |
+| `/api/dash/bot-signals` | 200 OK |
+| `/api/dash/devices` | 200 OK |
+| `/api/dash/behavior` | 200 OK |
+| `/api/dash/sessions` | 200 OK |
+| `/api/dash/recent` | **503** (graceful error — view timeout, SQL fix needed) |
+| `/api/atlas/sections` | 200 OK (410KB) |
+
+## Session 12 — JavaScript Janitor: BUG-Q6 + BUG-Q8
+
+**Agent:** `javascript-janitor`
+**Scope:** Fix 2 Tron dashboard JavaScript bugs from Session 9 QA sweep.
+
+### BUG-Q6 (MODERATE) — Classification selector logic broken in `renderBehavior()`
+
+**Problem:** `renderBehavior()` used `d.classification.includes('<50')` and `d.classification.includes('50')` to separate human vs bot traffic. The classification field contains strings like `"Human (<50)"` and `"Bot (≥50)"`, but `includes('50')` matched both because `'<50'` contains `'50'`. This caused entries to appear in both the human and bot columns.
+
+**Fix:** Changed to `d.classification.startsWith('Human')` and `d.classification.startsWith('Bot')` — unambiguous prefix matching that works regardless of the score threshold text in parentheses.
+
+**Files:** Both copies of `tron.html` (Sentinel + Edge).
+
+### BUG-Q8 (MAJOR) — 11 missing Tron dashboard panels
+
+**Problem:** Session 8 added 11 API endpoints to `DashboardEndpoints.cs` but never wired them into the Tron dashboard frontend. The endpoints returned data fine but the dashboard had no panels, renderers, or pipeline steps to call them.
+
+**Missing endpoints:** `sessions`, `dead-internet`, `customer-quality`, `cross-customer`, `cross-customer-detail`, `impossible-travel`, `device-lifecycle`, `device-hops`, `subnet-clusters`, `pipeline`, `remediations`.
+
+**Fix — four layers of changes:**
+
+| Layer | What was added |
+|-------|---------------|
+| **API object** | 11 new entries in `const API = {}` mapping names to fetch URLs |
+| **HTML panels** | 5 new `panel-grid half` sections in analytics view (Sessions, Dead Internet, Customer Quality, Cross-Customer, Impossible Travel, Device Lifecycle, Subnet Clusters, Device Hops) + 1 new `panel-grid half` section in ops view (Pipeline Health, Remediations) |
+| **Renderer functions** | 11 new functions: `renderSessions`, `renderDeadInternet`, `renderCustomerQuality`, `renderCrossCustomer`, `renderImpossibleTravel`, `renderDeviceLifecycle`, `renderDeviceHops`, `renderSubnets`, `renderPipelineHealth`, `renderRemediations` |
+| **Pipeline steps** | 2 new steps in `OPS_STEPS` (PIPELINE/DUMONT, REMEDIATE/BECK) + 9 new steps in `ANALYTICS_STEPS` (SESSIONS/DUMONT, DEAD-NET/BECK, QUALITY/CYRUS, CROSS-CX/PAIGE, TRAVEL/ABLE, LIFECYCLE/ISO, HOPS/DYSON, SUBNETS/CROM) |
+
+**Renderer design:** Each renderer follows the existing pattern — null/empty guard with fallback message, `feed-table` class for data tables, `num()` helper for number formatting, conditional color styling for alert fields (bot scores, dormant flags, subnet alerts).
+
+### Conflict Resolution
+
+**Encoding conflict:** tron.html contains UTF-8 mojibake throughout (BUG-Q11, not in scope for this agent). All string replacements required matching the mojibake characters exactly as they appear in the file (e.g., `â€"` not `—`). Logged for BUG-Q11 resolution.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `SmartPiXL.Sentinel/wwwroot/tron.html` | BUG-Q6 fix + all BUG-Q8 additions (API, HTML, renderers, pipeline steps) |
+| `SmartPiXL/wwwroot/tron.html` | Synced copy from Sentinel |
+
+### Build Results
+
+| Metric | Result |
+|--------|--------|
+| Sentinel build | **0 warnings, 0 errors** |

@@ -179,18 +179,20 @@ public sealed class InfraHealthService : IDisposable
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT 
-                    (SELECT COUNT(*) FROM PiXL.Raw) AS TestRows,
-                    (SELECT COUNT(*) FROM PiXL.Parsed) AS ParsedRows,
+                    (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
+                     WHERE object_id = OBJECT_ID('PiXL.Raw') AND index_id IN (0,1)) AS TestRows,
+                    (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
+                     WHERE object_id = OBJECT_ID('PiXL.Parsed') AND index_id IN (0,1)) AS ParsedRows,
                     (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS Watermark,
                     (SELECT LastRunAt FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS LastEtlRun,
                     @@VERSION AS ServerVersion";
-            cmd.CommandTimeout = 5;
+            cmd.CommandTimeout = 10;
 
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                item.TestRows = reader.GetInt32(0);
-                item.ParsedRows = reader.GetInt32(1);
+                item.TestRows = Convert.ToInt32(reader.GetValue(0));
+                item.ParsedRows = Convert.ToInt32(reader.GetValue(1));
                 item.Watermark = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
                 item.LastEtlRun = reader.IsDBNull(3) ? null : reader.GetDateTime(3);
                 item.ServerVersion = reader.IsDBNull(4) ? null : reader.GetString(4);
@@ -216,11 +218,13 @@ public sealed class InfraHealthService : IDisposable
     // ========================================================================
     private async Task<List<WebsiteHealthItem>> ProbeWebsitesAsync()
     {
+        // Only probe production IIS endpoints. The dev Kestrel (port 7000) check
+        // was ported from the Worker but is never running in production — removed to
+        // avoid a permanent "Endpoint Unhealthy" warning on the Tron dashboard.
         var targets = new (string Name, string Url, bool Critical, bool IsPixelTest)[]
         {
             ("IIS Production (HTTP)",   "http://192.168.88.176/health",  true,  false),
             ("IIS Pixel Endpoint",      "http://192.168.88.176/HEALTHCHECK/probe_SMART.GIF?_hc=1", true, true),
-            ("Dev Kestrel (HTTP)",      "http://localhost:7000/health",  false, false),
         };
 
         var tasks = targets.Select(async t =>

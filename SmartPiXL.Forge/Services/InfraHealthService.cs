@@ -179,18 +179,20 @@ public sealed class InfraHealthService : IDisposable
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT 
-                    (SELECT COUNT(*) FROM PiXL.Raw) AS TestRows,
-                    (SELECT COUNT(*) FROM PiXL.Parsed) AS ParsedRows,
+                    (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
+                     WHERE object_id = OBJECT_ID('PiXL.Raw') AND index_id IN (0,1)) AS TestRows,
+                    (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
+                     WHERE object_id = OBJECT_ID('PiXL.Parsed') AND index_id IN (0,1)) AS ParsedRows,
                     (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS Watermark,
                     (SELECT LastRunAt FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS LastEtlRun,
                     @@VERSION AS ServerVersion";
-            cmd.CommandTimeout = 5;
+            cmd.CommandTimeout = 10;
 
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                item.TestRows = reader.GetInt32(0);
-                item.ParsedRows = reader.GetInt32(1);
+                item.TestRows = Convert.ToInt32(reader.GetValue(0));
+                item.ParsedRows = Convert.ToInt32(reader.GetValue(1));
                 item.Watermark = reader.IsDBNull(2) ? 0 : Convert.ToInt64(reader.GetValue(2));
                 item.LastEtlRun = reader.IsDBNull(3) ? null : reader.GetDateTime(3);
                 item.ServerVersion = reader.IsDBNull(4) ? null : reader.GetString(4);

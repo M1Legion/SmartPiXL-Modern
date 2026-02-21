@@ -231,6 +231,18 @@ public sealed class PipeClientService : BackgroundService
             DisposePipe();
             return false;
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // IIS app pool identity may lack pipe access — treat as transient
+            _reconnectAttempts++;
+            SetNextReconnectTime();
+            if (_reconnectAttempts <= 3 || _reconnectAttempts % 10 == 0)
+            {
+                _logger.Warning($"PipeClient: access denied to pipe (attempt {_reconnectAttempts}) — {ex.Message}");
+            }
+            DisposePipe();
+            return false;
+        }
     }
 
     /// <summary>

@@ -4,12 +4,11 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Endpoints;
 
 // ============================================================================
-// INTERNAL ENDPOINTS — Localhost-only HTTP bridge for the Worker process.
+// INTERNAL ENDPOINTS — Localhost-only HTTP bridge for Forge/Sentinel processes.
 //
-// The SmartPiXL Worker (ETL, sync, healing, dashboards) runs as a separate
-// Windows Service. It needs to query and control state that lives inside the
-// IIS Edge process (circuit breaker, queue depth, geo cache). These endpoints
-// provide that bridge.
+// The SmartPiXL Forge and Sentinel processes run as separate Windows Services.
+// They need to query and control state inside the IIS Edge process (pipe
+// connectivity, queue depth, geo cache). These endpoints provide that bridge.
 //
 // ENDPOINTS:
 //   GET  /internal/health        → EdgeHealthStatus JSON (circuit, queue, uptime)
@@ -35,7 +34,9 @@ public static class InternalEndpoints
     public static void MapInternalEndpoints(this WebApplication app)
     {
         // ── Health snapshot ─────────────────────────────────────────
-        app.MapGet("/internal/health", (HttpContext ctx, DatabaseWriterService dbWriter) =>
+        // Edge no longer owns DatabaseWriterService (moved to Forge).
+        // Health now reports PipeClientService connectivity + queue depth.
+        app.MapGet("/internal/health", (HttpContext ctx, PipeClientService pipeClient) =>
         {
             if (!IsLoopback(ctx))
             {
@@ -46,16 +47,18 @@ public static class InternalEndpoints
             var elapsed = Stopwatch.GetElapsedTime(StartTicks);
             return Results.Json(new EdgeHealthStatus
             {
-                Circuit = dbWriter.Circuit.ToString(),
-                LastTripReason = dbWriter.LastTripReason,
-                QueueDepth = dbWriter.QueueDepth,
+                Circuit = pipeClient.IsConnected ? "Closed" : "Open",
+                LastTripReason = pipeClient.IsConnected ? null : "Pipe disconnected",
+                QueueDepth = pipeClient.QueueDepth,
                 UptimeSeconds = elapsed.TotalSeconds,
                 IsReachable = true
             });
         });
 
         // ── Circuit breaker reset ───────────────────────────────────
-        app.MapPost("/internal/circuit-reset", (HttpContext ctx, DatabaseWriterService dbWriter) =>
+        // Edge pipe reconnects automatically; reset is a no-op but kept
+        // for API compatibility with Forge/Sentinel health probes.
+        app.MapPost("/internal/circuit-reset", (HttpContext ctx) =>
         {
             if (!IsLoopback(ctx))
             {
@@ -63,8 +66,7 @@ public static class InternalEndpoints
                 return Results.Empty;
             }
 
-            var reset = dbWriter.TryReset();
-            return Results.Json(new { success = reset });
+            return Results.Json(new { success = true });
         });
 
         // ── Geo cache invalidation ─────────────────────────────────

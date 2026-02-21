@@ -95,6 +95,27 @@ builder.Services.AddSingleton<EmailNotificationService>();
 // it only provides the API surface for operator interaction.
 builder.Services.AddSingleton<RemediationService>();
 
+// MarkdownAtlasService: Reads docs/atlas/*.md, parses frontmatter + 4 tiers,
+// converts to HTML via Markdig, caches with FileSystemWatcher invalidation.
+builder.Services.AddSingleton(sp =>
+{
+    var logger = sp.GetRequiredService<ITrackingLogger>();
+    // Resolution order:
+    // 1. Explicit config via appsettings or env var (Atlas:DocsPath)
+    // 2. Bundled with publish output (ContentRootPath/docs/atlas)
+    // 3. Source-relative (ContentRootPath/../docs/atlas — works in dev)
+    var configPath = builder.Configuration["Atlas:DocsPath"];
+    var bundledPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "docs", "atlas"));
+    var sourcePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "docs", "atlas"));
+
+    var docsPath = configPath != null && Directory.Exists(configPath) ? configPath
+                 : Directory.Exists(bundledPath) ? bundledPath
+                 : sourcePath;
+
+    logger.Info($"[Atlas] Docs path resolved: {docsPath} (exists: {Directory.Exists(docsPath)})");
+    return new MarkdownAtlasService(docsPath, logger);
+});
+
 // CORS: Atlas is public-facing, Tron dashboard is localhost-only.
 builder.Services.AddCors();
 

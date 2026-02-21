@@ -1743,7 +1743,7 @@ body::before {
           <div class="pipe-node" id="pipe-sql" onclick="drillPipeline('sql')">
             <div class="pipe-node-label">SQL WRITE</div>
             <div class="pipe-node-value" id="pipe-sql-val">--</div>
-            <div class="pipe-node-sub" id="pipe-sql-sub">PiXL.Raw</div>
+            <div class="pipe-node-sub" id="pipe-sql-sub">PiXL.Test</div>
           </div>
           <div class="pipe-arrow" id="pipe-arrow-2"></div>
           <div class="pipe-node" id="pipe-etl" onclick="drillPipeline('etl')">
@@ -1804,6 +1804,18 @@ body::before {
     <div class="panel" style="margin-bottom:24px;">
       <div class="panel-title">INFRASTRUCTURE</div>
       <div id="infra-detail"><div class="loading">LOADING</div></div>
+    </div>
+
+    <!-- Pipeline Health + Remediations -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">PIPELINE HEALTH</div>
+        <div id="pipeline-health"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">REMEDIATIONS</div>
+        <div id="remediation-log"><div class="loading">LOADING</div></div>
+      </div>
     </div>
 
     <!-- Live Feed (compact, 15 hits) -->
@@ -1901,6 +1913,54 @@ body::before {
         <div id="a-etl-details" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
     </div>
+
+    <!-- Sessions + Dead Internet -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">SESSION ANALYSIS</div>
+        <div id="session-summary"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">DEAD INTERNET INDEX</div>
+        <div id="dead-internet"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Customer Quality + Cross-Customer -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">CUSTOMER QUALITY</div>
+        <div id="customer-quality"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">CROSS-CUSTOMER INTEL</div>
+        <div id="cross-customer"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Impossible Travel + Device Lifecycle -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">IMPOSSIBLE TRAVEL</div>
+        <div id="impossible-travel"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">DEVICE LIFECYCLE</div>
+        <div id="device-lifecycle"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Subnet Clusters + Device Hops -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">SUBNET CLUSTERS</div>
+        <div id="subnet-clusters"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">DEVICE HOPS</div>
+        <div id="device-hops"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1929,6 +1989,17 @@ const API = {
   evasion:      () => fetchJson('/api/dash/evasion'),
   behavior:     () => fetchJson('/api/dash/behavior'),
   fingerprints: () => fetchJson('/api/dash/fingerprints?limit=12'),
+  sessions:     () => fetchJson('/api/dash/sessions'),
+  deadInternet: () => fetchJson('/api/dash/dead-internet'),
+  custQuality:  () => fetchJson('/api/dash/customer-quality'),
+  crossCustomer:() => fetchJson('/api/dash/cross-customer'),
+  crossDetail:  () => fetchJson('/api/dash/cross-customer/detail'),
+  impossTravel: () => fetchJson('/api/dash/impossible-travel'),
+  deviceLife:   () => fetchJson('/api/dash/device-lifecycle'),
+  deviceHops:   () => fetchJson('/api/dash/device-hops'),
+  subnets:      () => fetchJson('/api/dash/subnet-clusters'),
+  pipeline:     () => fetchJson('/api/dash/pipeline'),
+  remediations: () => fetchJson('/api/dash/remediations'),
 };
 
 let lastData = {};
@@ -2179,7 +2250,7 @@ function drillPipeline(stage) {
     html += di('Response Time', sql?.responseMs != null ? sql.responseMs + 'ms' : '--', sql?.responseMs > 200 ? 'warn' : 'ok');
     html += di('Data Source', sql?.dataSource || '--');
     html += di('Database', sql?.database || '--');
-    html += di('PiXL.Raw Rows', num(sql?.testRows));
+    html += di('PiXL.Test Rows', num(sql?.testRows));
     html += di('PiXL.Parsed Rows', num(sql?.parsedRows));
     html += di('Watermark', num(sql?.watermark));
     html += di('Last ETL Run', sql?.lastEtlRun ? timeAgo(sql.lastEtlRun) : '--');
@@ -2187,7 +2258,7 @@ function drillPipeline(stage) {
     if (!sql?.isConnected) {
       html += sug('SQL Server is disconnected. Check that the SQL2025 instance is running:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>Verify the connection string in appsettings.json points to localhost\\SQL2025.');
     } else {
-      html += sug('SQL connection is healthy. PiXL.Raw stores raw ingested hits. PiXL.Parsed contains ETL-processed rows with all 167+ signals materialized.');
+      html += sug('SQL connection is healthy. PiXL.Test stores raw ingested hits. PiXL.Parsed contains ETL-processed rows with all 167+ signals materialized.');
     }
     openModal('SQL WRITE STAGE', html);
   }
@@ -2264,7 +2335,7 @@ function drillPipelineTable(table) {
     html += di('Latest', pipe.testLatest ? timeAgo(pipe.testLatest) : '--');
     html += di('Parse Watermark', num(pipe.parseWatermark));
     html += '</div>';
-    openModal('PiXL.Raw', html);
+    openModal('PiXL.Test', html);
   } else if (table === 'parsed') {
     html += di('Rows', num(pipe.parsedRows));
     html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 50 ? 'warn' : 'ok');
@@ -2341,7 +2412,7 @@ function drillStatus(type) {
     html += di('Instance', s?.dataSource || '--');
     html += di('Database', s?.database || '--');
     html += di('Response', s?.responseMs != null ? s.responseMs + 'ms' : '--');
-    html += di('PiXL.Raw', num(s?.testRows) + ' rows');
+    html += di('PiXL.Test', num(s?.testRows) + ' rows');
     html += di('PiXL.Parsed', num(s?.parsedRows) + ' rows');
     html += di('Watermark', num(s?.watermark));
     html += di('Last ETL', s?.lastEtlRun ? timeAgo(s.lastEtlRun) : '--');
@@ -2433,7 +2504,7 @@ function drillIssue(idx) {
 function getFixSuggestion(issue) {
   const t = issue.title.toLowerCase();
   if (t.includes('sql') && t.includes('disconnect')) return 'Check SQL Server service:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>If stopped, start it:<br><code style="color:var(--cyan)">Start-Service MSSQL$SQL2025</code>';
-  if (t.includes('data not flowing')) return 'Check that the SmartPiXL process is running and that the IIS app pool identity has SQL permissions.<br><code style="color:var(--cyan)">Get-Process SmartPiXL</code>';
+  if (t.includes('data not flowing')) return 'Check that the TrackingPixel process is running and that the IIS app pool identity has SQL permissions.<br><code style="color:var(--cyan)">Get-Process TrackingPixel</code>';
   if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
   if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
   if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
@@ -2614,7 +2685,7 @@ function renderPipeline(health, infra) {
   // Node 2: SQL WRITE
   const maxTestId = pipe?.maxTestId ?? (df?.maxTestId ?? (sql?.testRows ?? '--'));
   document.getElementById('pipe-sql-val').textContent = typeof maxTestId === 'number' ? num(maxTestId) : maxTestId;
-  document.getElementById('pipe-sql-sub').textContent = 'PiXL.Raw';
+  document.getElementById('pipe-sql-sub').textContent = 'PiXL.Test';
   document.getElementById('pipe-sql').className = 'pipe-node' + (sql?.isConnected === false ? ' down' : sql?.isConnected ? ' healthy' : '');
   document.getElementById('pipe-arrow-1').className = 'pipe-arrow' + (sql?.isConnected === false ? ' dead' : '');
 
@@ -2943,7 +3014,7 @@ function renderInfraDetail(infra) {
     const s = infra.sql;
     html += `<div class="infra-item"><div class="infra-dot ${s.isConnected ? 'up' : 'down'}"></div><div class="infra-item-name">${s.dataSource || 'SQL Server'} / ${s.database || '?'}</div><div class="infra-item-ms">${s.responseMs}ms</div></div>`;
     if (s.isConnected) {
-      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Raw: ${num(s.testRows)} · PiXL.Parsed: ${num(s.parsedRows)} · Watermark: ${num(s.watermark)}</div>`;
+      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Test: ${num(s.testRows)} Â· PiXL.Parsed: ${num(s.parsedRows)} Â· Watermark: ${num(s.watermark)}</div>`;
       if (s.lastEtlRun) html += `<div style="font-size:0.72rem;color:var(--text-dim);padding:2px 0 0 18px;">Last ETL: ${timeAgo(s.lastEtlRun)}</div>`;
     } else {
       html += `<div style="font-size:0.78rem;color:var(--red);padding:4px 0 0 18px;">${s.error || 'Connection failed'}</div>`;
@@ -3344,8 +3415,8 @@ function renderEvasion(data) {
 function renderBehavior(data) {
   const el = document.getElementById('behavior-compare');
   if (!data || !data.length) { el.innerHTML = '<div>No data</div>'; return; }
-  const human = data.find(d => d.classification && d.classification.includes('<50'));
-  const bot = data.find(d => d.classification && d.classification.includes('50'));
+  const human = data.find(d => d.classification && d.classification.startsWith('Human'));
+  const bot = data.find(d => d.classification && d.classification.startsWith('Bot'));
   const stat = (label, hv) => `<div class="behavior-stat"><span>${label}</span><span class="val">${hv??'--'}</span></div>`;
   const col = (title, cls, d) => `
     <div class="behavior-col">
@@ -3406,6 +3477,140 @@ function renderDevices(data) {
 }
 
 // ============================================================================
+// SESSIONS, DEAD-INTERNET, CUSTOMER-QUALITY, CROSS-CUSTOMER, IMPOSSIBLE-TRAVEL
+// DEVICE-LIFECYCLE, DEVICE-HOPS, SUBNET-CLUSTERS, PIPELINE, REMEDIATIONS
+// ============================================================================
+
+function renderSessions(rows) {
+    const el = document.getElementById('session-summary');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No session data</p>'; return; }
+    const cols = ['companyID','sessionDate','totalSessions','avgPagesPerSession','avgDurationSec','bounceRatePct'];
+    const labels = ['Company','Date','Sessions','Avg Pages','Avg Duration (s)','Bounce %'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? (typeof r[c]==='number' ? num(r[c]) : r[c]) : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderDeadInternet(rows) {
+    const el = document.getElementById('dead-internet');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No dead-internet data</p>'; return; }
+    const cols = ['companyID','weekStart','totalHits','zeroMouseHits','zeroMousePct','definiteBotHits','definiteBotPct','likelyHumanHits','likelyHumanPct'];
+    const labels = ['Company','Week','Hits','0-Mouse','0-Mouse %','Bot Hits','Bot %','Human Hits','Human %'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? (typeof r[c]==='number' ? num(r[c]) : r[c]) : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderCustomerQuality(rows) {
+    const el = document.getElementById('customer-quality');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No customer-quality data</p>'; return; }
+    const cols = ['companyID','piXLID','monthStart','totalHits','uniqueDevices','uniqueIPs','botPct','avgBotScore','avgAnomalyScore','definiteHumanHits','matchedVisitors'];
+    const labels = ['Company','PiXL','Month','Hits','Devices','IPs','Bot %','Bot Score','Anomaly','Human','Matched'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? (typeof r[c]==='number' ? num(r[c]) : r[c]) : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderCrossCustomer(rows) {
+    const el = document.getElementById('cross-customer');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No cross-customer data</p>'; return; }
+    const cols = Object.keys(rows[0]);
+    el.innerHTML = `<table class="feed-table"><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? (typeof r[c]==='number' ? num(r[c]) : r[c]) : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderImpossibleTravel(rows) {
+    const el = document.getElementById('impossible-travel');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No impossible-travel data</p>'; return; }
+    const cols = Object.keys(rows[0]);
+    el.innerHTML = `<table class="feed-table"><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? (typeof r[c]==='number' ? num(r[c]) : r[c]) : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderDeviceLifecycle(rows) {
+    const el = document.getElementById('device-lifecycle');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No device-lifecycle data</p>'; return; }
+    const cols = ['deviceHash','hitCount','companyCount','lifespanDays','daysSinceLastSeen','isDormant','firstSeen','lastSeen'];
+    const labels = ['Device','Hits','Companies','Lifespan (d)','Last Seen (d)','Dormant','First Seen','Last Seen'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>{
+            let v = r[c];
+            if (v == null) return '<td>--</td>';
+            if (c === 'isDormant') return '<td style="color:' + (v ? 'var(--orange)' : 'var(--green)') + ';">' + (v ? 'Yes' : 'No') + '</td>';
+            if (c === 'deviceHash') return '<td title="' + v + '">' + String(v).substring(0,10) + '...</td>';
+            if (typeof v === 'number') return '<td>' + num(v) + '</td>';
+            return '<td>' + v + '</td>';
+        }).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderDeviceHops(rows) {
+    const el = document.getElementById('device-hops');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No device-hops data</p>'; return; }
+    const cols = ['deviceHash','companyID','uniqueIPs','hitCount','firstSeen','lastSeen'];
+    const labels = ['Device','Company','Unique IPs','Hits','First Seen','Last Seen'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>{
+            let v = r[c];
+            if (v == null) return '<td>--</td>';
+            if (c === 'deviceHash') return '<td title="' + v + '">' + String(v).substring(0,10) + '...</td>';
+            if (typeof v === 'number') return '<td>' + num(v) + '</td>';
+            return '<td>' + v + '</td>';
+        }).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderSubnets(rows) {
+    const el = document.getElementById('subnet-clusters');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No subnet data</p>'; return; }
+    const cols = ['subnet24','totalHits','uniqueIPs','uniqueFingerprints','avgBotScore','hasSubnetAlert','firstSeen','lastSeen'];
+    const labels = ['Subnet /24','Hits','IPs','Fingerprints','Avg Bot','Alert','First','Last'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>{
+            let v = r[c];
+            if (v == null) return '<td>--</td>';
+            if (c === 'hasSubnetAlert') return '<td style="color:' + (v ? 'var(--red)' : 'var(--green)') + ';">' + (v ? 'YES' : 'No') + '</td>';
+            if (c === 'avgBotScore') return '<td style="color:' + (v > 60 ? 'var(--red)' : v > 30 ? 'var(--orange)' : 'var(--green)') + ';">' + num(v) + '</td>';
+            if (typeof v === 'number') return '<td>' + num(v) + '</td>';
+            return '<td>' + v + '</td>';
+        }).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderPipelineHealth(data) {
+    const el = document.getElementById('pipeline-health');
+    if (!el || !data) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No pipeline data</p>'; return; }
+    const pairs = [
+        ['Raw Rows', data.rawRows],
+        ['Parsed Rows', data.parsedRows],
+        ['Device Rows', data.deviceRows],
+        ['IP Rows', data.ipRows],
+        ['Match Rows', data.matchRows],
+        ['Matches Pending', data.matchesPending],
+        ['Matches Resolved', data.matchesResolved],
+        ['Parse Lag', data.parseLag],
+        ['Match Lag', data.matchLag],
+        ['Parse Last Run', data.parseLastRunAt],
+        ['Match Last Run', data.matchLastRunAt],
+    ];
+    el.innerHTML = `<table class="feed-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${
+        pairs.map(([k,v])=>`<tr><td>${k}</td><td>${v != null ? (typeof v==='number' ? num(v) : v) : '--'}</td></tr>`).join('')
+    }</tbody></table>`;
+}
+
+function renderRemediations(rows) {
+    const el = document.getElementById('remediation-log');
+    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No remediations</p>'; return; }
+    const cols = ['id','issueType','description','detectedAtUtc','executedAtUtc','executedBy'];
+    const labels = ['ID','Issue','Description','Detected','Executed','By'];
+    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? r[c] : '--'}</td>`).join('')}</tr>`).join('')
+    }</tbody></table>`;
+}
+
+// ============================================================================
 // REFRESH LOOP â€” Only active view fetches & renders
 // ============================================================================
 // ============================================================================
@@ -3451,6 +3656,10 @@ const OPS_STEPS = [
     render() { renderXavierSync(lastData.xavierSync); }},
   { name: 'FEED', contestant: 'GEM', fn: API.recent, key: 'recent',
     render() { renderOpsFeed(lastData.recent); }},
+  { name: 'PIPELINE', contestant: 'DUMONT', fn: API.pipeline, key: 'pipeline',
+    render() { renderPipelineHealth(lastData.pipeline); }},
+  { name: 'REMEDIATE', contestant: 'BECK', fn: API.remediations, key: 'remediations',
+    render() { renderRemediations(lastData.remediations); }},
 ];
 
 // Analytics view: 10 sequential calls â€” each section pops in as data arrives
@@ -3475,6 +3684,22 @@ const ANALYTICS_STEPS = [
     render() { renderFingerprints(lastData.fingerprints); }},
   { name: 'DEVICES', contestant: 'FLYNN', fn: API.devices, key: 'devices',
     render() { renderDevices(lastData.devices); }},
+  { name: 'SESSIONS', contestant: 'DUMONT', fn: API.sessions, key: 'sessions',
+    render() { renderSessions(lastData.sessions); }},
+  { name: 'DEAD-NET', contestant: 'BECK', fn: API.deadInternet, key: 'deadInternet',
+    render() { renderDeadInternet(lastData.deadInternet); }},
+  { name: 'QUALITY', contestant: 'CYRUS', fn: API.custQuality, key: 'custQuality',
+    render() { renderCustomerQuality(lastData.custQuality); }},
+  { name: 'CROSS-CX', contestant: 'PAIGE', fn: API.crossCustomer, key: 'crossCustomer',
+    render() { renderCrossCustomer(lastData.crossCustomer); }},
+  { name: 'TRAVEL', contestant: 'ABLE', fn: API.impossTravel, key: 'impossTravel',
+    render() { renderImpossibleTravel(lastData.impossTravel); }},
+  { name: 'LIFECYCLE', contestant: 'ISO', fn: API.deviceLife, key: 'deviceLife',
+    render() { renderDeviceLifecycle(lastData.deviceLife); }},
+  { name: 'HOPS', contestant: 'DYSON', fn: API.deviceHops, key: 'deviceHops',
+    render() { renderDeviceHops(lastData.deviceHops); }},
+  { name: 'SUBNETS', contestant: 'CROM', fn: API.subnets, key: 'subnets',
+    render() { renderSubnets(lastData.subnets); }},
 ];
 
 async function runPipeline(steps) {

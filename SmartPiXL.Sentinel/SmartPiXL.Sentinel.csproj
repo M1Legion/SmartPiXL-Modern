@@ -14,6 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="0.45.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.2" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.2" />
@@ -21,6 +22,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SmartPiXL.Shared\SmartPiXL.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Bundle docs/atlas markdown files into the publish output so they travel with deployment -->
+  <ItemGroup>
+    <Content Include="..\docs\atlas\**\*.md" LinkBase="docs\atlas" CopyToPublishDirectory="PreserveNewest" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

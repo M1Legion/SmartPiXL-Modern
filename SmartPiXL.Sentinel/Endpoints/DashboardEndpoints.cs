@@ -122,79 +122,74 @@ public static class DashboardEndpoints
                 await WriteJsonAsync(ctx, cached);
                 return;
             }
-            var data = await QuerySingleRowAsync(settings.ConnectionString,
-                "SELECT * FROM vw_Dash_SystemHealth");
-            _healthCache = data;
-            _healthExpiry = now + CacheDuration;
-            await WriteJsonAsync(ctx, data);
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QuerySingleRowAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_SystemHealth");
+                _healthCache = data;
+                _healthExpiry = now + CacheDuration;
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/hourly", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
             var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP (@N) * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC",
                 new SqlParameter("@N", hours));
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/bots", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_BotBreakdown ORDER BY SortOrder");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/bot-signals", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 20 * FROM vw_Dash_TopBotSignals ORDER BY TimesTriggered DESC");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/devices", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 30 * FROM vw_Dash_DeviceBreakdown ORDER BY HitCount DESC");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/evasion", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QuerySingleRowAsync(settings.ConnectionString,
+            await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_EvasionSummary");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/behavior", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_BehavioralAnalysis");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/recent", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_RecentHits");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/fingerprints", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 50;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP (@N) * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC",
                 new SqlParameter("@N", limit));
-            await WriteJsonAsync(ctx, data);
         });
 
         // ====================================================================
@@ -203,9 +198,12 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/infra", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var infraService = ctx.RequestServices.GetRequiredService<InfraHealthService>();
-            var snapshot = await infraService.GetHealthAsync();
-            await WriteJsonAsync(ctx, snapshot);
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var infraService = ctx.RequestServices.GetRequiredService<InfraHealthService>();
+                var snapshot = await infraService.GetHealthAsync();
+                await WriteJsonAsync(ctx, snapshot);
+            });
         });
 
         // ====================================================================
@@ -221,11 +219,14 @@ public static class DashboardEndpoints
                 await WriteJsonAsync(ctx, cached);
                 return;
             }
-            var data = await QueryAsync(settings.ConnectionString,
-                "SELECT * FROM vw_Dash_XavierSync");
-            _xavierCache = data;
-            _xavierExpiry = now + CacheDuration;
-            await WriteJsonAsync(ctx, data);
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_XavierSync");
+                _xavierCache = data;
+                _xavierExpiry = now + CacheDuration;
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         // ====================================================================
@@ -234,9 +235,8 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/pipeline", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QuerySingleRowAsync(settings.ConnectionString,
+            await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_PipelineHealth");
-            await WriteJsonAsync(ctx, data);
         });
 
         // ====================================================================
@@ -246,73 +246,64 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/sessions", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_SessionSummary");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/dead-internet", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_DeadInternet");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/customer-quality", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_CustomerQuality");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/cross-customer", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_CrossCustomer");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/cross-customer/detail", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_CrossCustomerDetail");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/impossible-travel", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_ImpossibleTravel");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/device-lifecycle", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_DeviceLifecycle");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/device-hops", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_DeviceCustomerHops");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapGet("/api/dash/subnet-clusters", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_SubnetClusters");
-            await WriteJsonAsync(ctx, data);
         });
 
         // ====================================================================
@@ -322,25 +313,30 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/remediations", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var data = await QueryAsync(settings.ConnectionString,
+            await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 50 * FROM Ops.RemediationLog ORDER BY DetectedAtUtc DESC");
-            await WriteJsonAsync(ctx, data);
         });
 
         app.MapPost("/api/dash/remediation/approve/{id:int}", async (HttpContext ctx, int id) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
-            var (success, message) = await remediation.ExecuteRemediationAsync(id, ctx.RequestAborted);
-            await WriteJsonAsync(ctx, new { success, message });
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
+                var (success, message) = await remediation.ExecuteRemediationAsync(id, ctx.RequestAborted);
+                await WriteJsonAsync(ctx, new { success, message });
+            });
         });
 
         app.MapPost("/api/dash/remediation/skip/{id:int}", async (HttpContext ctx, int id) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
-            var skipped = await remediation.SkipRemediationAsync(id, ctx.RequestAborted);
-            await WriteJsonAsync(ctx, new { success = skipped, message = skipped ? "Skipped" : "Not found or not pending" });
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
+                var skipped = await remediation.SkipRemediationAsync(id, ctx.RequestAborted);
+                await WriteJsonAsync(ctx, new { success = skipped, message = skipped ? "Skipped" : "Not found or not pending" });
+            });
         });
 
         // ====================================================================
@@ -349,14 +345,17 @@ public static class DashboardEndpoints
         app.MapPost("/api/dash/circuit-reset", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var edge = ctx.RequestServices.GetRequiredService<IEdgeHealthClient>();
-            var reset = await edge.ResetCircuitAsync(ctx.RequestAborted);
-            var health = await edge.GetHealthAsync(ctx.RequestAborted);
-            await WriteJsonAsync(ctx, new
+            await SafeExecuteAsync(ctx, async () =>
             {
-                success = reset,
-                state = health.Circuit,
-                message = reset ? "Circuit breaker reset to Closed" : "Already closed or Edge unreachable"
+                var edge = ctx.RequestServices.GetRequiredService<IEdgeHealthClient>();
+                var reset = await edge.ResetCircuitAsync(ctx.RequestAborted);
+                var health = await edge.GetHealthAsync(ctx.RequestAborted);
+                await WriteJsonAsync(ctx, new
+                {
+                    success = reset,
+                    state = health.Circuit,
+                    message = reset ? "Circuit breaker reset to Closed" : "Already closed or Edge unreachable"
+                });
             });
         });
 
@@ -366,17 +365,20 @@ public static class DashboardEndpoints
         app.MapPost("/api/dash/test-notify", async (HttpContext ctx) =>
         {
             if (!RequireLoopback(ctx)) return;
-            var email = ctx.RequestServices.GetRequiredService<EmailNotificationService>();
-            var (emailSent, smsSent) = await email.NotifyAsync(
-                "TestNotification",
-                "Test Alert — System OK",
-                $"This is a test notification from SmartPiXL Sentinel.\nTimestamp: {DateTime.UtcNow:u}\nEmail + SMS channels verified.");
-            await WriteJsonAsync(ctx, new
+            await SafeExecuteAsync(ctx, async () =>
             {
-                emailSent,
-                smsSent,
-                emailConfigured = email.IsConfigured,
-                smsConfigured = email.IsSmsConfigured
+                var email = ctx.RequestServices.GetRequiredService<EmailNotificationService>();
+                var (emailSent, smsSent) = await email.NotifyAsync(
+                    "TestNotification",
+                    "Test Alert — System OK",
+                    $"This is a test notification from SmartPiXL Sentinel.\nTimestamp: {DateTime.UtcNow:u}\nEmail + SMS channels verified.");
+                await WriteJsonAsync(ctx, new
+                {
+                    emailSent,
+                    smsSent,
+                    emailConfigured = email.IsConfigured,
+                    smsConfigured = email.IsSmsConfigured
+                });
             });
         });
 
@@ -488,6 +490,80 @@ public static class DashboardEndpoints
     {
         var results = await QueryAsync(connectionString, sql);
         return results.FirstOrDefault() ?? new Dictionary<string, object?>();
+    }
+
+    // ========================================================================
+    // SAFE QUERY WRAPPERS — Execute SQL view queries with error handling.
+    //
+    // Returns structured JSON error on SqlException/timeout instead of
+    // propagating unhandled exceptions as raw 500s. (BUG-Q4 fix)
+    // ========================================================================
+
+    /// <summary>
+    /// Execute a multi-row query, serialize to JSON, and write the response.
+    /// On failure, returns HTTP 503 with structured <c>{ error, detail }</c> JSON.
+    /// </summary>
+    private static async Task QueryViewAsync(
+        HttpContext ctx, string connectionString, string sql, SqlParameter? param = null)
+    {
+        try
+        {
+            var data = await QueryAsync(connectionString, sql, param);
+            await WriteJsonAsync(ctx, data);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Error($"[Dashboard] Query failed: {ex.Message}");
+            if (!ctx.Response.HasStarted)
+            {
+                ctx.Response.StatusCode = 503;
+                await WriteJsonAsync(ctx, new { error = "Query failed", detail = ex.Message });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Execute a single-row query, serialize to JSON, and write the response.
+    /// On failure, returns HTTP 503 with structured <c>{ error, detail }</c> JSON.
+    /// </summary>
+    private static async Task QueryViewSingleRowAsync(HttpContext ctx, string connectionString, string sql)
+    {
+        try
+        {
+            var data = await QuerySingleRowAsync(connectionString, sql);
+            await WriteJsonAsync(ctx, data);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Error($"[Dashboard] Query failed: {ex.Message}");
+            if (!ctx.Response.HasStarted)
+            {
+                ctx.Response.StatusCode = 503;
+                await WriteJsonAsync(ctx, new { error = "Query failed", detail = ex.Message });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Execute arbitrary async work with structured error handling.
+    /// On failure, returns HTTP 503 with structured <c>{ error, detail }</c> JSON.
+    /// Used for non-query endpoints (infra, remediation, notifications).
+    /// </summary>
+    private static async Task SafeExecuteAsync(HttpContext ctx, Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Error($"[Dashboard] Request failed: {ex.Message}");
+            if (!ctx.Response.HasStarted)
+            {
+                ctx.Response.StatusCode = 503;
+                await WriteJsonAsync(ctx, new { error = "Request failed", detail = ex.Message });
+            }
+        }
     }
 
     private static async Task WriteJsonAsync(HttpContext ctx, object data)

@@ -2,28 +2,31 @@ using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
+using SmartPiXL.Sentinel.Services;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Sentinel.Endpoints;
 
 // ============================================================================
-// ATLAS DOCUMENTATION PORTAL — Public-facing API for the 4-tier docs portal.
+// ATLAS DOCUMENTATION PORTAL — Markdown-backed API + live SQL metrics.
 //
 // ROUTE MAP:
-//   /atlas                  →  wwwroot/atlas.html (documentation portal SPA)
-//   /api/atlas/sections     →  Docs.Section (full content tree, all 4 tiers)
-//   /api/atlas/section/{slug} → Single Docs.Section by slug
-//   /api/atlas/status       →  Docs.SystemStatus (phase + status for roadmap)
-//   /api/atlas/metrics      →  Docs.Metric (hero stats, some with live SQL queries)
+//   /atlas                    →  wwwroot/atlas.html (SPA shell)
+//   /api/atlas/sections       →  All sections from markdown files (4 tiers)
+//   /api/atlas/section/{slug} →  Single section by slug
+//   /api/atlas/categories     →  Sections grouped by category
+//   /api/atlas/status         →  System statuses from Docs.SystemStatus (SQL)
+//   /api/atlas/metrics        →  Live metrics from Docs.Metric (SQL)
 //
 // DESIGN:
-//   - NOT localhost-restricted — Atlas is for external audiences
-//   - Read-only: all data comes from the Docs schema
-//   - Live metrics execute QuerySql dynamically (single scalar SELECTs)
+//   Content comes from docs/atlas/*.md files (version-controlled, Markdig-parsed).
+//   Live metrics come from SQL (row counts, watermarks, etc.).
+//   FileSystemWatcher invalidates cache on markdown changes.
 // ============================================================================
 
 /// <summary>
-/// Atlas documentation portal API endpoints — serves SQL-backed 4-tier content.
+/// Atlas documentation portal API endpoints — serves markdown-backed 4-tier content
+/// with live SQL metrics. Content is read from docs/atlas/*.md and parsed via Markdig.
 /// Unlike <see cref="DashboardEndpoints"/> (localhost-only), Atlas endpoints are
 /// accessible from any IP.
 /// </summary>
@@ -33,7 +36,8 @@ public static class AtlasEndpoints
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false
+        WriteIndented = false,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
     private static ITrackingLogger _logger = null!;
@@ -42,24 +46,20 @@ public static class AtlasEndpoints
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
         _logger = app.Services.GetRequiredService<ITrackingLogger>();
+        var atlas = app.Services.GetRequiredService<MarkdownAtlasService>();
 
         // ====================================================================
-        // ATLAS HTML — Professional documentation portal
+        // ATLAS HTML — SPA shell (served as static file)
         // ====================================================================
         app.MapGet("/atlas", ServeAtlasHtml);
 
         // ====================================================================
-        // SECTIONS — Full content tree with all 4 audience tiers
+        // SECTIONS — All markdown-backed content
         // ====================================================================
-        app.MapGet("/api/atlas/sections", async (HttpContext ctx) =>
+        app.MapGet("/api/atlas/sections", (HttpContext ctx) =>
         {
-            var sections = await QueryAsync(settings.ConnectionString, @"
-                SELECT SectionId, ParentSectionId, Slug, Title, IconClass, SortOrder,
-                       PitchHtml, ManagementHtml, TechnicalHtml, WalkthroughHtml,
-                       MermaidDiagram, LastUpdated, UpdatedBy
-                FROM Docs.Section
-                ORDER BY SortOrder, SectionId");
-            await WriteJsonAsync(ctx, sections);
+            var sections = atlas.GetSections();
+            return WriteJsonAsync(ctx, sections);
         });
 
         // ====================================================================
@@ -67,48 +67,79 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/section/{slug}", async (HttpContext ctx, string slug) =>
         {
-            var sections = await QueryAsync(settings.ConnectionString, @"
-                SELECT SectionId, ParentSectionId, Slug, Title, IconClass, SortOrder,
-                       PitchHtml, ManagementHtml, TechnicalHtml, WalkthroughHtml,
-                       MermaidDiagram, LastUpdated, UpdatedBy
-                FROM Docs.Section
-                WHERE Slug = @Slug",
-                new SqlParameter("@Slug", slug));
-
-            if (sections.Count == 0)
+            var section = atlas.GetSectionBySlug(slug);
+            if (section is null)
             {
                 ctx.Response.StatusCode = 404;
                 await ctx.Response.WriteAsync("Section not found.");
                 return;
             }
-            await WriteJsonAsync(ctx, sections[0]);
+            await WriteJsonAsync(ctx, section);
         });
 
         // ====================================================================
-        // SYSTEM STATUS — Roadmap phases and feature statuses
+        // CATEGORIES — Sections grouped by category for tabbed navigation
+        // ====================================================================
+        app.MapGet("/api/atlas/categories", (HttpContext ctx) =>
+        {
+            var categories = atlas.GetCategories();
+            return WriteJsonAsync(ctx, categories);
+        });
+
+        // ====================================================================
+        // SYSTEM STATUS — Still SQL-backed (roadmap phases, live verification)
         // ====================================================================
         app.MapGet("/api/atlas/status", async (HttpContext ctx) =>
         {
-            var statuses = await QueryAsync(settings.ConnectionString, @"
-                SELECT s.SystemId, s.SystemName, s.Phase, s.Status,
-                       s.SectionId, sec.Slug AS SectionSlug,
-                       s.LastVerified, s.VerifiedBy, s.Notes
-                FROM Docs.SystemStatus s
-                LEFT JOIN Docs.Section sec ON sec.SectionId = s.SectionId
-                ORDER BY s.Phase, s.SystemName");
-            await WriteJsonAsync(ctx, statuses);
+            try
+            {
+                var statuses = await QueryAsync(settings.ConnectionString, @"
+                    SELECT s.SystemId, s.SystemName, s.Phase, s.Status,
+                           s.SectionId, s.LastVerified, s.VerifiedBy, s.Notes
+                    FROM Docs.SystemStatus s
+                    ORDER BY s.Phase, s.SystemName");
+                await WriteJsonAsync(ctx, statuses);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"[Atlas] Status query failed: {ex.Message}");
+                await WriteJsonAsync(ctx, Array.Empty<object>());
+            }
         });
 
         // ====================================================================
-        // METRICS — Hero stats + section-specific metrics (live SQL queries)
+        // METRICS — Live SQL queries for hero stats + section metrics
         // ====================================================================
         app.MapGet("/api/atlas/metrics", async (HttpContext ctx) =>
         {
-            var metrics = await GetMetricsAsync(settings.ConnectionString);
-            await WriteJsonAsync(ctx, metrics);
+            try
+            {
+                var metrics = await GetMetricsAsync(settings.ConnectionString);
+                await WriteJsonAsync(ctx, metrics);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"[Atlas] Metrics query failed: {ex.Message}");
+                await WriteJsonAsync(ctx, GetStaticFallbackMetrics());
+            }
         });
 
-        _logger.Info("[Atlas] Documentation portal endpoints mapped: /atlas, /api/atlas/*");
+        _logger.Info("[Atlas] Markdown-backed documentation portal mapped: /atlas, /api/atlas/*");
+    }
+
+    // ========================================================================
+    // STATIC FALLBACK METRICS — Used when SQL is unavailable
+    // ========================================================================
+    private static List<Dictionary<string, object?>> GetStaticFallbackMetrics()
+    {
+        return
+        [
+            new() { ["metricId"] = 1, ["sectionId"] = null, ["label"] = "Browser Signals", ["value"] = "159", ["formatHint"] = "number", ["sortOrder"] = 1 },
+            new() { ["metricId"] = 2, ["sectionId"] = null, ["label"] = "Data Points", ["value"] = "230+", ["formatHint"] = "text", ["sortOrder"] = 2 },
+            new() { ["metricId"] = 3, ["sectionId"] = null, ["label"] = "Bot Signals", ["value"] = "80+", ["formatHint"] = "text", ["sortOrder"] = 3 },
+            new() { ["metricId"] = 4, ["sectionId"] = null, ["label"] = "ETL Cadence", ["value"] = "60s", ["formatHint"] = "text", ["sortOrder"] = 4 },
+            new() { ["metricId"] = 5, ["sectionId"] = null, ["label"] = "Enrichment Steps", ["value"] = "15", ["formatHint"] = "number", ["sortOrder"] = 5 },
+        ];
     }
 
     private static async Task<List<Dictionary<string, object?>>> GetMetricsAsync(string connectionString)
@@ -159,7 +190,7 @@ public static class AtlasEndpoints
                 catch (Exception ex)
                 {
                     _logger.Warning($"[Atlas] Metric query failed for '{m.label}': {ex.Message}");
-                    value = "N/A";
+                    value = m.staticValue ?? "N/A";
                 }
             }
 

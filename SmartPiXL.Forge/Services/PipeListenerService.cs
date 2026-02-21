@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
@@ -100,12 +102,27 @@ public sealed class PipeListenerService : BackgroundService
         {
             try
             {
-                await using var pipeServer = new NamedPipeServerStream(
+                // PipeSecurity: grant the IIS app pool identity read access
+                // so the Edge (running as IIS APPPOOL\Smartpixl.info) can connect.
+                var pipeSecurity = new PipeSecurity();
+                pipeSecurity.AddAccessRule(new PipeAccessRule(
+                    new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                    PipeAccessRights.FullControl,
+                    AccessControlType.Allow));
+                pipeSecurity.AddAccessRule(new PipeAccessRule(
+                    new NTAccount("IIS APPPOOL", "Smartpixl.info"),
+                    PipeAccessRights.ReadWrite,
+                    AccessControlType.Allow));
+
+                await using var pipeServer = NamedPipeServerStreamAcl.Create(
                     pipeName,
                     PipeDirection.In,
                     _forgeSettings.MaxConcurrentPipeInstances,
                     PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                    PipeOptions.Asynchronous,
+                    inBufferSize: 0,
+                    outBufferSize: 0,
+                    pipeSecurity);
 
                 _logger.Debug($"Pipe instance {instanceId}: waiting for connection...");
                 await pipeServer.WaitForConnectionAsync(ct);

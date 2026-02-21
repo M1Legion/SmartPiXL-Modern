@@ -25,11 +25,13 @@ public sealed class TrackingSettings
     
     /// <summary>
     /// SQL Server connection string targeting the SmartPiXL database.
-    /// Default targets the local SQL2025 instance with Windows Integrated auth.
+    /// Default uses the SmartPiXL SQL login. The actual password is injected
+    /// at runtime via the <c>Tracking__ConnectionString</c> machine environment
+    /// variable — this compiled default is a safe fallback only.
     /// <c>Encrypt=True</c> is the MDSC 4.0+ default but stated explicitly for clarity.
     /// <c>TrustServerCertificate=True</c> is safe for localhost (no network boundary).
     /// </summary>
-    public string ConnectionString { get; set; } = "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;Encrypt=True;TrustServerCertificate=True";
+    public string ConnectionString { get; set; } = "Server=localhost\\SQL2025;Database=SmartPiXL;User Id=SmartPiXL;Password=OVERRIDE_VIA_ENV;TrustServerCertificate=True;Encrypt=True";
     
     /// <summary>
     /// IP addresses allowed to access the /tron dashboard and /api/dash/* endpoints
