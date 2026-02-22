@@ -406,7 +406,8 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                     src.RampUpPeriod, src.RampUpDate, src.MinOrder,
                     src.StatusId, src.IsActive, src.CreatedDate, src.ModifiedDate)
 
-                WHEN NOT MATCHED BY SOURCE THEN DELETE
+                -- Protect local-only rows (Atlas demo company 12344) from sync deletion
+                WHEN NOT MATCHED BY SOURCE AND target.CompanyID <> 12344 THEN DELETE
 
                 OUTPUT $action INTO @changes;
 
@@ -633,7 +634,8 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                     src.PiXLPolicyURL, src.PiXLDomain,
                     src.PiXLLatitude, src.PiXLLongitude, src.[PiXL 2.5])
 
-                WHEN NOT MATCHED BY SOURCE THEN DELETE
+                -- Protect local-only rows (Atlas demo pixel 12344/1) from sync deletion
+                WHEN NOT MATCHED BY SOURCE AND target.CompanyId <> 12344 THEN DELETE
 
                 OUTPUT $action INTO @changes;
 

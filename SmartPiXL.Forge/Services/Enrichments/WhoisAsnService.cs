@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Forge.Services.Enrichments;
@@ -23,6 +24,8 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class WhoisAsnService
 {
+    private readonly ConcurrentDictionary<string, WhoisResult> _cache = new(StringComparer.Ordinal);
+    private const int MaxCacheSize = 200_000;
     private readonly ITrackingLogger _logger;
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(5);
 
@@ -30,6 +33,18 @@ public sealed class WhoisAsnService
     /// Result of a WHOIS ASN lookup.
     /// </summary>
     public readonly record struct WhoisResult(string? Asn, string? Organization);
+
+    /// <summary>
+    /// Non-blocking cache-only check. Returns the cached result if available,
+    /// or null if the IP hasn't been looked up yet. Used by the enrichment
+    /// pipeline for zero-latency inline reads (Lane 1). Background workers
+    /// populate the cache via <see cref="LookupAsync"/> (Lane 3).
+    /// </summary>
+    public WhoisResult? TryGetCached(string? ipAddress)
+    {
+        if (ipAddress is null) return null;
+        return _cache.TryGetValue(ipAddress, out var result) ? result : null;
+    }
 
     public WhoisAsnService(ITrackingLogger logger)
     {
@@ -51,6 +66,26 @@ public sealed class WhoisAsnService
             ipAddress.StartsWith("127.", StringComparison.Ordinal))
             return default;
 
+        // Lock-free cache lookup — WHOIS is 1-5s per query, caching is critical.
+        // IP cardinality ~38% unique per 100K records = ~62% cache hit rate.
+        if (_cache.TryGetValue(ipAddress, out var cached))
+            return cached;
+
+        var result = await LookupCoreAsync(ipAddress, ct);
+
+        // Cache both hits and misses (misses = default) to avoid retrying
+        if (_cache.Count >= MaxCacheSize)
+            _cache.Clear();
+
+        _cache.TryAdd(ipAddress, result);
+        return result;
+    }
+
+    /// <summary>
+    /// Core WHOIS lookup — only called on cache miss.
+    /// </summary>
+    private async Task<WhoisResult> LookupCoreAsync(string ipAddress, CancellationToken ct)
+    {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

@@ -104,29 +104,52 @@ builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, cli
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 
-// ── Tier 1 Enrichment services (Phase 4) ──────────────────────────────────
-// Registered as singletons — injected into EnrichmentPipelineService.
+// ── Enrichment services ───────────────────────────────────────────────────
+// Three-lane architecture (Session 17):
+//   Lane 1: CPU/memory services run inline on enrichment workers (<5ms total)
+//   Lane 2: IPAPI geo enrichment via SQL ETL (batch JOIN, already exists)
+//   Lane 3: DNS/IpApi/WHOIS via BackgroundIpEnrichmentService (off hot path)
+//
+// ── Lane 1 — Tier 1 (Phase 4) — Pure-compute / memory-only ──
 builder.Services.AddSingleton<BotUaDetectionService>();
 builder.Services.AddSingleton<UaParsingService>();
-builder.Services.AddSingleton<DnsLookupService>();
 builder.Services.AddSingleton<MaxMindGeoService>();
-builder.Services.AddSingleton<IpApiLookupService>();
-builder.Services.AddSingleton<WhoisAsnService>();
-
-// ── Tier 2 Enrichment services (Phase 5) ──────────────────────────────────
-// Stateful services — singletons with in-memory sliding windows / sessions.
+//
+// ── Lane 1 — Tier 2 (Phase 5) — In-memory state + math ──
 builder.Services.AddSingleton<SessionStitchingService>();
 builder.Services.AddSingleton<CrossCustomerIntelService>();
 builder.Services.AddSingleton<DeviceAffluenceService>();
 builder.Services.AddSingleton<LeadQualityScoringService>();
-
-// ── Tier 3 Enrichment services (Phase 6 — Asymmetric Detection) ───────────
-// Stateless rule engines + stateful replay/aggregation services.
+//
+// ── Lane 1 — Tier 3 (Phase 6) — Rule engines + pattern detection ──
 builder.Services.AddSingleton<ContradictionMatrixService>();
 builder.Services.AddSingleton<GeographicArbitrageService>();
 builder.Services.AddSingleton<DeviceAgeEstimationService>();
 builder.Services.AddSingleton<BehavioralReplayService>();
 builder.Services.AddSingleton<DeadInternetService>();
+//
+// ── Lane 3 — Network I/O services (OFF hot path) ─────────────────────────
+// These have seconds-level latency (DNS 2s, WHOIS 5s).
+// Registered in DI but NOT called from pipeline workers. Instead:
+//   1. Pipeline calls TryGetCached() — zero-latency cache read
+//   2. BackgroundIpEnrichmentService runs actual lookups asynchronously
+//   3. Results populate service caches for subsequent records
+builder.Services.AddSingleton<DnsLookupService>();
+// IpApiLookupService: DISABLED — the live Xavier system owns ip-api.com API calls.
+// IPAPI.IP (344M rows) is populated by Xavier. Forge reads it via Lane 2
+// (ETL.usp_EnrichParsedGeo batch JOIN). Do NOT call ip-api.com from Forge.
+// builder.Services.AddSingleton<IpApiLookupService>();
+builder.Services.AddSingleton<WhoisAsnService>();
+
+// BackgroundIpEnrichmentService: Lane 3 background workers.
+// Receives unique IPs from pipeline via fire-and-forget Enqueue().
+// Runs DNS/IpApi/WHOIS async, populates caches for inline reads.
+builder.Services.AddSingleton<BackgroundIpEnrichmentService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundIpEnrichmentService>());
+
+// ── Performance metrics ───────────────────────────────────────────────────
+builder.Services.AddSingleton<ForgeMetrics>();
+builder.Services.AddHostedService<MetricsReporterService>();
 
 // ── Forge-specific pipeline services ──────────────────────────────────────
 
@@ -140,39 +163,37 @@ builder.Services.AddHostedService<EnrichmentPipelineService>();
 // SqlBulkCopyWriterService: Drains SqlWriter channel → SqlBulkCopy → PiXL.Raw.
 builder.Services.AddHostedService<SqlBulkCopyWriterService>();
 
-// FailoverCatchupService: Scans Failover/ for JSONL files, feeds into pipeline.
-builder.Services.AddHostedService<FailoverCatchupService>();
+// FailoverCatchupService: DISABLED — isolating core pipeline first.
+// builder.Services.AddHostedService<FailoverCatchupService>();
 
 // ── Ported Worker services ────────────────────────────────────────────────
 
-// EtlBackgroundService: PiXL.Raw → PiXL.Parsed every 60s (4-phase ETL).
-builder.Services.AddHostedService<EtlBackgroundService>();
+// EtlBackgroundService: DISABLED — isolating core pipeline first.
+// builder.Services.AddHostedService<EtlBackgroundService>();
 
-// IpApiSyncService: Xavier → IPAPI.IP delta sync (daily, 2 AM UTC).
-builder.Services.AddSingleton<IpApiSyncService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
-
-// EmailNotificationService: SMTP + SMS ops notifications (singleton, not hosted).
-builder.Services.AddSingleton<EmailNotificationService>();
-
-// CompanyPiXLSyncService: Xavier → PiXL.Company/PiXL.Settings every 6h.
-builder.Services.AddSingleton<CompanyPiXLSyncService>();
-builder.Services.AddHostedService(sp =>
-{
-    var svc = sp.GetRequiredService<CompanyPiXLSyncService>();
-    svc.EmailService = sp.GetService<EmailNotificationService>();
-    return svc;
-});
-
-// InfraHealthService: Probes Windows services, SQL, IIS, app metrics (15s cache).
-builder.Services.AddSingleton<InfraHealthService>();
-
-// SelfHealingService: Monitors health, auto-remediates safe issues (60s loop).
-builder.Services.AddSingleton<SelfHealingService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SelfHealingService>());
-
-// MaintenanceSchedulerService: Purge (3 AM daily) + index rebuild (Sunday 4 AM).
-builder.Services.AddHostedService<MaintenanceSchedulerService>();
+// ── Non-essential services DISABLED ───────────────────────────────────────
+// All background sync, maintenance, health, and notification services disabled
+// to isolate the core Pipe → SQL pipeline. Re-enable after baseline verified.
+//
+// builder.Services.AddSingleton<IpApiSyncService>();
+// builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
+//
+// builder.Services.AddSingleton<EmailNotificationService>();
+//
+// builder.Services.AddSingleton<CompanyPiXLSyncService>();
+// builder.Services.AddHostedService(sp =>
+// {
+//     var svc = sp.GetRequiredService<CompanyPiXLSyncService>();
+//     svc.EmailService = sp.GetService<EmailNotificationService>();
+//     return svc;
+// });
+//
+// builder.Services.AddSingleton<InfraHealthService>();
+//
+// builder.Services.AddSingleton<SelfHealingService>();
+// builder.Services.AddHostedService(sp => sp.GetRequiredService<SelfHealingService>());
+//
+// builder.Services.AddHostedService<MaintenanceSchedulerService>();
 
 // ---------------------------------------------------------------------------
 // WINDOWS SERVICE SUPPORT

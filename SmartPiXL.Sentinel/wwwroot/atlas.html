@@ -69,6 +69,7 @@
             --cat-subsystems: #3b82f6;
             --cat-database: #10b981;
             --cat-operations: #f59e0b;
+            --cat-deepdives: #06b6d4;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -459,6 +460,7 @@
         .feature-card[data-category="Subsystems"]::before { background: var(--cat-subsystems); }
         .feature-card[data-category="Database"]::before { background: var(--cat-database); }
         .feature-card[data-category="Operations"]::before { background: var(--cat-operations); }
+        .feature-card[data-category="Deep Dives"]::before { background: var(--cat-deepdives); }
 
         .card-header {
             display: flex;
@@ -902,6 +904,100 @@
             .category-tabs { gap: 0.35rem; }
             .category-tab { padding: 0.4rem 0.85rem; font-size: 0.75rem; }
         }
+        /* ================================================================
+           LIVE DEMO PANEL — "Your Device" panel in Deep Dives
+           ================================================================ */
+        .demo-panel {
+            background: linear-gradient(135deg, rgba(6,182,212,0.06), rgba(59,130,246,0.04));
+            border: 1px solid rgba(6,182,212,0.2);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .demo-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .demo-panel-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+        .demo-panel-title svg { width: 18px; height: 18px; }
+        .demo-panel-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.2rem 0.65rem;
+            border-radius: 9999px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .demo-badge-live {
+            background: rgba(16,185,129,0.15);
+            color: var(--accent-green);
+        }
+        .demo-badge-live .demo-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .demo-badge-waiting {
+            background: rgba(245,158,11,0.15);
+            color: var(--accent-amber);
+        }
+        .demo-device-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+        .demo-field {
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xs);
+            padding: 0.6rem 0.75rem;
+        }
+        .demo-field-label {
+            font-size: 0.6rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-dim);
+            margin-bottom: 0.2rem;
+        }
+        .demo-field-value {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+        .demo-field-value.highlight { color: var(--accent-cyan); }
+        .demo-field-value.warn { color: var(--accent-amber); }
+        .demo-field-value.danger { color: var(--accent-red); }
+        .demo-field-value.safe { color: var(--accent-green); }
+        .demo-section-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin: 1rem 0 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .demo-section-label:first-of-type { margin-top: 0; }
     </style>
 </head>
 <body>
@@ -1525,6 +1621,230 @@
         } else {
             init();
         }
+    </script>
+
+    <!-- ============================================================
+         LIVE PiXL SCRIPT — Runs the REAL pipeline (Company 12344, Pixel 1)
+         This is NOT a demo. This is the live PiXL Script running through
+         Edge → Forge → SQL. The viewer IS the demo.
+         ============================================================ -->
+    <script src="http://192.168.88.176/12344/00001_atlas_SMART.js"></script>
+
+    <script>
+        // ================================================================
+        // LIVE DEMO ENGINE — Polls /api/atlas/demo for the viewer's own
+        // pipeline results and renders them into Deep Dive reading panels.
+        // ================================================================
+        const DEMO_COMPANY = '12344';
+        const DEMO_PIXL = '00001';
+        let demoData = null;
+        let demoPollTimer = null;
+        let demoLoaded = false;
+
+        // Topic → field mapping: which fields to show for each Deep Dive slug
+        const DEMO_TOPICS = {
+            'subsystems-pixl-script-data-fields': {
+                title: 'Your Data Fields',
+                sections: [
+                    { label: 'Display & Screen', fields: ['sw','sh','saw','sah','cd','pd','ori','vw','vh','ow','oh','sx','sy','screenExtended'] },
+                    { label: 'Hardware', fields: ['cores','mem','gpu','gpuVendor','batteryLevel','batteryCharging'] },
+                    { label: 'Browser Identity', fields: ['ua','plt','vnd','product','productSub','vendorSub','appName','appVersion','chromeObj','chromeRuntime','uaBrands','uaPlatform','uaMobile','uaArch','uaBitness','uaPlatformVersion','uaFullVersion'] },
+                    { label: 'Location & Language', fields: ['tz','tzo','lang','langs','tzLocale','dateFormat','numberFormat'] },
+                    { label: 'Connection', fields: ['conn','dl','rtt','save','connType'] },
+                    { label: 'Preferences', fields: ['darkMode','reducedMotion','contrast','forcedColors','hover','pointer'] }
+                ]
+            },
+            'subsystems-pixl-script-fingerprinting-techniques': {
+                title: 'Your Fingerprints',
+                sections: [
+                    { label: 'Canvas Fingerprint', fields: ['canvasFP','canvasConsistency','canvasEvasion'] },
+                    { label: 'WebGL / GPU Fingerprint', fields: ['webglFP','gpu','gpuVendor','webglParams','webglExt','webglEvasion'] },
+                    { label: 'Audio Fingerprint', fields: ['audioFP','audioHash','audioStable','audioNoiseDetected'] },
+                    { label: 'Font Detection', fields: ['fonts','fontMethodMismatch'] },
+                    { label: 'Math Fingerprint', fields: ['mathFP'] },
+                    { label: 'CSS Rendering', fields: ['cssFontVariant'] },
+                    { label: 'Error Fingerprint', fields: ['errorFP'] }
+                ]
+            },
+            'subsystems-pixl-script-bot-detection-engine': {
+                title: 'Your Bot Analysis',
+                sections: [
+                    { label: 'Bot Score', fields: ['botScore','combinedThreatScore'] },
+                    { label: 'Bot Signals Detected', fields: ['botSignals'] },
+                    { label: 'Automation Markers', fields: ['webdr','scriptExecTime'] },
+                    { label: 'Browser Integrity', fields: ['plugins','mimeTypes','pluginList'] }
+                ]
+            },
+            'subsystems-pixl-script-evasion-detection': {
+                title: 'Your Evasion Analysis',
+                sections: [
+                    { label: 'Evasion Signals', fields: ['evasionDetected'] },
+                    { label: 'Evasion V2 (Advanced)', fields: ['evasionSignalsV2'] },
+                    { label: 'Stealth Detection', fields: ['stealthSignals'] }
+                ]
+            },
+            'subsystems-pixl-script-cross-signal-analysis': {
+                title: 'Your Cross-Signal Analysis',
+                sections: [
+                    { label: 'Anomaly Score', fields: ['anomalyScore','combinedThreatScore'] },
+                    { label: 'Cross-Signal Flags', fields: ['crossSignals'] },
+                    { label: 'Platform vs Fonts', fields: ['plt','fonts'] },
+                    { label: 'Platform vs GPU', fields: ['plt','gpu','gpuVendor'] }
+                ]
+            },
+            'subsystems-pixl-script-behavioral-analysis': {
+                title: 'Your Behavioral Profile',
+                sections: [
+                    { label: 'Mouse Movement', fields: ['mouseMoves','mouseEntropy','moveCountBucket'] },
+                    { label: 'Timing Analysis', fields: ['moveTimingCV','moveSpeedCV'] },
+                    { label: 'Scroll Behavior', fields: ['scrolled','scrollY','scrollContradiction'] },
+                    { label: 'Behavioral Flags', fields: ['behavioralFlags'] }
+                ]
+            },
+            'subsystems-pixl-script-delivery-mechanism': {
+                title: 'Your Delivery Stats',
+                sections: [
+                    { label: 'Script Execution', fields: ['scriptExecTime'] },
+                    { label: 'Page Performance', fields: ['loadTime','domTime','dnsTime','tcpTime','ttfb'] },
+                    { label: 'Page Context', fields: ['url','ref','domain','path','protocol'] }
+                ]
+            }
+        };
+
+        // Poll for demo data after the PiXL script fires
+        async function pollDemoData(maxAttempts = 12) {
+            for (let i = 0; i < maxAttempts; i++) {
+                try {
+                    const resp = await fetch('/api/atlas/demo');
+                    if (resp.status === 200) {
+                        demoData = await resp.json();
+                        demoLoaded = true;
+                        console.log(`[Atlas Demo] Live data received — ${demoData.fieldCount} fields from pipeline`);
+                        // If a Deep Dive is currently open, refresh its demo panel
+                        if (selectedSlug && DEMO_TOPICS[selectedSlug]) {
+                            injectDemoPanel(selectedSlug);
+                        }
+                        return;
+                    }
+                } catch (e) { /* ignore, retry */ }
+                // Exponential backoff: 1s, 2s, 3s, 4s...
+                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+            }
+            console.warn('[Atlas Demo] No pipeline data received after polling');
+        }
+
+        // Build the demo panel HTML for a given topic
+        function buildDemoPanelHtml(slug) {
+            const topic = DEMO_TOPICS[slug];
+            if (!topic || !demoData) return '';
+
+            const fields = demoData.fields || {};
+            const ts = demoData.receivedAt ? new Date(demoData.receivedAt).toLocaleTimeString() : 'just now';
+
+            let html = `<div class="demo-panel">`;
+            html += `<div class="demo-panel-header">`;
+            html += `<div class="demo-panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                ${topic.title}
+            </div>`;
+            html += `<span class="demo-panel-badge demo-badge-live"><span class="demo-dot"></span>LIVE — captured at ${escapeHtml(ts)}</span>`;
+            html += `</div>`;
+
+            for (const section of topic.sections) {
+                html += `<div class="demo-section-label">${section.label}</div>`;
+                html += `<div class="demo-device-grid">`;
+                for (const key of section.fields) {
+                    const val = fields[key];
+                    const display = val !== undefined && val !== '' && val !== null ? String(val) : '—';
+                    const cssClass = getFieldValueClass(key, val);
+                    html += `<div class="demo-field">
+                        <div class="demo-field-label">${escapeHtml(key)}</div>
+                        <div class="demo-field-value ${cssClass}">${escapeHtml(display)}</div>
+                    </div>`;
+                }
+                html += `</div>`;
+            }
+
+            html += `<div style="margin-top:1rem;font-size:0.7rem;color:var(--text-dim)">
+                Raw ID: ${demoData.rawId} &middot; IP: ${escapeHtml(demoData.ip)} &middot;
+                ${demoData.fieldCount} fields captured by the live pipeline
+            </div>`;
+            html += `</div>`;
+            return html;
+        }
+
+        // Colorize field values based on content
+        function getFieldValueClass(key, val) {
+            if (val === undefined || val === '' || val === null) return '';
+            const s = String(val);
+            // Bot/threat scores
+            if (key === 'botScore' || key === 'combinedThreatScore' || key === 'anomalyScore') {
+                const n = parseInt(s);
+                if (n === 0) return 'safe';
+                if (n < 15) return 'highlight';
+                if (n < 50) return 'warn';
+                return 'danger';
+            }
+            // Evasion/bot signals — empty is good
+            if (key === 'botSignals' || key === 'evasionDetected' || key === 'crossSignals'
+                || key === 'stealthSignals' || key === 'evasionSignalsV2' || key === 'behavioralFlags') {
+                return s.length > 0 ? 'warn' : 'safe';
+            }
+            // Fingerprint hashes
+            if (key.endsWith('FP') || key.endsWith('Hash')) return 'highlight';
+            // Boolean flags
+            if (s === '0' && (key === 'webdr' || key === 'canvasEvasion' || key === 'webglEvasion')) return 'safe';
+            if (s === '1' && (key === 'webdr' || key === 'canvasEvasion' || key === 'webglEvasion')) return 'danger';
+            return '';
+        }
+
+        // Inject the demo panel into the currently open reading panel
+        function injectDemoPanel(slug) {
+            if (!DEMO_TOPICS[slug]) return;
+            const body = document.getElementById('readingBody');
+            if (!body) return;
+
+            // Remove any existing demo panel
+            const existing = body.querySelector('.demo-panel');
+            if (existing) existing.remove();
+
+            if (!demoData) {
+                // Show waiting state
+                const waitHtml = `<div class="demo-panel">
+                    <div class="demo-panel-header">
+                        <div class="demo-panel-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            Your Device
+                        </div>
+                        <span class="demo-panel-badge demo-badge-waiting">Collecting data...</span>
+                    </div>
+                    <p style="font-size:0.85rem;color:var(--text-muted)">
+                        The live PiXL Script is running on this page right now. Your device data is being
+                        captured through the full pipeline (Edge → Forge → SQL). Results will appear here
+                        momentarily.
+                    </p>
+                </div>`;
+                body.insertAdjacentHTML('afterbegin', waitHtml);
+                return;
+            }
+
+            const html = buildDemoPanelHtml(slug);
+            if (html) {
+                body.insertAdjacentHTML('afterbegin', html);
+            }
+        }
+
+        // Hook into openReading to inject demo panels for Deep Dive slugs
+        const _originalOpenReading = openReading;
+        openReading = function(slug) {
+            _originalOpenReading(slug);
+            if (DEMO_TOPICS[slug]) {
+                injectDemoPanel(slug);
+            }
+        };
+
+        // Start polling 2s after page load (gives PiXL script time to fire + reach SQL)
+        setTimeout(() => pollDemoData(), 2000);
     </script>
 </body>
 </html>

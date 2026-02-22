@@ -38,7 +38,7 @@ public sealed class ForgeChannels
             new BoundedChannelOptions(enrichmentCapacity)
             {
                 FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true // Only EnrichmentPipelineService reads
+                SingleReader = false // Multiple enrichment workers read concurrently
             });
 
         SqlWriter = Channel.CreateBounded<TrackingData>(

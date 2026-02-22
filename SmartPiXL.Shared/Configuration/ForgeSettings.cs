@@ -56,6 +56,14 @@ public sealed class ForgeSettings
     public int MaxConcurrentPipeInstances { get; set; } = 4;
 
     /// <summary>
+    /// Number of concurrent enrichment workers. Each worker reads from the
+    /// enrichment channel and processes one record at a time through the
+    /// full Tier 1-3 enrichment chain. Overlaps I/O waits (DNS, IPAPI)
+    /// across records. Default 8.
+    /// </summary>
+    public int EnrichmentWorkerCount { get; set; } = 8;
+
+    /// <summary>
     /// Master toggle for the enrichment pipeline. When false, records pass
     /// through the pipeline without any enrichment processing (useful for
     /// testing pipe + SQL writer in isolation).

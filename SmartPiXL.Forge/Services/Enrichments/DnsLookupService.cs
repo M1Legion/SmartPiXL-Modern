@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.RegularExpressions;
 using DnsClient;
@@ -12,7 +13,12 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 // from the hostname (ec2-*, compute.googleapis.com, etc.).
 //
 // TIMEOUT: 2 seconds per lookup — will not block the enrichment pipeline.
-// CACHING: DnsClient handles internal caching based on TTL.
+// CACHING: Two tiers:
+//   1. Application-level ConcurrentDictionary — caches ALL results (including
+//      NXDOMAIN / timeout = default) for the lifetime of the process. Evicted
+//      when cache exceeds 200K entries. This prevents repeated 2s DNS timeouts
+//      for the same IP across multiple enrichment workers.
+//   2. DnsClient internal cache — TTL-based caching per DNS spec.
 //
 // APPENDED PARAMS:
 //   _srv_rdns={hostname}     — Reverse DNS hostname (PTR record)
@@ -21,13 +27,20 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 
 /// <summary>
 /// Performs reverse DNS lookups and detects cloud provider hostname patterns.
-/// Singleton — thread-safe. Uses DnsClient for async DNS resolution.
+/// Singleton — thread-safe. Uses DnsClient for async DNS resolution with
+/// application-level result caching.
 /// </summary>
 public sealed partial class DnsLookupService
 {
     private readonly LookupClient _dnsClient;
     private readonly ITrackingLogger _logger;
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(2);
+
+    // Application-level cache: IP → DnsLookupResult (including "no result" = default).
+    // Prevents repeated 2s DNS lookups for the same IP across concurrent workers.
+    // Bounded at 200K entries — cleared entirely when exceeded.
+    private readonly ConcurrentDictionary<string, DnsLookupResult> _cache = new(StringComparer.Ordinal);
+    private const int MaxCacheSize = 200_000;
 
     // Pre-compiled cloud hostname patterns
     [GeneratedRegex(@"(ec2-|\.compute\.amazonaws\.com|\.compute\.internal|\.compute-1\.amazonaws\.com)", RegexOptions.IgnoreCase)]
@@ -56,6 +69,18 @@ public sealed partial class DnsLookupService
     /// </summary>
     public readonly record struct DnsLookupResult(string? Hostname, bool IsCloud);
 
+    /// <summary>
+    /// Non-blocking cache-only check. Returns the cached result if available,
+    /// or null if the IP hasn't been looked up yet. Used by the enrichment
+    /// pipeline for zero-latency inline reads (Lane 1). Background workers
+    /// populate the cache via <see cref="LookupAsync"/> (Lane 3).
+    /// </summary>
+    public DnsLookupResult? TryGetCached(string? ipAddress)
+    {
+        if (ipAddress is null) return null;
+        return _cache.TryGetValue(ipAddress, out var result) ? result : null;
+    }
+
     public DnsLookupService(ITrackingLogger logger)
     {
         _logger = logger;
@@ -72,48 +97,67 @@ public sealed partial class DnsLookupService
     /// <summary>
     /// Performs a reverse DNS lookup for the given IP address.
     /// Returns the hostname (if available) and whether it matches a cloud provider pattern.
+    /// Results are cached at the application level to prevent repeated 2s DNS
+    /// lookups for the same IP across concurrent enrichment workers.
     /// </summary>
     public async Task<DnsLookupResult> LookupAsync(string? ipAddress, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(ipAddress))
             return default;
 
+        // Application-level cache hit — includes "no PTR" (default) results
+        if (_cache.TryGetValue(ipAddress, out var cached))
+            return cached;
+
         if (!IPAddress.TryParse(ipAddress, out var ip))
             return default;
 
+        DnsLookupResult result = default;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(s_timeout);
 
-            var result = await _dnsClient.QueryReverseAsync(ip, cts.Token);
-            var ptrRecord = result.Answers.PtrRecords().FirstOrDefault();
+            var dnsResponse = await _dnsClient.QueryReverseAsync(ip, cts.Token);
 
-            if (ptrRecord is null)
-                return default;
+            // Avoid LINQ FirstOrDefault() — enumerate directly to find the first PTR record
+            DnsClient.Protocol.PtrRecord? ptrRecord = null;
+            foreach (var record in dnsResponse.Answers.PtrRecords())
+            {
+                ptrRecord = record;
+                break;
+            }
 
-            var hostname = ptrRecord.PtrDomainName.Value.TrimEnd('.');
-            if (string.IsNullOrEmpty(hostname))
-                return default;
-
-            var isCloud = IsCloudHostname(hostname);
-            return new DnsLookupResult(hostname, isCloud);
+            if (ptrRecord is not null)
+            {
+                var hostname = ptrRecord.PtrDomainName.Value.TrimEnd('.');
+                if (!string.IsNullOrEmpty(hostname))
+                {
+                    var isCloud = IsCloudHostname(hostname);
+                    result = new DnsLookupResult(hostname, isCloud);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            // Timeout or pipeline shutdown — expected
-            return default;
+            // Timeout or pipeline shutdown — cache the miss to avoid retrying
         }
         catch (DnsResponseException)
         {
-            // NXDOMAIN, SERVFAIL, etc. — no PTR record, normal
-            return default;
+            // NXDOMAIN, SERVFAIL, etc. — no PTR record, cache the miss
         }
         catch (Exception ex)
         {
             _logger.Debug($"DnsLookup: failed for {ipAddress} — {ex.Message}");
-            return default;
+            // Cache the miss so we don't retry this IP
         }
+
+        // Cache both hits and misses. Evict if over capacity.
+        if (_cache.Count >= MaxCacheSize)
+            _cache.Clear();
+
+        _cache.TryAdd(ipAddress, result);
+        return result;
     }
 
     /// <summary>

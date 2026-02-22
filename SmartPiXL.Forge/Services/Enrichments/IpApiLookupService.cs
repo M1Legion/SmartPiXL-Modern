@@ -12,8 +12,13 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 // ============================================================================
 // IPAPI LOOKUP SERVICE — Real-time IP geolocation via the ip-api.com Pro API.
 //
-// On startup: loads all known IPs from IPAPI.IP into a HashSet<string>.
-// Per record: check if IP is known+fresh (<90 days). If not, call the Pro API.
+// Per record: inline SQL check (clustered PK seek on IPAPI.IP, sub-ms) to see
+// if the IP is known+fresh (<90 days). If not, call the Pro API (rate-limited).
+//
+// Previous design loaded all 344M rows from IPAPI.IP into a ConcurrentDictionary
+// at startup — took 2+ hours and ~15GB RAM, blocking the pipeline. Replaced
+// with inline SQL EXISTS checks that are instant on the clustered PK index.
+// IPs looked up via SQL are cached locally in _knownIps to avoid repeat queries.
 //
 // API: https://pro.ip-api.com/json/{ip}?key={key}&fields=...
 // Rate limit: 30 req/min (Pro basic tier). Uses SemaphoreSlim for throttling.
@@ -33,7 +38,7 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 
 /// <summary>
 /// Real-time IP geolocation enrichment via ip-api.com Pro.
-/// Singleton — thread-safe. Maintains a HashSet of known IPs to avoid redundant lookups.
+/// Singleton — thread-safe. Uses inline SQL checks + progressive in-memory cache.
 /// Rate-limited to 30 requests per minute via a semaphore + delay.
 /// </summary>
 public sealed class IpApiLookupService : IDisposable
@@ -44,6 +49,11 @@ public sealed class IpApiLookupService : IDisposable
     private readonly string _connectionString;
     private readonly ITrackingLogger _logger;
     private bool _disposed;
+
+    // Result cache for inline pipeline reads — populated by CallApiAsync,
+    // read by TryGetCached. Separate from _knownIps (which only tracks freshness).
+    private readonly ConcurrentDictionary<string, IpApiResult> _resultCache = new(StringComparer.Ordinal);
+    private const int MaxResultCacheSize = 200_000;
 
     private const string ApiKey = "oJC4NplwJaCnbWw";
     private const string ApiFields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,reverse,mobile,proxy,hosting,query";
@@ -75,34 +85,73 @@ public sealed class IpApiLookupService : IDisposable
     }
 
     /// <summary>
+    /// Non-blocking cache-only check. Returns the cached result if available,
+    /// or null if the IP hasn't been looked up yet (or was already known in SQL).
+    /// Used by the enrichment pipeline for zero-latency inline reads (Lane 1).
+    /// Background workers populate the cache via <see cref="LookupAsync"/> (Lane 3).
+    /// </summary>
+    public IpApiResult? TryGetCached(string? ipAddress)
+    {
+        if (ipAddress is null) return null;
+        return _resultCache.TryGetValue(ipAddress, out var result) ? result : null;
+    }
+
+    /// <summary>
     /// Loads all known IPs and their last-updated dates from IPAPI.IP into memory.
     /// Call this during startup before processing records.
+    /// <para>
+    /// DISABLED — Loading 344M rows into a ConcurrentDictionary takes 2+ hours
+    /// and ~15GB RAM. The enrichment pipeline now uses inline SQL EXISTS checks
+    /// via <see cref="IsKnownInSqlAsync"/> instead. This method is retained as
+    /// a no-op so callers don't need changes.
+    /// </para>
     /// </summary>
-    public async Task LoadKnownIpsAsync(CancellationToken ct = default)
+    public Task LoadKnownIpsAsync(CancellationToken ct = default)
     {
+        _logger.Info("IpApiLookup: Skipping bulk IP cache load (using inline SQL checks instead)");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Fast inline check: does this IP already exist in IPAPI.IP with fresh data?
+    /// Uses the clustered PK index — sub-millisecond on uncontended SQL Server.
+    /// On timeout/error, returns true (skip API call) to avoid compounding latency.
+    /// </summary>
+    private async Task<bool> IsKnownInSqlAsync(string ipAddress, CancellationToken ct)
+    {
+        // Check in-memory first (populated progressively as we see IPs)
+        if (_knownIps.TryGetValue(ipAddress, out var updatedAt) &&
+            (DateTime.UtcNow - updatedAt) < s_staleness)
+        {
+            return true;
+        }
+
         try
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(ct);
 
             await using var cmd = new SqlCommand(
-                "SELECT IP, LastSeen FROM IPAPI.IP WITH (NOLOCK) WHERE LastSeen IS NOT NULL", conn);
+                "SELECT TOP 1 LastSeen FROM IPAPI.IP WHERE IP = @IP AND Status = 'success' OPTION (MAXDOP 1)", conn);
+            cmd.Parameters.AddWithValue("@IP", ipAddress);
+            cmd.CommandTimeout = 2;
 
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            var count = 0;
-            while (await reader.ReadAsync(ct))
+            var result = await cmd.ExecuteScalarAsync(ct);
+            if (result is DateTime lastSeen && (DateTime.UtcNow - lastSeen) < s_staleness)
             {
-                var ip = reader.GetString(0);
-                var lastSeen = reader.GetDateTime(1);
-                _knownIps[ip] = lastSeen;
-                count++;
+                // Cache locally so we don't hit SQL again for this IP
+                _knownIps[ipAddress] = lastSeen;
+                return true;
             }
 
-            _logger.Info($"IpApiLookup: Loaded {count:N0} known IPs from IPAPI.IP");
+            return false;
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.Warning($"IpApiLookup: Failed to load known IPs — {ex.Message}");
+            // On SQL timeout/error, skip the API call entirely.
+            // Better to miss one IPAPI enrichment than to block the pipeline
+            // with a 2.1s rate-limited API call on top of a SQL timeout.
+            return true;
         }
     }
 
@@ -123,14 +172,11 @@ public sealed class IpApiLookupService : IDisposable
             ipAddress.StartsWith("172.", StringComparison.Ordinal))
             return default;
 
-        // Check if known and fresh
-        if (_knownIps.TryGetValue(ipAddress, out var updatedAt) &&
-            (DateTime.UtcNow - updatedAt) < s_staleness)
-        {
-            return default; // Already enriched, skip
-        }
+        // Fast inline SQL check (clustered PK seek, sub-ms) — replaces 344M-row HashSet
+        if (await IsKnownInSqlAsync(ipAddress, ct))
+            return default; // Already enriched and fresh, skip
 
-        // Rate-limited API call
+        // Rate-limited API call for genuinely new IPs only
         return await CallApiAsync(ipAddress, ct);
     }
 
@@ -156,13 +202,20 @@ public sealed class IpApiLookupService : IDisposable
             // Mark as known
             _knownIps[ipAddress] = DateTime.UtcNow;
 
-            return new IpApiResult(
+            var result = new IpApiResult(
                 response.CountryCode,
                 response.Isp,
                 response.Proxy,
                 response.Mobile,
                 response.Reverse,
                 ParseAsNumber(response.As));
+
+            // Cache result for inline pipeline reads (TryGetCached)
+            if (_resultCache.Count >= MaxResultCacheSize)
+                _resultCache.Clear();
+            _resultCache.TryAdd(ipAddress, result);
+
+            return result;
         }
         catch (OperationCanceledException)
         {

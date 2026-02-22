@@ -47,6 +47,7 @@ public sealed class PipeListenerService : BackgroundService
     private readonly ForgeSettings _forgeSettings;
     private readonly Channel<TrackingData> _enrichmentChannel;
     private readonly ITrackingLogger _logger;
+    private readonly ForgeMetrics _metrics;
 
     private static readonly JsonSerializerOptions s_jsonOpts = new()
     {
@@ -56,11 +57,13 @@ public sealed class PipeListenerService : BackgroundService
     public PipeListenerService(
         IOptions<ForgeSettings> forgeSettings,
         ForgeChannels channels,
-        ITrackingLogger logger)
+        ITrackingLogger logger,
+        ForgeMetrics metrics)
     {
         _forgeSettings = forgeSettings.Value;
         _enrichmentChannel = channels.Enrichment;
         _logger = logger;
+        _metrics = metrics;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -171,6 +174,8 @@ public sealed class PipeListenerService : BackgroundService
 
                 try
                 {
+                    var ts = ForgeMetrics.StartTimer();
+
                     var record = JsonSerializer.Deserialize<TrackingData>(line, s_jsonOpts);
                     if (record is null)
                     {
@@ -180,10 +185,12 @@ public sealed class PipeListenerService : BackgroundService
 
                     if (!_enrichmentChannel.Writer.TryWrite(record))
                     {
+                        _metrics.RecordDrop(Stage.PipeDeserialize);
                         _logger.Warning($"Pipe instance {instanceId}: enrichment channel full, dropping record");
                     }
                     else
                     {
+                        _metrics.Record(Stage.PipeDeserialize, ts);
                         recordCount++;
                     }
                 }

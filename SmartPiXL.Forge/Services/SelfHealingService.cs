@@ -200,7 +200,9 @@ public sealed class SelfHealingService : BackgroundService
         if (!pipeline.IsAvailable) return;
 
         // Parse lag > 500 rows = ETL might be stalled
-        if (pipeline.ParseLag > 500)
+        // TEMPORARILY RAISED to 50M to prevent catch-up during SQL resource crunch.
+        // The EtlBackgroundService is also disabled. Re-enable both after manual catch-up.
+        if (pipeline.ParseLag > 50_000_000)
         {
             _logger.Info($"SelfHealingService: parse lag {pipeline.ParseLag}, running catch-up ETL");
 
@@ -228,7 +230,8 @@ public sealed class SelfHealingService : BackgroundService
         }
 
         // Match lag > 500 = match ETL behind
-        if (pipeline.MatchLag > 500)
+        // TEMPORARILY RAISED — same reason as parse lag above
+        if (pipeline.MatchLag > 50_000_000)
         {
             _logger.Info($"SelfHealingService: match lag {pipeline.MatchLag}, running catch-up");
 

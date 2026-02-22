@@ -46,6 +46,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     private readonly Channel<TrackingData> _channel;
     private readonly TrackingSettings _settings;
     private readonly ITrackingLogger _logger;
+    private readonly ForgeMetrics _metrics;
 
     // ── Circuit breaker ────────────────────────────────────────────────
     private volatile ForgeCircuitState _circuitState = ForgeCircuitState.Closed;
@@ -54,6 +55,12 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     private DateTime _circuitOpenedUtc;
     private static readonly TimeSpan HalfOpenCooldown = TimeSpan.FromMinutes(2);
     private static readonly int MaxBackoffMs = 30_000;
+
+    // ── Batch fill window ─────────────────────────────────────────────
+    // After the first item arrives, wait up to this duration for more items.
+    // At 70 rec/s, 150ms collects ~10 records per batch instead of ~1,
+    // reducing per-record overhead from connection/TDS setup by ~10x.
+    private static readonly TimeSpan BatchFillWindow = TimeSpan.FromMilliseconds(150);
 
     // ── Retry + dead-letter ────────────────────────────────────────────
     private const int MaxRetries = 3;
@@ -101,11 +108,13 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     public SqlBulkCopyWriterService(
         ForgeChannels channels,
         IOptions<TrackingSettings> settings,
-        ITrackingLogger logger)
+        ITrackingLogger logger,
+        ForgeMetrics metrics)
     {
         _channel = channels.SqlWriter;
         _settings = settings.Value;
         _logger = logger;
+        _metrics = metrics;
         _deadLetterDir = Path.Combine(AppContext.BaseDirectory, "DeadLetter");
     }
 
@@ -145,9 +154,35 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             {
                 if (await reader.WaitToReadAsync(stoppingToken))
                 {
+                    // Greedy drain: grab everything available right now.
                     while (batch.Count < _settings.BatchSize && reader.TryRead(out var item))
                     {
                         batch.Add(item);
+                    }
+
+                    // Batch fill window: if we haven't hit BatchSize, wait briefly
+                    // for more items to arrive. At 70 rec/s, 150ms collects ~10 records
+                    // instead of writing 1-record batches 70 times per second.
+                    if (batch.Count < _settings.BatchSize)
+                    {
+                        using var fillCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        fillCts.CancelAfter(BatchFillWindow);
+
+                        try
+                        {
+                            while (batch.Count < _settings.BatchSize
+                                && await reader.WaitToReadAsync(fillCts.Token))
+                            {
+                                while (batch.Count < _settings.BatchSize && reader.TryRead(out var extra))
+                                {
+                                    batch.Add(extra);
+                                }
+                            }
+                        }
+                        catch (OperationCanceledException) when (fillCts.IsCancellationRequested)
+                        {
+                            // Fill window expired — write what we have
+                        }
                     }
 
                     if (batch.Count > 0)
@@ -219,6 +254,8 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
             try
             {
+                var ts = ForgeMetrics.StartTimer();
+
                 using var dataReader = new TrackingDataReader(batch);
                 using var bulkCopy = new SqlBulkCopy(_settings.ConnectionString);
                 bulkCopy.DestinationTableName = "PiXL.Raw";
@@ -231,6 +268,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
                 await bulkCopy.WriteToServerAsync(dataReader, ct);
 
+                _metrics.Record(Stage.SqlBulkCopy, ts, batch.Count);
                 OnWriteSuccess();
                 _logger.Debug($"Forge wrote {batch.Count} records");
                 return;

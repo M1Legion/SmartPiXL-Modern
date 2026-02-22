@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using MaxMind.Db;
 using MaxMind.GeoIP2;
 using MaxMind.GeoIP2.Exceptions;
@@ -38,6 +39,8 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class MaxMindGeoService : IDisposable
 {
+    private readonly ConcurrentDictionary<string, MaxMindResult> _cache = new(StringComparer.Ordinal);
+    private const int MaxCacheSize = 200_000;
     private readonly DatabaseReader? _cityReader;
     private readonly DatabaseReader? _asnReader;
     private readonly DatabaseReader? _countryReader;
@@ -80,6 +83,11 @@ public sealed class MaxMindGeoService : IDisposable
     {
         if (string.IsNullOrEmpty(ipAddress))
             return default;
+
+        // Lock-free cache lookup — avoids triple trie traversal on repeat IPs.
+        // IP cardinality is ~38% unique per 100K records = ~62% cache hit rate.
+        if (_cache.TryGetValue(ipAddress, out var cached))
+            return cached;
 
         if (!System.Net.IPAddress.TryParse(ipAddress, out var ip))
             return default;
@@ -145,7 +153,13 @@ public sealed class MaxMindGeoService : IDisposable
             }
         }
 
-        return new MaxMindResult(countryCode, region, city, lat, lon, asn, asnOrg);
+        var result = new MaxMindResult(countryCode, region, city, lat, lon, asn, asnOrg);
+
+        if (_cache.Count >= MaxCacheSize)
+            _cache.Clear();
+
+        _cache.TryAdd(ipAddress, result);
+        return result;
     }
 
     private DatabaseReader? TryLoadDatabase(string directory, string fileName)

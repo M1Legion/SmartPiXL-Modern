@@ -1,207 +1,289 @@
 ---
 subsystem: pixl-script
-title: PiXL Script
-version: 1.0
-last_updated: 2026-02-20
+title: PiXL Script — Overview
+version: 2.0
+last_updated: 2026-02-21
 status: current
 related:
   - architecture/data-flow
   - subsystems/fingerprinting
   - subsystems/bot-detection
+deep_dive:
+  - subsystems/pixl-script/data-fields
+  - subsystems/pixl-script/fingerprinting-techniques
+  - subsystems/pixl-script/bot-detection-engine
+  - subsystems/pixl-script/evasion-detection
+  - subsystems/pixl-script/cross-signal-analysis
+  - subsystems/pixl-script/behavioral-analysis
+  - subsystems/pixl-script/delivery-mechanism
 ---
 
-# PiXL Script
+# PiXL Script — Overview
+
+> This is the hub page. Each major capability has its own deep-dive document
+> linked below.
 
 ## Atlas Public
 
-The PiXL Script is SmartPiXL's browser-side intelligence collector. When a visitor loads any page on your website, this lightweight JavaScript runs silently in the background, gathering a comprehensive profile of the visitor's device, browser, and behavior — all without cookies, popups, or any visible impact.
+The PiXL Script is SmartPiXL's browser-side intelligence collector. When a visitor loads any page on your website, this lightweight JavaScript runs silently in the background — invisible, fast, and comprehensive.
 
-**What makes it exceptional:**
+```
+  ┌──────────────────────────────────────────────────────────┐
+  │                   VISITOR'S BROWSER                      │
+  │                                                          │
+  │  Page loads ──► PiXL Script runs silently (< 500ms)      │
+  │                     │                                    │
+  │         ┌───────────┼───────────────┐                    │
+  │         ▼           ▼               ▼                    │
+  │    Device ID    Bot Check    Behavior Watch              │
+  │   (who is it?)  (is it real?)  (what does it do?)        │
+  │         │           │               │                    │
+  │         └───────────┼───────────────┘                    │
+  │                     ▼                                    │
+  │           1x1 invisible image request                    │
+  │           (data encoded in the URL)                      │
+  │                     │                                    │
+  └─────────────────────│────────────────────────────────────┘
+                        ▼
+               SmartPiXL Server
+```
 
-- **159 data fields** captured per visit — the most comprehensive visitor profile in the industry
-- **230+ data points** extracted from those fields (composite fields contain multiple signals)
-- **Under 500ms** — faster than your page finishes loading
-- **Completely invisible** — no popups, no consent dialogs, no performance impact
-- **Works without cookies** — identifies devices using hardware and behavior characteristics
-- **Resilient** — if any browser API is blocked (privacy tools, ad blockers), the script gracefully degrades and flags the evasion attempt
+**By the numbers:**
 
-**Data categories collected:**
+| Metric | Value |
+|--------|-------|
+| Data fields collected | 159 |
+| Data points extracted | 230+ (composite fields contain multiple signals) |
+| Time to complete | Under 500ms (usually ~80ms) |
+| External dependencies | Zero |
+| Cookies required | None |
+| Visible impact on page | None |
 
-| Category | What It Captures |
-|----------|-----------------|
-| Display | Screen size, color depth, multi-monitor, viewport, pixel ratio |
-| Hardware | CPU cores, device memory, GPU model, battery level |
-| Browser | Full feature detection (17 APIs), plugins, MIME types |
-| Identity | Canvas fingerprint, WebGL fingerprint, audio fingerprint |
-| Location | Timezone, locale, date/number formatting, language preferences |
-| Behavior | Mouse movement patterns, scroll depth, page navigation |
-| Evasion | Privacy tool detection, browser spoofing, automation signals |
+**What it captures — in plain terms:**
+
+| Category | Analogy | What It Captures |
+|----------|---------|-----------------|
+| Device Identity | Like a car's VIN | Screen, GPU, fonts, audio — a unique hardware "signature" |
+| Bot Detection | Like a lie detector | 30+ checks for fake browsers, automation tools, spoofed data |
+| Privacy Evasion | Like spotting a disguise | Detects Tor, Brave, VPNs, anti-detect browsers |
+| Behavior | Like body language | Mouse movement patterns, scroll depth, timing |
+| Browser Profile | Like a passport | Language, timezone, installed features, plugins |
+
+**Deep-Dive Pages:**
+
+| Page | What It Explains |
+|------|-----------------|
+| [Data Fields](pixl-script/data-fields.md) | Every field collected, organized by category |
+| [Fingerprinting](pixl-script/fingerprinting-techniques.md) | How canvas, GPU, audio, and font fingerprints work |
+| [Bot Detection](pixl-script/bot-detection-engine.md) | The 30+ signal scoring system |
+| [Evasion Detection](pixl-script/evasion-detection.md) | How we catch privacy tools and spoofing |
+| [Cross-Signal Analysis](pixl-script/cross-signal-analysis.md) | How we correlate signals to catch sophisticated fakes |
+| [Behavioral Analysis](pixl-script/behavioral-analysis.md) | Mouse movement, scroll tracking, entropy math |
+| [Delivery Mechanism](pixl-script/delivery-mechanism.md) | How the data gets from browser to server |
+
+---
 
 ## Atlas Internal
 
-### How the Script Works
+### How the Script Works — Step by Step
 
-1. A customer's webpage includes a reference to `_SMART.js`
-2. Our server dynamically generates the JavaScript (it's a C# template, not a static file)
-3. The script runs in the visitor's browser for up to 500ms
-4. It collects data from browser APIs — screen properties, hardware specs, fingerprints, behavioral observations
-5. It fires a 1x1 pixel image request (`_SMART.GIF`) with all the data encoded in the URL
-6. The visitor never sees or feels any of this
+```
+  STEP 1: Customer's webpage loads
+    └──► <script src="/{company}/{pixel}_SMART.js"></script>
+
+  STEP 2: Our server generates the JavaScript dynamically
+    └──► C# template (PiXLScript.cs) injects the pixel URL
+
+  STEP 3: Script runs in the visitor's browser
+    └──► Collects 159 fields from browser APIs
+    └──► Runs bot detection (30+ checks)
+    └──► Watches mouse movement and scroll behavior
+
+  STEP 4: All data fires as a 1x1 GIF request
+    └──► _SMART.GIF?canvasFP=a3f9c&gpu=NVIDIA+RTX+4090&...
+    └──► Visitor never sees, feels, or knows about it
+
+  STEP 5: Server receives, enriches, and stores the data
+    └──► Edge server: fast enrichments (IP classification, geo cache)
+    └──► Forge service: deep enrichments (DNS, WHOIS, cross-customer intel)
+```
 
 ### The 500ms Window
 
-The script doesn't wait 500ms — that's a ceiling, not a delay. Most data is collected instantly (under 10ms). The 500ms window exists because a few operations are asynchronous:
-- Audio fingerprinting (needs to render an audio buffer)
-- Battery level check
-- Camera/mic device count (no popup — just counts, never accesses)
-- High-entropy client hints (detailed platform info)
-- Storage quota estimates
+The script doesn't wait 500ms — that's a **safety ceiling**, not a delay. Most data is instant (~10ms). The window exists because a few operations are asynchronous:
 
-If all async operations finish early (they usually do, in ~80ms), data fires immediately. The 500ms is a safety timeout — if any async probe hangs, the data still sends.
+| Async Operation | Why It's Async | Typical Time |
+|-----------------|---------------|--------------|
+| Audio fingerprint | Renders an audio buffer | ~50ms |
+| Battery level | OS-level API call | ~10ms |
+| Media device count | Enumerates hardware | ~20ms |
+| Client hints | Requests detailed platform info | ~15ms |
+| Storage quota | Disk estimation | ~10ms |
 
-During this window, the script also captures behavioral signals:
-- Mouse movement tracking (up to 50 coordinate + timestamp events)
-- Scroll depth recording
-- All used for distinguishing human visitors from bots
+**Guaranteed delivery:** If any async probe hangs forever, the 500ms timeout fires the data anyway with whatever was collected. The pixel **always** fires.
+
+During this window, the script passively records mouse movements and scroll events — used for distinguishing human visitors from bots.
 
 ### What We DON'T Collect
 
-- No camera or microphone access (we count devices, we never activate them)
-- No screen recording or screenshotting
-- No form data or text input
-- No cookies (our identification is cookie-independent)
-- Nothing that requires a permission dialog
-- Nothing that would trigger a browser notification
+| Concern | Answer |
+|---------|--------|
+| Camera/microphone access? | **No.** We count how many exist. We never activate them. |
+| Screen recording? | **No.** |
+| Keystrokes or form data? | **No.** The script never reads any text input. |
+| Cookies? | **No.** Identification is entirely cookie-independent. |
+| Permission dialogs? | **Never.** Nothing triggers a browser popup. |
+| Console output? | **None.** Zero visible trace in developer tools. |
 
-### Field Count: 159
+### Field Count Summary: 159
 
-| Category | Field Count | Examples |
-|----------|-------------|---------|
-| Screen & Display | 14 | Screen size, multi-monitor, pixel ratio |
-| Navigator Properties | 18 | User agent, CPU cores, memory, touch points |
-| Canvas Fingerprint | 3 | Canvas hash, evasion detection, noise detection |
-| WebGL Fingerprint | 6 | GPU model, vendor, parameters, extensions |
-| Audio Fingerprint | 4 | Audio hash, consistency, noise detection |
-| Font Detection | 2 | 30 fonts tested, method spoofing detection |
-| Client Hints | 10 | Platform, architecture, bitness, model |
-| Network/WebRTC | 7 | Connection type, speed, local IP |
-| Storage | 6 | Local/Session/IndexedDB availability, disk quota |
-| Battery | 2 | Level, charging state |
-| Media Devices | 2 | Camera count, mic count |
-| Feature Detection | 17 | Cookie, WebGL, WASM, WebWorker, etc. |
-| CSS/Accessibility | 10 | Dark mode, reduced motion, forced colors |
-| Timezone & Locale | 7 | Timezone, locale, date/number format |
-| Performance | 5 | Page load, DNS, TCP, TTFB timing |
-| JS Heap | 3 | Heap limit, total, used (Chromium) |
-| Page Context | 8 | URL, referrer, title, domain |
-| Document State | 5 | Charset, compat mode, visibility |
-| Exotic Fingerprints | 3 | Math precision, CSS font variant, error message |
-| Plugins & MIME | 4 | Plugin list, MIME types |
-| Bot Detection | 3 | 30+ signals packed into botSignals field |
-| Evasion Detection | 3 | 22+ signals across three fields |
-| Cross-Signal | 3 | 20+ contradiction signals |
-| Behavioral | 10 | Mouse entropy, timing, scroll depth, mouse path |
-| Metadata | 1 | Script execution time |
-| Debug | 1 | Proxy-blocked properties |
+| Category | Count | Deep Dive |
+|----------|-------|-----------|
+| Screen & Display | 14 | [Data Fields](pixl-script/data-fields.md) |
+| Navigator Properties | 18 | [Data Fields](pixl-script/data-fields.md) |
+| Fingerprints (Canvas/WebGL/Audio/Font/Math/CSS/Error) | 21 | [Fingerprinting](pixl-script/fingerprinting-techniques.md) |
+| Client Hints (UA-CH) | 10 | [Data Fields](pixl-script/data-fields.md) |
+| Network & WebRTC | 7 | [Data Fields](pixl-script/data-fields.md) |
+| Storage & APIs | 23 | [Data Fields](pixl-script/data-fields.md) |
+| Hardware (Battery, Media, Gamepads) | 6 | [Data Fields](pixl-script/data-fields.md) |
+| CSS & Accessibility Preferences | 10 | [Data Fields](pixl-script/data-fields.md) |
+| Timezone & Locale | 7 | [Data Fields](pixl-script/data-fields.md) |
+| Performance Timing | 5 | [Data Fields](pixl-script/data-fields.md) |
+| Page Context & Document State | 13 | [Data Fields](pixl-script/data-fields.md) |
+| Plugins & MIME Types | 4 | [Data Fields](pixl-script/data-fields.md) |
+| Bot Detection | 3 | [Bot Detection](pixl-script/bot-detection-engine.md) |
+| Evasion Detection | 3 | [Evasion](pixl-script/evasion-detection.md) |
+| Cross-Signal Anomaly | 3 | [Cross-Signal](pixl-script/cross-signal-analysis.md) |
+| Behavioral (Mouse/Scroll) | 10 | [Behavioral](pixl-script/behavioral-analysis.md) |
+| Metadata & Debug | 2 | [Data Fields](pixl-script/data-fields.md) |
+
+---
 
 ## Atlas Technical
 
 ### Template Architecture
 
-The PiXL Script is not a static `.js` file — it's generated by `PiXLScript.cs` (~1,155 lines of C# producing JavaScript). This approach enables:
-- Server-side injection of company-specific configuration
-- Template-time optimization (dead code removal for features not needed)
-- Versioning via C# file, not CDN cache invalidation
+The PiXL Script is not a static `.js` file. It's generated by `PiXLScript.cs` — ~1,155 lines of JavaScript embedded in a C# string constant. At serve time, a single placeholder (`{{PIXL_URL}}`) is replaced with the company/pixel-specific GIF URL.
 
-The script is served on `GET /{company}/{pixl}_SMART.js` via `TrackingEndpoints.ServeScript()`. Response headers: `Content-Type: application/javascript`, `Cache-Control: public, max-age=3600`.
-
-### Data Fire Mechanism
-
-```javascript
-// After all data is collected:
-var qs = Object.keys(data).map(k => k + '=' + encodeURIComponent(data[k])).join('&');
-new Image().src = '_SMART.GIF?' + qs;
+```
+PiXLScript.cs (C# string template)
+    │
+    ▼  GetScript(pixlUrl)
+ConcurrentDictionary cache (max 10,000 entries)
+    │
+    ▼  Cache miss? Template.Replace("{{PIXL_URL}}", url)
+Generated JS string (cached per companyId/pixlId)
+    │
+    ▼  Served on GET /{company}/{pixl}_SMART.js
+Browser receives and executes
 ```
 
-The data is sent as URL query parameters on an image request. This approach:
-- Works cross-origin without CORS configuration
-- Bypasses most ad blockers (they target `XMLHttpRequest`, not image loads)
-- Is truly fire-and-forget — the image request doesn't block the page
+**Endpoint:** `TrackingEndpoints.ServeScript()` — `Content-Type: application/javascript`, `Cache-Control: public, max-age=3600`.
 
-### Fingerprinting Techniques
+**Why C# template instead of static JS?**
+- Server-side URL injection at generation time (no config file in the browser)
+- Versioning via C# file (deploys with the app, not a CDN invalidation)
+- Cache per company/pixel combo — zero allocation after first hit
 
-**Canvas fingerprinting**: Draw text + shapes + arc on a `<canvas>` element → `toDataURL()` → hash. Different GPU/OS/font rendering produces different outputs. Two-canvas repeatability test detects noise injection (Brave, Firefox privacy mode).
+### Script Execution Order
 
-**WebGL fingerprinting**: Query 23 WebGL parameters + extension list + `UNMASKED_RENDERER_WEBGL` (GPU model). Hash the combined output.
+The script executes in this order, with async operations running in parallel during the collection window:
 
-**Audio fingerprinting**: `OfflineAudioContext` → oscillator + compressor → sum samples [4500..5000]. Run twice via `Promise.all` to check consistency. Different audio stacks produce different outputs.
+```
+1. Setup & Utilities           ──► safeGet(), hashStr()
+2. Canvas Fingerprint          ──► canvasFP, canvasEvasion, canvasConsistency
+3. WebGL Fingerprint           ──► webglFP, gpu, gpuVendor, webglParams, webglExt
+4. Audio Fingerprint (async)   ──► audioFP, audioHash, audioStable
+5. Font Detection              ──► fonts, fontMethodMismatch
+6. Speech Synthesis Voices     ──► voices
+7. WebRTC Local IP (async)     ──► localIp
+8. Storage Quota (async)       ──► storageQuota, storageUsed
+9. Gamepads                    ──► gamepads
+10. Battery (async)            ──► batteryLevel, batteryCharging
+11. Media Devices (async)      ──► audioInputs, videoInputs
+12. Screen & Display           ──► sw, sh, saw, sah, cd, pd, ori, vw, vh, ow, oh, ...
+13. Timezone & Locale          ──► tz, tzo, ts, lang, langs, tzLocale, dateFormat, ...
+14. Navigator Properties       ──► plt, vnd, ua, cores, mem, touch, ...
+15. JS Heap Memory             ──► jsHeapLimit, jsHeapTotal, jsHeapUsed
+16. Client Hints (async)       ──► uaArch, uaBitness, uaModel, uaPlatformVersion, ...
+17. Plugins & MIME Types       ──► pluginList, mimeList
+18. Boolean Feature Flags      ──► ck, dnt, pdf, webdr, online, java, ...
+19. Bot Detection Engine       ──► botSignals, botScore
+20. Evasion Detection          ──► evasionDetected
+21. Cross-Signal Anomaly       ──► crossSignals, anomalyScore, combinedThreatScore
+22. Network & Connection       ──► conn, dl, dlMax, rtt, save, connType
+23. Page Context               ──► url, ref, hist, title, domain, path, hash, protocol
+24. Performance Timing         ──► loadTime, domTime, dnsTime, tcpTime, ttfb
+25. API Support Flags          ──► ls, ss, idb, caches, ww, swk, wasm, webgl, ...
+26. CSS Media Preferences      ──► darkMode, reducedMotion, contrast, hover, pointer, ...
+27. Document State             ──► docCharset, docCompat, docReady, docHidden, ...
+28. Math Fingerprint           ──► mathFP
+29. CSS Font Variant FP        ──► cssFontVariant
+30. Error Fingerprint          ──► errorFP
+31. Stealth Signals            ──► stealthSignals
+32. Evasion Signals V2         ──► evasionSignalsV2
+  ─── Mouse/Scroll listeners run from step 12 until fire ───
+33. Behavioral Analysis        ──► mouseMoves, mouseEntropy, mousePath, scrolled, ...
+34. GIF Fire                   ──► new Image().src = '{{PIXL_URL}}?' + queryString
+```
 
-### Bot Detection (80+ Signals)
+See each deep-dive page for implementation details of each step.
 
-Three composite fields pack 80+ named signals:
-
-**`botSignals`** (~30 signals): `webdriver` (+10), `selenium` (+10), `cdp` (+10), `headless-no-chrome-obj` (+8), `fake-ua` (+20), `phantomjs` (+10), `empty-languages` (+5), `plugin-mime-mismatch` (+3), `zero-screen` (+8), `eval-tampered` (+5), `cross-realm-toString` (+12), `getter-name-mismatch` (+6 each), etc.
-
-**`evasionDetected`** + **`stealthSignals`** + **`evasionSignalsV2`** (~22 signals): `tor-screen`, `tor-likely`, `brave`, `ua-platform-mismatch`, `mobile-ua-desktop-screen`, `webdriver-slow`, `toString-spoofed`, `canvas-noise`, `audio-noise`, etc.
-
-**`crossSignals`** (~20 signals): `win-fonts-on-mac` (+15), `safari-google-vendor` (+20), `swiftshader-gpu` (+5), `gpu-platform-mismatch` (+15), `scroll-no-depth` (+8), `uniform-timing` (+5), etc.
-
-### Mouse & Behavioral Analysis
-
-During the 500ms window, mouse events are captured (up to 50 `{x, y, timestamp}` events):
-
-| Metric | Bot Signal |
-|--------|-----------|
-| `mouseMoves` = 0 | Headless/automated |
-| `mouseEntropy` low | Straight-line movement (bot) |
-| `moveTimingCV` < 0.3 | Metronomic timing (bot) |
-| `moveSpeedCV` < 0.2 | Constant speed (bot) |
-| `mousePath` | Raw trajectory for replay detection in the Forge |
-
-### Anti-Evasion: Repeatability Testing
-
-The script doesn't snapshot everything twice. It runs specific operations twice and checks consistency:
-
-- **Canvas**: Draw identical content on two separate canvas elements, hash both. Same input → different output = noise injection
-- **Audio**: Run `OfflineAudioContext` fingerprint twice in parallel via `Promise.all`. Different results = noise injection
-
-When evasion is detected, the noisy field is excluded from the composite fingerprint (preserving accuracy) and the record is flagged. This feeds into bot scoring.
+---
 
 ## Atlas Private
 
-### Implementation Details in PiXLScript.cs
+### Complete Architecture: PiXLScript.cs
 
-The script is a single string template in `PiXLScript.cs`. Key implementation notes:
+The entire script lives in a single file: `SmartPiXL/Scripts/PiXLScript.cs`. It's a `public static class` with:
 
-**`safeGet()` wrapper**: Every browser API access is wrapped in a try-catch that returns `''` on failure. This prevents any single API from crashing the entire script. If a Proxy is being used to trap property access (anti-fingerprinting tools), the caught error's property name is appended to `_proxyBlocked`.
+- `Template` — a `const string` containing ~1,155 lines of JavaScript. Allocated once at app startup, lives for the process lifetime. `const` means it's baked into the assembly metadata.
+- `_cache` — a `ConcurrentDictionary<string, string>` mapping pixel URLs to generated scripts. Lock-free, thread-safe.
+- `GetScript(pixlUrl)` — calls `_cache.GetOrAdd()` with `Template.Replace("{{PIXL_URL}}", url)` as the factory. The Replace only runs on cache miss. Nuclear eviction (`_cache.Clear()`) at 10,000 entries to bound memory — acceptable because warm-up is a single string.Replace per URL.
 
-**Font detection**: Tests 30 fonts against a monospace baseline by measuring `offsetWidth`. Also cross-checks `offsetWidth` against `getBoundingClientRect().width` — a mismatch indicates the browser is spoofing font metrics.
+**Why `const string` instead of embedded resource?** The JIT interns const strings. The 40KB template is interned in the string pool — no additional heap allocation beyond the one the CLR creates at assembly load. An embedded resource would require `GetManifestResourceStream()` → `StreamReader.ReadToEnd()` → a new heap string every time (unless manually cached, which is what we're doing anyway).
 
-**WebGL parameter query**: Reads 23 parameters via `gl.getParameter()` including `MAX_VERTEX_ATTRIBS`, `MAX_TEXTURE_SIZE`, `MAX_RENDERBUFFER_SIZE`, etc. Extension count is captured separately. The `WEBGL_debug_renderer_info` extension provides the unmasked GPU renderer and vendor — this is the most valuable single data point for device identification.
+### Key Implementation Patterns
 
-**Cross-realm toString check**: Creates a hidden `<iframe>`, accesses its `Function.prototype.toString`, and compares it to the main frame's `Function.prototype.toString`. If they differ, a Proxy or prototype manipulation is in play. This catches sophisticated stealth plugins that modify native function behavior.
+**`safeGet(obj, prop, fallback)`** — Lines 29-40. Wraps every browser API access. If the property is a function, it calls it (handles `navigator.javaEnabled()` transparently). If a Proxy traps the access and throws, the caught property name is appended to `data._proxyBlocked` — this is diagnostic data for understanding which privacy tools are active.
 
-**Getter property validation**: For 6 `Navigator` properties (`userAgent`, `platform`, `language`, `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints`), the script checks:
-1. Does `Object.getOwnPropertyDescriptor(Navigator.prototype, prop).get` have the expected name? (Mismatch = overridden getter)
-2. Does the getter have a `prototype` property? (Native getters don't have prototypes; spoofed functions often do)
+**`hashStr(str)`** — Lines 43-52. DJB2 variant. Closure-captured `h` variable (no allocation per call). `h = ((h << 5) - h) + charCodeAt(i)` is multiply-by-31 plus character code. `h = h & h` forces 32-bit integer (avoids floating-point drift). Returns `Math.abs(h).toString(16)`.
 
-Each property that fails these checks contributes +6 or +8 to `botScore`.
+**Fire-and-forget pattern** — Lines 1100-1131. The critical guarantee: the GIF **must** fire. Three paths:
+1. `Promise.allSettled` available + async work: `Promise.race([allSettled(asyncPromises), 500ms timeout]).then(sendPiXL)` — whichever wins triggers the send.
+2. `Promise.allSettled` not available (IE11 edge case): falls through to the 500ms timeout.
+3. Catastrophic error: outer try/catch fires `new Image().src = '{{PIXL_URL}}?error=1&msg=...'` — even a script crash produces a data point.
 
-**Heap spoofing detection**: Chrome's `performance.memory` values (jsHeapSizeLimit, totalJSHeapSize, usedJSHeapSize) should be irregular numbers. If `heapLimit % 1000000 === 0` (round million), it's likely spoofed. If `totalJSHeapSize === usedJSHeapSize`, something is suppressing real values.
+**No `Promise.allSettled` fallback** — old browsers that lack it just wait 500ms. This is fine because the async data (audio, battery, etc.) usually completes well within 500ms anyway. Worst case: those fields are empty, but the hit is recorded.
 
-**Mouse path encoding**: After the 500ms window, the `moves[]` array (up to 50 `{x, y, timestamp}` events) is serialized as `x,y,t|x,y,t|...` with a hard cap at 2000 characters. The first event's timestamp becomes the base (t=0), subsequent timestamps are relative. This encoding is consumed by the Forge's `BehavioralReplayService` for replay detection.
+### Script Size
 
-**`screenExtended`**: `screen.isExtended` returns `true` for multi-monitor setups. Outputs `1` or `0`. On single-monitor setups and older browsers, the ternary resolves to `0` (undefined is falsy).
+| Metric | Value |
+|--------|-------|
+| Source lines (JS in C# template) | ~1,155 |
+| Uncompressed JS | ~38KB |
+| Gzip over wire | ~9KB |
+| Cache-Control | `public, max-age=3600` |
+| External dependencies | Zero |
 
-### Script Size and Delivery
+### Known Browser Limitations
 
-The generated JavaScript is approximately 35-40KB uncompressed. With gzip (default for IIS), it's ~8-10KB over the wire. The script is served with `max-age=3600` (1 hour cache), so repeat visits within an hour don't re-download.
+| Browser | Missing APIs | Impact |
+|---------|-------------|--------|
+| Firefox | `deviceMemory`, `performance.memory`, Client Hints (`userAgentData`) | Fingerprint has fewer dimensions, but canvas/WebGL/fonts/audio still work |
+| Safari | Battery API, Client Hints, `connection` API | Relies more on canvas, WebGL, fonts, screen |
+| Brave | Randomizes canvas and WebGL output | Detected by repeatability test → flagged as evasion → noisy fields excluded from fingerprint hash |
+| Tor Browser | Letterboxed viewport, minimal fonts, blocked WebRTC | Detected via viewport math + font count. Very low uniqueness by design. |
+| Edge | Identical to Chrome (same engine) | Full API coverage |
 
-The script has ZERO external dependencies — no jQuery, no analytics libraries, no CDN requests. It's entirely self-contained. This was a deliberate choice: external dependencies can be blocked by ad blockers, and CDN failures would break data collection.
+### Deep-Dive Documents
 
-### Known Limitations
-
-- **Firefox**: `navigator.deviceMemory` returns `undefined`. `performance.memory` is unavailable. Client Hints (`navigator.userAgentData`) are unavailable. These fields are simply empty for Firefox visitors — they don't break the fingerprint, they reduce its dimensionality.
-- **Safari**: Battery API, Client Hints, and `connection` API are all unavailable. Safari is the most privacy-restrictive mainstream browser — our fingerprint for Safari visitors relies more heavily on canvas, WebGL, fonts, and screen properties.
-- **Brave**: Randomizes canvas and WebGL outputs. The repeatability test catches this and flags it as evasion. The noisy fields are excluded from the fingerprint hash.
-- **Tor Browser**: Letterboxes the viewport to fixed sizes. The script detects this via viewport math and flags it. Tor users have very low fingerprint uniqueness (by design).
+| Document | Lines of PiXLScript.cs | Content |
+|----------|----------------------|---------|
+| [data-fields.md](pixl-script/data-fields.md) | All | Complete 159-field inventory |
+| [fingerprinting-techniques.md](pixl-script/fingerprinting-techniques.md) | 56-965 | Canvas, WebGL, Audio, Font, Math, CSS, Error FP |
+| [bot-detection-engine.md](pixl-script/bot-detection-engine.md) | 483-713 | Scored signal system |
+| [evasion-detection.md](pixl-script/evasion-detection.md) | 715-750, 967-1010 | Privacy/spoofing/stealth detection |
+| [cross-signal-analysis.md](pixl-script/cross-signal-analysis.md) | 752-850 | Cross-correlation anomaly scoring |
+| [behavioral-analysis.md](pixl-script/behavioral-analysis.md) | 1012-1098 | Mouse/scroll tracking + entropy |
+| [delivery-mechanism.md](pixl-script/delivery-mechanism.md) | 1100-1168 | GIF fire, 500ms window, C# host |

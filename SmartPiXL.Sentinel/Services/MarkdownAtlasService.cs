@@ -69,6 +69,15 @@ public sealed partial class MarkdownAtlasService
         ["subsystems/traffic-alerts"]       = ("Subsystems", 27, "bell", "Traffic Alerts"),
         ["subsystems/failover"]             = ("Subsystems", 28, "shield-check", "Failover & Durability"),
 
+        // Deep Dives — PiXL Script breakdown
+        ["subsystems/pixl-script/data-fields"]              = ("Deep Dives", 50, "list",          "Data Field Inventory"),
+        ["subsystems/pixl-script/fingerprinting-techniques"] = ("Deep Dives", 51, "fingerprint",   "Fingerprinting Techniques"),
+        ["subsystems/pixl-script/bot-detection-engine"]     = ("Deep Dives", 52, "shield-alert",  "Bot Detection Engine"),
+        ["subsystems/pixl-script/evasion-detection"]        = ("Deep Dives", 53, "eye-off",       "Evasion Detection"),
+        ["subsystems/pixl-script/cross-signal-analysis"]    = ("Deep Dives", 54, "git-merge",     "Cross-Signal Analysis"),
+        ["subsystems/pixl-script/behavioral-analysis"]      = ("Deep Dives", 55, "mouse-pointer", "Behavioral Analysis"),
+        ["subsystems/pixl-script/delivery-mechanism"]       = ("Deep Dives", 56, "send",          "Delivery Mechanism"),
+
         // Database
         ["database/schema-map"]             = ("Database", 30, "table", "Schema Map"),
         ["database/etl-procedures"]         = ("Database", 31, "file-code", "ETL Procedures"),

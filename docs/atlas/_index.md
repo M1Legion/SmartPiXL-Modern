@@ -29,7 +29,7 @@ This index lists all documented subsystems in the SmartPiXL platform. Each docum
 
 | Document | Status | Description |
 |----------|--------|-------------|
-| [pixl-script](subsystems/pixl-script.md) | Current | Browser-side data collection (159 fields) |
+| [pixl-script](subsystems/pixl-script.md) | Current | Browser-side data collection (159 fields) — overview hub |
 | [fingerprinting](subsystems/fingerprinting.md) | Current | Device identification via canvas/WebGL/audio |
 | [bot-detection](subsystems/bot-detection.md) | Current | Bot/crawler scoring (80+ signals) |
 | [enrichment-pipeline](subsystems/enrichment-pipeline.md) | Current | Tier 1-3 Forge enrichments (15 steps) |
@@ -38,6 +38,20 @@ This index lists all documented subsystems in the SmartPiXL platform. Each docum
 | [geo-intelligence](subsystems/geo-intelligence.md) | Current | IPAPI, MaxMind, cultural arbitrage |
 | [traffic-alerts](subsystems/traffic-alerts.md) | Current | Visitor scoring, customer summaries |
 | [failover](subsystems/failover.md) | Current | JSONL durability, catch-up mechanism |
+
+### PiXL Script Deep Dive
+
+Detailed breakdowns of each PiXL Script domain:
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| [data-fields](subsystems/pixl-script/data-fields.md) | Current | Complete 159-field inventory by category |
+| [fingerprinting-techniques](subsystems/pixl-script/fingerprinting-techniques.md) | Current | Canvas, WebGL, Audio, Font, Math, CSS, Error fingerprinting |
+| [bot-detection-engine](subsystems/pixl-script/bot-detection-engine.md) | Current | 30+ scored bot signals with weights |
+| [evasion-detection](subsystems/pixl-script/evasion-detection.md) | Current | Privacy tools, spoofing, stealth plugin detection |
+| [cross-signal-analysis](subsystems/pixl-script/cross-signal-analysis.md) | Current | Cross-correlating signals to catch sophisticated fakes |
+| [behavioral-analysis](subsystems/pixl-script/behavioral-analysis.md) | Current | Mouse tracking, scroll depth, entropy math |
+| [delivery-mechanism](subsystems/pixl-script/delivery-mechanism.md) | Current | GIF fire pattern, 500ms window, C# template host |
 
 ## Database
 

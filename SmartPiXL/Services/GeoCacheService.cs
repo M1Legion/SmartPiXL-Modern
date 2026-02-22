@@ -295,7 +295,8 @@ public sealed class GeoCacheService : IHostedService, IDisposable
             SELECT TOP 1 Country, CountryCode, RegionName, City, Zip,
                    Lat, Lon, Timezone, ISP, Org, Proxy, Mobile
             FROM IPAPI.IP
-            WHERE IP = @IP AND Status = 'success'";
+            WHERE IP = @IP AND Status = 'success'
+            OPTION (MAXDOP 1)";
         cmd.Parameters.AddWithValue("@IP", ip);
         cmd.CommandTimeout = 5; // Fast timeout — don't slow down under pressure
         
@@ -367,7 +368,8 @@ public sealed class GeoCacheService : IHostedService, IDisposable
                 FROM PiXL.IP pip
                 INNER JOIN IPAPI.IP ipa ON pip.IPAddress = ipa.IP
                 WHERE ipa.Status = 'success'
-                ORDER BY pip.HitCount DESC";
+                ORDER BY pip.HitCount DESC
+                OPTION (MAXDOP 1)";
             cmd.Parameters.AddWithValue("@TopN", topN);
             cmd.CommandTimeout = 30;
             
