@@ -3217,3 +3217,99 @@ Created `SmartPiXL.Sentinel/SentinelAccessControl.cs` — a single, centralized 
 ### Design Decision: Access Control Scope
 
 Per platform owner directive (2026-02-25): "everything on Sentinel needs to securely run both on the server when I'm RDP'd in and from our office at 8.27.24.2." The original localhost-only restriction was unrealistic — the Tron dashboard requires an RTX 4090 (workstation only), while the server needs programmatic access via LAN IP during RDP sessions. The unified access control supports both scenarios through the `localIp` equality check (RDP) and `DashboardAllowedIPs` config (office IP).
+
+---
+
+## Session — ETL Pipeline Validation (Embedded QA) (2026-02-25)
+
+### Objective
+
+Validate `ETL.usp_ParseNewHits` before resuming on 25M+ queued records. Code reconnaissance → risk map → controlled test batch → verify output.
+
+### Environment
+
+- **ETL Proc:** Migration 44 (Tier3) — 13 phases, 31,313 chars, authoritative deployed version
+- **Watermark:** ParseNewHits at 7,349,707 (before test), Raw max 32,451,808
+- **Gap:** ~25.1M unparsed records
+- **Data composition:** 25,108,292 legacy + 71 modern (test hits, CompanyID=TEST)
+
+### Risk Map
+
+| # | Location | Risk | Likelihood | Impact | Result |
+|---|----------|------|------------|--------|--------|
+| 1 | Migration 44, Phase 10 (Device MERGE) | No `WHEN MATCHED` clause — repeat devices never update FirstSeen/LastSeen/HitCount | certain | **Moderate** — PiXL.Device dimensions degrade over time, repeat devices always show HitCount=1, FirstSeen/LastSeen = sysutcdatetime() instead of hit ReceivedAt | **CONFIRMED** — 0 devices upserted (legacy has NULL DeviceHash). For modern data, regression will manifest. |
+| 2 | Migration 44, Phase 11 (IP MERGE) | `WHEN MATCHED` updates LastSeen but no HitCount accumulation | certain | **Moderate** — IP.HitCount stuck at whatever pre-migration-44 value it had. New IPs start at 1, never increment. | **CONFIRMED** — IP 1399414 has HitCount=1 but 187 actual visits. Google crawler IP (66.249.64.65) has HitCount=43,276 but 78,334 actual visits. |
+| 3 | Migration 44, Phase 11 (IP MERGE) | FirstSeen/LastSeen use `SYSUTCDATETIME()` (ETL execution time) instead of hit's `ReceivedAt` | certain | **Minor** — Temporal precision loss. LastSeen=2026-02-25 for hits from 2026-02-18. Tolerable for legacy catch-up but wrong for real-time. | **CONFIRMED** — All IP LastSeen = `2026-02-25 18:47:56` for hits received `2026-02-18`. |
+| 4 | Migration 57 comment | 4 bitmap columns (FeatureBitmapValue, AccessibilityBitmapValue, BotBitmapValue, EvasionBitmapValue) have no ETL phase | certain | **None (expected)** — Migration 57 explicitly deferred Phase 8E. Columns will be NULL. | **CONFIRMED** — Known gap, not a bug. |
+| 5 | Edge fingerprint stability params | `_srv_fpAlert`, `_srv_fpObs`, `_srv_fpUniq`, `_srv_fpRate5m` appended to QueryString but no PiXL.Parsed columns exist | certain | **Minor** — Data preserved in Raw.QueryString, used by Forge's LeadQualityScoringService, but not queryable in Parsed. | **CONFIRMED** — Design gap, not a regression. |
+| 6 | PiXL.Parsed column `Tier` (ordinal 11) | AI drift artifact — `GetQueryParam(qs, 'tier')` reads a param that nothing sets | certain | **None** — Always NULL. Dead column from abandoned "tiered script complexity" concept. | **CONFIRMED** — Platform owner confirmed: tiers were abandoned. Only legacy vs modern data exists. |
+| 7 | Field name cross-reference | 150+ GetQueryParam param names vs PiXL Script data.* names | N/A | N/A | **PASS** — All param names match exactly. No mismatches, no missing fields, no type cast issues. |
+| 8 | `dbo.GetQueryParam` function | URL decoding correctness, NULL handling, edge cases | N/A | N/A | **PASS** — Handles NULL/empty, 12 decode patterns, `%25` → `%` correctly last, `NULLIF(@Value, '')` returns NULL for empty values. |
+| 9 | Legacy data handling | 25.1M legacy rows with no browser fields — should parse without error, all browser columns NULL | N/A | N/A | **PASS** — 100-row test batch completed successfully. All browser columns NULL. HitType='legacy'. Correct. |
+
+### Confirmed Bugs
+
+#### BUG-E1: Device MERGE regression (migration 44)
+
+- **Severity:** Moderate (will bite on modern data)
+- **Location:** `SmartPiXL/SQL/44_ForgeTier3Columns.sql` Phase 10 (Device MERGE)
+- **What the code does:** `WHEN NOT MATCHED THEN INSERT (DeviceHash) VALUES (...)` — only inserts. No `WHEN MATCHED` clause at all.
+- **What it should do:** Migration 42 had the correct version: `WHEN MATCHED THEN UPDATE SET target.HitCount = target.HitCount + source.BatchHitCount, target.LastSeen = source.MaxReceivedAt` with GROUP BY DeviceHash, MIN/MAX(ReceivedAt), COUNT(*).
+- **Impact:** Repeat devices never update. FirstSeen/LastSeen use DEFAULT sysutcdatetime() (ETL time, not hit time). HitCount stuck at 1 forever. For legacy data this is harmless (DeviceHash is always NULL → no Device MERGE runs). For modern data it means PiXL.Device is functionally broken.
+- **Repro:** Run `EXEC ETL.usp_ParseNewHits @BatchSize = 100` with data that has non-NULL CanvasFingerprint. Check PiXL.Device — HitCount will be 1 regardless of how many times the device was seen.
+
+#### BUG-E2: IP MERGE HitCount not accumulating (migration 44)
+
+- **Severity:** Moderate
+- **Location:** `SmartPiXL/SQL/44_ForgeTier3Columns.sql` Phase 11 (IP MERGE)
+- **What the code does:** `WHEN MATCHED THEN UPDATE SET target.LastSeen = SYSUTCDATETIME()` — updates LastSeen but not HitCount.
+- **What it should do:** `WHEN MATCHED THEN UPDATE SET target.LastSeen = SYSUTCDATETIME(), target.HitCount = target.HitCount + (SELECT COUNT(*) FROM #BatchRows WHERE IPAddress = source.IPAddress)`.
+- **Impact:** IP.HitCount is wrong for every IP processed after migration 44. Example: IP 66.249.64.65 shows HitCount=43,276 but has 78,334 visits.
+- **Evidence:** `SELECT ip.HitCount, COUNT(v.VisitID) AS ActualVisits FROM PiXL.IP ip JOIN PiXL.Visit v ON ip.IpId = v.IpId WHERE ip.IPAddress = '66.249.64.65' GROUP BY ip.HitCount` → 43276 vs 78334.
+
+#### BUG-E3: IP MERGE temporal precision loss (migration 44)
+
+- **Severity:** Minor
+- **Location:** `SmartPiXL/SQL/44_ForgeTier3Columns.sql` Phase 11 (IP MERGE)
+- **What the code does:** `SYSUTCDATETIME()` for both INSERT FirstSeen/LastSeen and MATCHED LastSeen.
+- **What it should do:** Use `MIN(ReceivedAt)` for FirstSeen insert, `MAX(ReceivedAt)` for LastSeen update (from GROUP BY in source subquery).
+- **Impact:** IP.LastSeen = ETL execution time, not actual hit time. During backlog catch-up, a Feb 18 hit shows LastSeen = Feb 25.
+
+### Test Batch Results
+
+- **Batch:** `EXEC ETL.usp_ParseNewHits @BatchSize = 100`
+- **Result:** 100 rows parsed (IDs 7,349,708–7,349,807)
+- **Devices upserted:** 0 (expected — legacy data, no fingerprints)
+- **IPs upserted:** 95 (correct — MERGE worked for IP dimension)
+- **Visits inserted:** 100 (correct — all rows got Visit records)
+- **Watermark:** Advanced from 7,349,707 → 7,349,807 ✓
+- **HitType:** All 100 rows = 'legacy' ✓
+- **Referrer URL decode:** `%3A%2F%2F` → `://` ✓
+- **Srv_* params:** Correctly parsed from QueryString (e.g., `_srv_subnetIps=5` → `Srv_SubnetIps=5`) ✓
+- **Browser fields:** All NULL for legacy data ✓
+
+### Technical Debt Identified
+
+| Item | Description | Priority |
+|------|-------------|----------|
+| `Tier` column (PiXL.Parsed ordinal 11) | AI drift artifact. Nothing populates it. Dead weight. | Low — remove in future cleanup migration |
+| `synthetic` param | Only used during blast testing. No production use. Consider removing or repurposing. | Low |
+| Fingerprint stability columns | `_srv_fpAlert/fpObs/fpUniq/fpRate5m` exist in Raw.QueryString but have no PiXL.Parsed columns | Medium — add columns if fp stability data is needed for dashboards |
+| 4 bitmap columns | Phase 8E deferred by migration 57. Will remain NULL until proc is updated. | Medium — implement when bitmaps are needed |
+
+### Decision: ETL Safe to Resume on Legacy Data
+
+The proc correctly parses legacy data — all browser/fingerprint columns are NULL (as expected), server-side `_srv_*` params parse correctly, URL decoding works, watermark advances properly, and Visits are created correctly.
+
+The MERGE regressions (BUG-E1, E2, E3) are **tolerable for legacy data** because:
+- BUG-E1 (Device): DeviceHash is NULL for all legacy rows → Device MERGE never fires → no impact
+- BUG-E2 (IP HitCount): IP.HitCount becomes inaccurate, but Visit records are correct and HitCount can be recalculated from Visit at any time
+- BUG-E3 (IP temporal): LastSeen = ETL time instead of hit time. Acceptable during backlog processing.
+
+**These bugs MUST be fixed before the modern PiXL Script goes live** — modern data will have non-NULL DeviceHash and the Device MERGE regression will cause real data loss.
+
+### Recommendation
+
+1. **Fix MERGE regressions** — restore migration 42's Device MERGE logic (GROUP BY, MIN/MAX(ReceivedAt), COUNT(*), MATCHED HitCount accumulation). Add HitCount accumulation to IP MERGE.
+2. **Resume ETL** — safe to run on legacy backlog as-is if MERGE fix isn't immediately available.
+3. **After backlog processed** — run `UPDATE PiXL.IP SET HitCount = (SELECT COUNT(*) FROM PiXL.Visit WHERE IpId = PiXL.IP.IpId)` to fix accumulated HitCount drift.
