@@ -1,5 +1,4 @@
-using System.Net;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
@@ -8,25 +7,25 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Sentinel.Endpoints;
 
 // ============================================================================
-// TRAFFIC ALERT API — Visitor scoring + customer quality endpoints.
+// TRAFFIC ALERT API â€” Visitor scoring + customer quality endpoints.
 //
 // ROUTE MAP:
-//   /api/traffic-alert/visitors        →  vw_TrafficAlert_VisitorDetail (paginated)
-//   /api/traffic-alert/visitors/{id}   →  Single visitor by VisitorScoreId
-//   /api/traffic-alert/customers       →  vw_TrafficAlert_CustomerOverview
-//   /api/traffic-alert/customers/{id}  →  Single customer by CompanyID
-//   /api/traffic-alert/trend           →  vw_TrafficAlert_Trend (time-series)
-//   /api/traffic-alert/summary         →  Aggregate KPI snapshot across all customers
+//   /api/traffic-alert/visitors        â†’  vw_TrafficAlert_VisitorDetail (paginated)
+//   /api/traffic-alert/visitors/{id}   â†’  Single visitor by VisitorScoreId
+//   /api/traffic-alert/customers       â†’  vw_TrafficAlert_CustomerOverview
+//   /api/traffic-alert/customers/{id}  â†’  Single customer by CompanyID
+//   /api/traffic-alert/trend           â†’  vw_TrafficAlert_Trend (time-series)
+//   /api/traffic-alert/summary         â†’  Aggregate KPI snapshot across all customers
 //
 // DESIGN:
-//   - Localhost-restricted (same as Dashboard — operational data)
+//   - Localhost-restricted (same as Dashboard â€” operational data)
 //   - All reads from materialized TrafficAlert views (no writes)
 //   - Pagination on visitors (default 100, max 500)
 //   - Customer filter via ?companyId=N query parameter
 // ============================================================================
 
 /// <summary>
-/// TrafficAlert API endpoints — visitor scoring, customer quality grades,
+/// TrafficAlert API endpoints â€” visitor scoring, customer quality grades,
 /// and traffic quality trend data for the ops dashboard.
 /// </summary>
 public static class TrafficAlertEndpoints
@@ -39,22 +38,20 @@ public static class TrafficAlertEndpoints
     };
 
     private static string _connectionString = null!;
-    private static string[]? _allowedIps;
     private static ITrackingLogger _logger = null!;
 
     public static void MapTrafficAlertEndpoints(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
         _connectionString = settings.ConnectionString;
-        _allowedIps = settings.DashboardAllowedIPs;
         _logger = app.Services.GetRequiredService<ITrackingLogger>();
 
         // ====================================================================
-        // VISITOR DETAIL — Full scoring breakdown (paginated)
+        // VISITOR DETAIL â€” Full scoring breakdown (paginated)
         // ====================================================================
         app.MapGet("/api/traffic-alert/visitors", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             int top = ParseInt(ctx, "top", 100, 1, 500);
             int offset = ParseInt(ctx, "offset", 0, 0, int.MaxValue);
@@ -89,11 +86,11 @@ public static class TrafficAlertEndpoints
         });
 
         // ====================================================================
-        // SINGLE VISITOR — By VisitorScoreId
+        // SINGLE VISITOR â€” By VisitorScoreId
         // ====================================================================
         app.MapGet("/api/traffic-alert/visitors/{id:long}", async (HttpContext ctx, long id) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             var rows = await QueryAsync(@"
                 SELECT *
@@ -111,11 +108,11 @@ public static class TrafficAlertEndpoints
         });
 
         // ====================================================================
-        // CUSTOMER OVERVIEW — Per-customer summary with quality grades
+        // CUSTOMER OVERVIEW â€” Per-customer summary with quality grades
         // ====================================================================
         app.MapGet("/api/traffic-alert/customers", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             string periodType = ctx.Request.Query["period"].FirstOrDefault() ?? "D";
             if (periodType is not ("D" or "W" or "M"))
@@ -132,11 +129,11 @@ public static class TrafficAlertEndpoints
         });
 
         // ====================================================================
-        // SINGLE CUSTOMER — By CompanyID
+        // SINGLE CUSTOMER â€” By CompanyID
         // ====================================================================
         app.MapGet("/api/traffic-alert/customers/{id:int}", async (HttpContext ctx, int id) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             var rows = await QueryAsync(@"
                 SELECT *
@@ -155,11 +152,11 @@ public static class TrafficAlertEndpoints
         });
 
         // ====================================================================
-        // TREND — Time-series for charting (per-customer or all)
+        // TREND â€” Time-series for charting (per-customer or all)
         // ====================================================================
         app.MapGet("/api/traffic-alert/trend", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             int? companyId = ParseOptionalInt(ctx, "companyId");
             string periodType = ctx.Request.Query["period"].FirstOrDefault() ?? "D";
@@ -191,11 +188,11 @@ public static class TrafficAlertEndpoints
         });
 
         // ====================================================================
-        // SUMMARY — Aggregate KPI snapshot across all customers
+        // SUMMARY â€” Aggregate KPI snapshot across all customers
         // ====================================================================
         app.MapGet("/api/traffic-alert/summary", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
             var rows = await QueryAsync(@"
                 SELECT
@@ -225,28 +222,7 @@ public static class TrafficAlertEndpoints
         _logger.Info("[TrafficAlert] API endpoints mapped: /api/traffic-alert/*");
     }
 
-    // ========================================================================
-    // ACCESS CONTROL — Same loopback + allowed-IP check as Dashboard.
-    // ========================================================================
-    private static bool RequireLoopback(HttpContext ctx)
-    {
-        var remote = ctx.Connection.RemoteIpAddress;
-        if (remote is null)
-        {
-            ctx.Response.StatusCode = 404;
-            return false;
-        }
 
-        if (IPAddress.IsLoopback(remote))
-            return true;
-
-        var ip = remote.MapToIPv4().ToString();
-        if (_allowedIps is not null && Array.Exists(_allowedIps, a => a == ip))
-            return true;
-
-        ctx.Response.StatusCode = 404;
-        return false;
-    }
 
     // ========================================================================
     // SQL + JSON HELPERS

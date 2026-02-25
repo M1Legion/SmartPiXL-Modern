@@ -2994,3 +2994,226 @@ Enrichment Worker → TryWrite(sqlChannel) ──success──→ SQL Writer →
 1. **`BoundedChannelFullMode.Wait` comment vs actual behavior.** The original comment in `ForgeChannels.cs` implied `TryWrite()` would apply backpressure. It doesn't — `TryWrite` is non-blocking by definition. Fixed comment to reflect reality. `WriteAsync()` is the method that respects wait behavior. Applied `WriteAsync` where backpressure is appropriate (PipeListener) and kept `TryWrite` + failover where we don't want to block (EnrichmentPipeline).
 
 2. **Circuit breaker drain vs backoff.** The original exponential backoff design preserved the channel buffer but lost data when it overflowed. The new "drain to disk" approach empties the channel immediately, trading disk I/O for zero data loss. This matches the user's stated priority: *"the core mechanics need to work."*
+
+---
+
+## Embedded QA Report — SmartPiXL Sentinel
+
+**Date:** 2026-02-25
+**Agent:** Embedded QA (Code Recon → Risk Map → Targeted Testing)
+
+### Test Environment
+
+- **Sentinel:** `http://localhost:7500` (dev, `dotnet run`)
+- **Edge (IIS):** `http://192.168.88.176` (production, actively receiving traffic)
+- **Forge:** `SmartPiXL-Forge` Windows Service (running, pipe `SmartPiXL-Enrichment` active)
+- **Database:** `localhost\SQL2025` → `SmartPiXL`
+- **PiXL.Raw ingest rate:** ~70 rec/sec (19,474 in last 5 minutes at time of test)
+
+### Source Files Reviewed
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `SmartPiXL.Sentinel/Program.cs` | 226 | Composition root, Kestrel config, service registration |
+| `SmartPiXL.Sentinel/Endpoints/DashboardEndpoints.cs` | 576 | 22 dashboard API endpoints (localhost-restricted) |
+| `SmartPiXL.Sentinel/Endpoints/AtlasEndpoints.cs` | ~300 | Atlas documentation portal (public) |
+| `SmartPiXL.Sentinel/Endpoints/TrafficAlertEndpoints.cs` | 304 | Traffic alert scoring API (localhost-restricted) |
+| `SmartPiXL.Sentinel/Services/InfraHealthService.cs` | 568 | Parallel infra probes (services, SQL, IIS, data flow) |
+| `SmartPiXL.Sentinel/Services/MarkdownAtlasService.cs` | 394 | Markdown→HTML with YAML frontmatter, FileSystemWatcher |
+| `SmartPiXL.Sentinel/Services/RemediationService.cs` | ~170 | ActionSql execution for self-healing remediations |
+| `SmartPiXL.Sentinel/Services/EmailNotificationService.cs` | ~170 | SMTP email + SMS (rate-limited, fire-and-forget) |
+| `SmartPiXL.Sentinel/Services/HttpEdgeHealthClient.cs` | ~100 | HTTP bridge to Edge /internal/* endpoints |
+
+### Endpoint Sweep — ALL 35 Endpoints Tested
+
+| Group | Endpoints | Status | Notes |
+|-------|-----------|--------|-------|
+| **Dashboard** (`/api/dash/*`) | 22 | All 200 OK | health, hourly, bots, bot-signals, devices, evasion, behavior, recent, fingerprints, pipeline, sessions, dead-internet, customer-quality, cross-customer, cross-customer/detail, impossible-travel, device-lifecycle, device-hops, subnet-clusters, xavier-sync, remediations, infra |
+| **Atlas** (`/api/atlas/*`, `/atlas`, `/tron`) | 7 | All 200 OK | sections, categories, status, metrics, demo, /atlas HTML, /tron HTML |
+| **TrafficAlert** (`/api/traffic-alert/*`) | 6 | All 200 OK (from localhost) | visitors, visitors/{id}, customers, customers/{id}, trend, summary |
+
+**Edge case handling (correct):**
+- `/api/atlas/section/nonexistent-slug` → 404
+- `/api/traffic-alert/visitors/99999999` → 404
+- `/api/traffic-alert/customers/99999999` → 404
+- `/tron/analytics` → 200 (valid module)
+
+### Security Tests — ALL PASSED
+
+| Test | Input | Result | Verdict |
+|------|-------|--------|---------|
+| Path traversal (URL-encoded) | `/tron/..%2f..%2fappsettings.json` | Blocked | PASS |
+| Path traversal (backslash) | `/tron/..\..\appsettings.json` | Blocked | PASS |
+| Invalid extension | `/tron/test.html` | Blocked | PASS |
+| SQL injection in query param | `?top=1;DROP TABLE x--` | `int.TryParse` fails → default 100, parameterized query | PASS |
+| Large top value | `?top=999999` | Capped at 500 by `Math.Min(t, 500)` | PASS |
+| Negative top value | `?top=-1` | `t > 0` fails → default 100 | PASS |
+
+### Risk Map
+
+| # | Location | Risk | Likelihood | Impact |
+|---|----------|------|------------|--------|
+| 1 | `vw_Dash_SystemHealth` + 12 other `vw_Dash_*` views | Dashboard shows `hits_24h: 0` when system processes 70+ rec/sec — all 13 views read PiXL.Parsed which is stale since ETL paused Feb 21 | **certain** (happening now) | **misleading ops** |
+| 2 | `TrafficAlertEndpoints.cs:249` | `MapToIPv4()` called without `IsIPv4MappedToIPv6` check — crashes on pure IPv6 connections | edge-case | **500 error** |
+| 3 | `TrafficAlertEndpoints.cs:231-252` | Missing `LocalIpAddress` equality check — LAN IP connections rejected | **confirmed** | **access denied for operator** |
+| 4 | `TrafficAlertEndpoints.cs` vs `DashboardEndpoints.cs` | Two separate `RequireLoopback` implementations with 3 behavioral differences (localIp, IPv6, null IP) | certain (code smell) | **inconsistent access control** |
+| 5 | `DashboardEndpoints.cs:78` | `remoteIp is null` returns `true` (fail-open) — allows access when IP can't be determined | theoretical | **security gap** |
+| 6 | `/api/dash/customer-quality` | Returns 1,237 rows / 275KB unbounded — no pagination | probable (grows with customers) | **performance degradation** |
+
+### Confirmed Bugs
+
+#### BUG-S1: Dashboard Stale Data — 13 Views Read PiXL.Parsed (ETL Stalled)
+
+- **Severity:** Critical (operator impact)
+- **Location:** `vw_Dash_SystemHealth` and 12 other `vw_Dash_*` SQL views
+- **Risk Map Entry:** #1
+- **What happens:** `/api/dash/health` returns `hits_24h: 0`, `lastHitAt: 2026-02-18`, `totalHits: 6,661,629`. Meanwhile `/api/dash/infra` (which queries PiXL.Raw) returns `hitsLast5Min: 19,474`, `hitsLastHour: 235,662`, `lastInsertUtc: 2026-02-25T17:39:59`.
+- **Root cause:** All 13 new `vw_Dash_*` views read from `PiXL.Parsed`. ETL (`usp_ParseNewHits`) last ran 2026-02-21. PiXL.Raw max ID is 32,219,747 but ETL watermark is at 7,349,707 — a gap of **24,870,040 unparsed records**.
+- **Affected views:** SystemHealth, HourlyRollup, BotBreakdown, TopBotSignals, DeviceBreakdown, EvasionSummary, BehavioralAnalysis, RecentHits, FingerprintClusters, SubnetClusters, DeadInternet, CustomerQuality, DeviceLifecycle
+- **Non-affected:** InfraHealth (reads PiXL.Raw directly in C#), pipeline panel (shows both Raw and Parsed stats), old `vw_Dashboard_*` Worker-era views (read PiXL.Raw)
+- **Impact:** An operator viewing the Tron dashboard would conclude the system is completely dead when it's actually healthy and processing traffic at full throughput. The pipeline panel does expose `parseLag: 24,870,040` but the dominant health panel says "0 hits."
+- **Classification:** Architecture/ETL issue, not a Sentinel code bug. Sentinel correctly queries the views. The design assumes ETL runs continuously. With ETL paused for the rebuild, the entire dashboard layer is showing week-old data.
+- **Recommendation:** Either (a) resume ETL, (b) add a stale-data warning when `ETL_LastRunAt` is > 1 hour old, or (c) add PiXL.Raw fallback metrics to SystemHealth view.
+
+#### BUG-S2: TrafficAlert RequireLoopback Rejects LAN IP Connections
+
+- **Severity:** Moderate
+- **Location:** `TrafficAlertEndpoints.cs` lines 231–252
+- **Risk Map Entry:** #3
+- **What happens:** `http://192.168.88.176:7500/api/dash/health` → **200 OK**. `http://192.168.88.176:7500/api/traffic-alert/summary` → **404 Not Found**.
+- **Root cause:** Dashboard's `RequireLoopback` has `var localIp = ctx.Connection.LocalIpAddress; if (localIp != null && remoteIp.Equals(localIp)) return true;` which allows connections from the machine's own LAN IP. TrafficAlert's `RequireLoopback` omits this check.
+- **Repro steps:**
+  1. Access `http://192.168.88.176:7500/api/dash/health` — returns 200
+  2. Access `http://192.168.88.176:7500/api/traffic-alert/summary` — returns 404
+- **Impact:** Operator cannot access TrafficAlert endpoints from the server's LAN IP unless `192.168.88.176` is added to `DashboardAllowedIPs`. Dashboard works fine from the same IP.
+
+#### BUG-S3: TrafficAlert RequireLoopback Crashes on Pure IPv6
+
+- **Severity:** Moderate
+- **Location:** `TrafficAlertEndpoints.cs` line 249
+- **Risk Map Entry:** #2
+- **What happens:** `remote.MapToIPv4()` is called unconditionally. `IPAddress.MapToIPv4()` throws `InvalidOperationException` on pure IPv6 addresses (not IPv4-mapped). Since TrafficAlert endpoints lack `SafeExecuteAsync` error wrapping, the exception propagates as a raw 500 Internal Server Error.
+- **Dashboard comparison:** `DashboardEndpoints.cs` line 86: `var checkIp = remoteIp.IsIPv4MappedToIPv6 ? remoteIp.MapToIPv4() : remoteIp;` — safely handles IPv6 by checking first.
+- **Repro:** Connect to port 7500 from a pure IPv6 address (not `::1`, not `::ffff:*`). The endpoint handler will throw. (Not easily reproducible on this IPv4-only LAN, but would affect any IPv6-enabled network.)
+- **Impact:** Unhandled exception in access-control code, 500 response instead of 404.
+
+#### BUG-S4: Duplicate RequireLoopback Implementations (Code Smell)
+
+- **Severity:** Minor (maintenance/correctness hazard)
+- **Location:** `DashboardEndpoints.cs:75-90` vs `TrafficAlertEndpoints.cs:231-252`
+- **Risk Map Entry:** #4
+- **What happens:** Two independent `RequireLoopback` methods with 3 behavioral differences:
+
+  | Behavior | Dashboard | TrafficAlert |
+  |----------|-----------|-------------|
+  | `remoteIp is null` | Returns `true` (allow) | Returns `false` (deny, 404) |
+  | `localIp` equality | Checked (allows LAN IP) | Not checked (rejects LAN IP) |
+  | IPv6 handling | `IsIPv4MappedToIPv6` guard | Unconditional `MapToIPv4()` (crashes) |
+  | IP storage | `HashSet<IPAddress>` (parsed) | `string[]` (raw string comparison) |
+
+- **Recommendation:** Extract a single `AccessControl.RequireLoopback()` into `SmartPiXL.Shared` or a Sentinel-internal helper class. Use the Dashboard version's logic as the correct implementation.
+
+#### BUG-S5: Dashboard Allows Access When Remote IP Is Null
+
+- **Severity:** Minor (theoretical)
+- **Location:** `DashboardEndpoints.cs` line 78
+- **Risk Map Entry:** #5
+- **What happens:** `if (remoteIp is null) return true;` — when `HttpContext.Connection.RemoteIpAddress` is null, the Dashboard allows the request through. This is a fail-open design that contradicts the intent of `RequireLoopback`.
+- **When null occurs:** Unix domain sockets, certain reverse proxy configurations, unit test mocks.
+- **Impact:** Unlikely to be exploitable in this deployment (Kestrel direct, no reverse proxy), but violates principle of least privilege.
+- **Recommendation:** Change to `if (remoteIp is null) { ctx.Response.StatusCode = 404; return false; }` to match TrafficAlert's fail-closed behavior.
+
+### Passed (Robust Code)
+
+| # | What Was Tested | Result |
+|---|-----------------|--------|
+| 1 | Path traversal on `/tron/{file}` — `..`, `%2e%2e`, backslash | All blocked by `..` check + extension whitelist (.js, .mjs, .glsl) |
+| 2 | SQL injection via query parameters (`?top=1;DROP TABLE x--`) | Safe — `int.TryParse` rejects, queries are parameterized (`@top`) |
+| 3 | Pagination bounds on TrafficAlert visitors | `Math.Min(t, 500)` caps correctly, negative values default to 100 |
+| 4 | Atlas endpoints unrestricted by design | `/api/atlas/*` accessible from any IP — correct per design |
+| 5 | InfraHealthService real-time data flow | `hitsLast5Min`, `hitsLastHour`, `lastInsertUtc` all accurate from PiXL.Raw |
+| 6 | Pipeline endpoint gap reporting | `parseLag: 24,870,040` correctly exposed — gap between Raw and Parsed visible |
+| 7 | 404 on nonexistent resources | Atlas slug, visitor ID, customer ID all return proper 404 |
+| 8 | Infra service probes | All 4 Windows services (SmartPiXL-Forge, MSSQLSERVER, SQLSERVERAGENT, W3SVC) reported Running |
+| 9 | CORS and security headers | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` all present |
+| 10 | Health/Xavier endpoint caching | 15s cache with `SemaphoreSlim` — no race observed under sequential requests |
+
+### Observations (Not Bugs)
+
+1. **Empty enrichment data:** `cross-customer`, `cross-customer/detail`, and `impossible-travel` all return `[]`. These views depend on Forge enrichment data that hasn't been populated yet (Forge was just deployed). Expected to populate as Forge processes traffic.
+
+2. **`customer-quality` unbounded:** Returns all 1,237 rows (275KB) in a single response. No pagination. As the customer count grows, this will become a performance concern. Not urgent for V1.0.0 with current data volume but worth adding `top`/`offset` parameters.
+
+3. **Sessions data minimal:** `/api/dash/sessions` returns only 508 bytes. The underlying `vw_Dash_Sessions` reads from `PiXL.Visit` which depends on ETL — same stale-data issue as BUG-S1.
+
+4. **ETL has been stalled since Feb 21:** This is the root cause of BUG-S1. The `parseWatermark` is 7,349,707 but `PiXL.Raw` max ID is 32,219,747. Approximately 24.87M records are queued for parsing. When ETL resumes, it will need to process a significant backlog. The ETL procs (`usp_ParseNewHits`, `usp_MatchVisits`) process in batches (configurable), so this should self-recover, but the initial catchup may take hours depending on batch size and server load.
+
+5. **`InfraHealthService.ProbeAppComponents()`** uses `.GetAwaiter().GetResult()` inside `Task.Run()` for the Edge health check. Not a deadlock risk (inside thread pool thread, not synchronization context), but would be cleaner as an `await` chain.
+
+6. **Atlas demo endpoint** (`/api/atlas/demo`) queries PiXL.Raw with the requester's IP to find matching records for company 12344. This is public-facing and reveals whether an IP has visited the SmartPiXL demo pixel. Low-risk information disclosure (limited to demo pixel only).
+
+### Summary
+
+| Category | Count |
+|----------|-------|
+| Fragile spots identified | 6 |
+| Tests executed | 16 |
+| Bugs confirmed | 5 (1 critical, 2 moderate, 2 minor) |
+| Passed (code is robust) | 10 |
+| Observations | 6 |
+
+**Sentinel is structurally sound** — the HTTP layer, routing, JSON serialization, SQL parameterization, security headers, and path traversal protection all work correctly. The two real bugs (BUG-S2 + BUG-S3) are in the duplicate `RequireLoopback` implementation in TrafficAlertEndpoints, which should be unified with Dashboard's version. BUG-S1 (stale dashboard data) is an ETL/architecture issue that will self-resolve when ETL resumes but should have a visible warning in the meantime.
+
+---
+
+## Sentinel Bug Fixes — Unified Access Control
+
+**Date:** 2026-02-25
+**Fixes:** BUG-S2, BUG-S3, BUG-S4, BUG-S5
+
+### What Changed
+
+Created `SmartPiXL.Sentinel/SentinelAccessControl.cs` — a single, centralized IP-based access control class that replaces the two divergent `RequireLoopback` implementations in `DashboardEndpoints.cs` and `TrafficAlertEndpoints.cs`.
+
+### Access Control Policy
+
+| Source | Allowed? | Mechanism |
+|--------|----------|-----------|
+| Loopback (127.0.0.1, ::1) | Yes | `IPAddress.IsLoopback()` |
+| Server's own LAN IP (RDP session) | Yes | `remoteIp.Equals(localIp)` |
+| Configured IPs (`Tracking:DashboardAllowedIPs`) | Yes | `HashSet<IPAddress>.Contains()` with IPv6 normalization |
+| Null remote IP | **No** (fail-closed) | Previously fail-open in Dashboard — fixed |
+| Pure IPv6 | Safe | `IsIPv4MappedToIPv6` guard prevents `InvalidOperationException` |
+| Everything else | No (404) | Silent deny — doesn't reveal the API exists |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `SmartPiXL.Sentinel/SentinelAccessControl.cs` | **NEW** — unified access control with `Initialize()` and `IsAllowed()` |
+| `SmartPiXL.Sentinel/Program.cs` | Added `SentinelAccessControl.Initialize()` call before endpoint mapping |
+| `SmartPiXL.Sentinel/Endpoints/DashboardEndpoints.cs` | Removed `RequireLoopback()`, `_allowedIps`, IP parsing loop. All `RequireLoopback(ctx)` → `SentinelAccessControl.IsAllowed(ctx)` |
+| `SmartPiXL.Sentinel/Endpoints/TrafficAlertEndpoints.cs` | Removed `RequireLoopback()`, `_allowedIps`. All `RequireLoopback(ctx)` → `SentinelAccessControl.IsAllowed(ctx)` |
+
+### Bug Resolution
+
+| Bug | Fix |
+|-----|-----|
+| **BUG-S2** (TrafficAlert rejects LAN IP) | `SentinelAccessControl.IsAllowed()` checks `localIp` equality — LAN IP works |
+| **BUG-S3** (IPv6 crash) | `IsIPv4MappedToIPv6` guard before `MapToIPv4()` — safe for pure IPv6 |
+| **BUG-S4** (duplicate implementations) | Single class, called by both endpoint files |
+| **BUG-S5** (null IP fail-open) | `remoteIp is null` → deny (fail-closed) |
+
+### Verification
+
+- **Build:** 0 warnings, 0 errors (full solution)
+- **Tests:** 523/523 passing
+- **Integration tests:**
+  - `http://localhost:7500/api/dash/health` → 200
+  - `http://localhost:7500/api/traffic-alert/summary` → 200
+  - `http://192.168.88.176:7500/api/dash/health` → 200
+  - `http://192.168.88.176:7500/api/traffic-alert/summary` → **200** (was 404 before fix)
+
+### Design Decision: Access Control Scope
+
+Per platform owner directive (2026-02-25): "everything on Sentinel needs to securely run both on the server when I'm RDP'd in and from our office at 8.27.24.2." The original localhost-only restriction was unrealistic — the Tron dashboard requires an RTX 4090 (workstation only), while the server needs programmatic access via LAN IP during RDP sessions. The unified access control supports both scenarios through the `localIp` equality check (RDP) and `DashboardAllowedIPs` config (office IP).

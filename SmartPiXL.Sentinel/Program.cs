@@ -1,6 +1,7 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
+using SmartPiXL.Sentinel;
 using SmartPiXL.Sentinel.Endpoints;
 using SmartPiXL.Sentinel.Services;
 using SmartPiXL.Services;
@@ -177,6 +178,14 @@ app.UseStaticFiles(new StaticFileOptions
 // ===========================================================================
 // ENDPOINT MAPPING
 // ===========================================================================
+
+// Initialize access control before mapping any restricted endpoints.
+{
+    var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
+    var acLogger = app.Services.GetRequiredService<ITrackingLogger>();
+    SentinelAccessControl.Initialize(settings.DashboardAllowedIPs, acLogger);
+}
+
 app.MapDashboardEndpoints();
 app.MapAtlasEndpoints();
 app.MapTrafficAlertEndpoints();

@@ -1,5 +1,4 @@
-using System.Net;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
@@ -9,42 +8,42 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Sentinel.Endpoints;
 
 // ============================================================================
-// DASHBOARD API ENDPOINTS — Read-only JSON API over SQL views.
+// DASHBOARD API ENDPOINTS â€” Read-only JSON API over SQL views.
 //
 // ARCHITECTURE:
-//   /api/dash/* routes  →  QueryAsync/QuerySingleRowAsync  →  vw_Dash_* views
+//   /api/dash/* routes  â†’  QueryAsync/QuerySingleRowAsync  â†’  vw_Dash_* views
 //   (HTTP GET)              (ADO.NET SqlDataReader)              (PiXL.Parsed materialized data)
 //
 // All endpoints are restricted to localhost + DashboardAllowedIPs from config.
 // External requests receive a 404 (not 403) to avoid revealing the API exists.
 //
 // SQL VIEW MAPPING:
-//   /api/dash/health       →  vw_Dash_SystemHealth       (single row aggregate)
-//   /api/dash/hourly       →  vw_Dash_HourlyRollup       (time-bucketed rollup)
-//   /api/dash/bots         →  vw_Dash_BotBreakdown       (risk tiers)
-//   /api/dash/bot-signals  →  vw_Dash_TopBotSignals      (detection signal frequency)
-//   /api/dash/devices      →  vw_Dash_DeviceBreakdown    (browser/OS/device stats)
-//   /api/dash/evasion      →  vw_Dash_EvasionSummary     (canvas/WebGL evasion)
-//   /api/dash/behavior     →  vw_Dash_BehavioralAnalysis (timing/interaction signals)
-//   /api/dash/recent       →  vw_Dash_RecentHits         (latest raw hits)
-//   /api/dash/fingerprints →  vw_Dash_FingerprintClusters(grouped fingerprints)
-//   /api/dash/infra        →  InfraHealthService         (live OS/SQL/IIS probes)
-//   /api/dash/pipeline     →  vw_Dash_PipelineHealth     (ETL watermarks & lags)
-//   /api/dash/sessions     →  vw_Dash_SessionSummary     (session reconstruction)
-//   /api/dash/dead-internet → vw_Dash_DeadInternet       (dead internet index)
-//   /api/dash/customer-quality → vw_Dash_CustomerQuality (traffic quality trending)
-//   /api/dash/cross-customer → vw_Dash_CrossCustomer     (cross-customer intelligence)
-//   /api/dash/impossible-travel → vw_Dash_ImpossibleTravel (geo anomaly detection)
-//   /api/dash/device-lifecycle → vw_Dash_DeviceLifecycle  (device age/lifecycle)
-//   /api/dash/subnet-clusters → vw_Dash_SubnetClusters   (subnet reputation)
+//   /api/dash/health       â†’  vw_Dash_SystemHealth       (single row aggregate)
+//   /api/dash/hourly       â†’  vw_Dash_HourlyRollup       (time-bucketed rollup)
+//   /api/dash/bots         â†’  vw_Dash_BotBreakdown       (risk tiers)
+//   /api/dash/bot-signals  â†’  vw_Dash_TopBotSignals      (detection signal frequency)
+//   /api/dash/devices      â†’  vw_Dash_DeviceBreakdown    (browser/OS/device stats)
+//   /api/dash/evasion      â†’  vw_Dash_EvasionSummary     (canvas/WebGL evasion)
+//   /api/dash/behavior     â†’  vw_Dash_BehavioralAnalysis (timing/interaction signals)
+//   /api/dash/recent       â†’  vw_Dash_RecentHits         (latest raw hits)
+//   /api/dash/fingerprints â†’  vw_Dash_FingerprintClusters(grouped fingerprints)
+//   /api/dash/infra        â†’  InfraHealthService         (live OS/SQL/IIS probes)
+//   /api/dash/pipeline     â†’  vw_Dash_PipelineHealth     (ETL watermarks & lags)
+//   /api/dash/sessions     â†’  vw_Dash_SessionSummary     (session reconstruction)
+//   /api/dash/dead-internet â†’ vw_Dash_DeadInternet       (dead internet index)
+//   /api/dash/customer-quality â†’ vw_Dash_CustomerQuality (traffic quality trending)
+//   /api/dash/cross-customer â†’ vw_Dash_CrossCustomer     (cross-customer intelligence)
+//   /api/dash/impossible-travel â†’ vw_Dash_ImpossibleTravel (geo anomaly detection)
+//   /api/dash/device-lifecycle â†’ vw_Dash_DeviceLifecycle  (device age/lifecycle)
+//   /api/dash/subnet-clusters â†’ vw_Dash_SubnetClusters   (subnet reputation)
 //
 // DASHBOARD HTML:
-//   /tron                  →  wwwroot/tron.html          (Tron ops dashboard SPA)
-//   /tron/analytics        →  wwwroot/tron.html          (same SPA, JS view switch)
+//   /tron                  â†’  wwwroot/tron.html          (Tron ops dashboard SPA)
+//   /tron/analytics        â†’  wwwroot/tron.html          (same SPA, JS view switch)
 // ============================================================================
 
 /// <summary>
-/// Dashboard API endpoints — exposes SQL views as JSON for the Tron operations dashboard.
+/// Dashboard API endpoints â€” exposes SQL views as JSON for the Tron operations dashboard.
 /// <para>
 /// All endpoints are read-only SELECT queries against <c>vw_Dash_*</c> views
 /// (materialized from <c>PiXL.Parsed</c>). Access is restricted to loopback
@@ -60,10 +59,9 @@ public static class DashboardEndpoints
         WriteIndented = false
     };
 
-    private static HashSet<IPAddress> _allowedIps = new();
     private static ITrackingLogger _logger = null!;
 
-    // ── Endpoint-level caches (15 s TTL) ────────────────────────────
+    // â”€â”€ Endpoint-level caches (15 s TTL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(15);
 
     private static volatile Dictionary<string, object?>? _healthCache;
@@ -72,41 +70,10 @@ public static class DashboardEndpoints
     private static volatile List<Dictionary<string, object?>>? _xavierCache;
     private static DateTime _xavierExpiry = DateTime.MinValue;
 
-    private static bool RequireLoopback(HttpContext ctx)
-    {
-        var remoteIp = ctx.Connection.RemoteIpAddress;
-        if (remoteIp is null) return true;
-
-        if (IPAddress.IsLoopback(remoteIp)) return true;
-
-        var localIp = ctx.Connection.LocalIpAddress;
-        if (localIp != null && remoteIp.Equals(localIp)) return true;
-
-        var checkIp = remoteIp.IsIPv4MappedToIPv6 ? remoteIp.MapToIPv4() : remoteIp;
-        if (_allowedIps.Contains(checkIp)) return true;
-
-        ctx.Response.StatusCode = 404;
-        return false;
-    }
-
     public static void MapDashboardEndpoints(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IOptions<TrackingSettings>>().Value;
         _logger = app.Services.GetRequiredService<ITrackingLogger>();
-
-        _allowedIps.Clear();
-        foreach (var ipStr in settings.DashboardAllowedIPs)
-        {
-            if (IPAddress.TryParse(ipStr.Trim(), out var parsed))
-            {
-                _allowedIps.Add(parsed);
-                _logger.Info($"[Dashboard] Allowed remote IP: {parsed}");
-            }
-            else
-            {
-                _logger.Warning($"[Dashboard] Could not parse allowed IP: '{ipStr}'");
-            }
-        }
 
         // ====================================================================
         // ORIGINAL DASHBOARD VIEWS (ported from Worker)
@@ -114,7 +81,7 @@ public static class DashboardEndpoints
 
         app.MapGet("/api/dash/health", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var now = DateTime.UtcNow;
             var cached = _healthCache;
             if (cached is not null && now < _healthExpiry)
@@ -134,7 +101,7 @@ public static class DashboardEndpoints
 
         app.MapGet("/api/dash/hourly", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP (@N) * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC",
@@ -143,49 +110,49 @@ public static class DashboardEndpoints
 
         app.MapGet("/api/dash/bots", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_BotBreakdown ORDER BY SortOrder");
         });
 
         app.MapGet("/api/dash/bot-signals", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 20 * FROM vw_Dash_TopBotSignals ORDER BY TimesTriggered DESC");
         });
 
         app.MapGet("/api/dash/devices", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 30 * FROM vw_Dash_DeviceBreakdown ORDER BY HitCount DESC");
         });
 
         app.MapGet("/api/dash/evasion", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_EvasionSummary");
         });
 
         app.MapGet("/api/dash/behavior", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_BehavioralAnalysis");
         });
 
         app.MapGet("/api/dash/recent", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_RecentHits");
         });
 
         app.MapGet("/api/dash/fingerprints", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 50;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP (@N) * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC",
@@ -193,11 +160,11 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // INFRASTRUCTURE HEALTH — Services, SQL, Websites, App metrics
+        // INFRASTRUCTURE HEALTH â€” Services, SQL, Websites, App metrics
         // ====================================================================
         app.MapGet("/api/dash/infra", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var infraService = ctx.RequestServices.GetRequiredService<InfraHealthService>();
@@ -207,11 +174,11 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // XAVIER SYNC HEALTH — Cached 15 s
+        // XAVIER SYNC HEALTH â€” Cached 15 s
         // ====================================================================
         app.MapGet("/api/dash/xavier-sync", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var now = DateTime.UtcNow;
             var cached = _xavierCache;
             if (cached is not null && now < _xavierExpiry)
@@ -230,96 +197,96 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // PIPELINE HEALTH — Device, IP, Visit, Match tables & watermarks
+        // PIPELINE HEALTH â€” Device, IP, Visit, Match tables & watermarks
         // ====================================================================
         app.MapGet("/api/dash/pipeline", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_PipelineHealth");
         });
 
         // ====================================================================
-        // ENRICHMENT-AWARE VIEWS (Phase 8+ — new in Sentinel)
+        // ENRICHMENT-AWARE VIEWS (Phase 8+ â€” new in Sentinel)
         // ====================================================================
 
         app.MapGet("/api/dash/sessions", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_SessionSummary");
         });
 
         app.MapGet("/api/dash/dead-internet", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_DeadInternet");
         });
 
         app.MapGet("/api/dash/customer-quality", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_CustomerQuality");
         });
 
         app.MapGet("/api/dash/cross-customer", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_CrossCustomer");
         });
 
         app.MapGet("/api/dash/cross-customer/detail", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_CrossCustomerDetail");
         });
 
         app.MapGet("/api/dash/impossible-travel", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_ImpossibleTravel");
         });
 
         app.MapGet("/api/dash/device-lifecycle", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT * FROM vw_Dash_DeviceLifecycle");
         });
 
         app.MapGet("/api/dash/device-hops", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_DeviceCustomerHops");
         });
 
         app.MapGet("/api/dash/subnet-clusters", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 100 * FROM vw_Dash_SubnetClusters");
         });
 
         // ====================================================================
-        // REMEDIATION ENDPOINTS — View, approve, skip remediations
+        // REMEDIATION ENDPOINTS â€” View, approve, skip remediations
         // ====================================================================
 
         app.MapGet("/api/dash/remediations", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await QueryViewAsync(ctx, settings.ConnectionString,
                 "SELECT TOP 50 * FROM Ops.RemediationLog ORDER BY DetectedAtUtc DESC");
         });
 
         app.MapPost("/api/dash/remediation/approve/{id:int}", async (HttpContext ctx, int id) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
@@ -330,7 +297,7 @@ public static class DashboardEndpoints
 
         app.MapPost("/api/dash/remediation/skip/{id:int}", async (HttpContext ctx, int id) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var remediation = ctx.RequestServices.GetRequiredService<RemediationService>();
@@ -340,11 +307,11 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // CIRCUIT BREAKER RESET — Proxied to IIS Edge via HTTP
+        // CIRCUIT BREAKER RESET â€” Proxied to IIS Edge via HTTP
         // ====================================================================
         app.MapPost("/api/dash/circuit-reset", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var edge = ctx.RequestServices.GetRequiredService<IEdgeHealthClient>();
@@ -360,17 +327,17 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // TEST NOTIFICATION — Verify email + SMS notification stack
+        // TEST NOTIFICATION â€” Verify email + SMS notification stack
         // ====================================================================
         app.MapPost("/api/dash/test-notify", async (HttpContext ctx) =>
         {
-            if (!RequireLoopback(ctx)) return;
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var email = ctx.RequestServices.GetRequiredService<EmailNotificationService>();
                 var (emailSent, smsSent) = await email.NotifyAsync(
                     "TestNotification",
-                    "Test Alert — System OK",
+                    "Test Alert â€” System OK",
                     $"This is a test notification from SmartPiXL Sentinel.\nTimestamp: {DateTime.UtcNow:u}\nEmail + SMS channels verified.");
                 await WriteJsonAsync(ctx, new
                 {
@@ -394,7 +361,7 @@ public static class DashboardEndpoints
 
     private static async Task ServeTronHtml(HttpContext ctx, IWebHostEnvironment env)
     {
-        if (!RequireLoopback(ctx)) return;
+        if (!SentinelAccessControl.IsAllowed(ctx)) return;
         var path = Path.Combine(env.WebRootPath ?? "wwwroot", "tron.html");
         if (!File.Exists(path))
             path = Path.Combine(env.ContentRootPath, "wwwroot", "tron.html");
@@ -415,7 +382,7 @@ public static class DashboardEndpoints
 
     private static async Task ServeTronModule(HttpContext ctx, IWebHostEnvironment env, string file)
     {
-        if (!RequireLoopback(ctx)) return;
+        if (!SentinelAccessControl.IsAllowed(ctx)) return;
 
         if (file.Contains("..") || file.Contains('/') || file.Contains('\\'))
         {
@@ -454,7 +421,7 @@ public static class DashboardEndpoints
     }
 
     // ========================================================================
-    // ADO.NET HELPERS — Thin wrappers for read-only view queries.
+    // ADO.NET HELPERS â€” Thin wrappers for read-only view queries.
     // ========================================================================
 
     private static async Task<List<Dictionary<string, object?>>> QueryAsync(
@@ -493,7 +460,7 @@ public static class DashboardEndpoints
     }
 
     // ========================================================================
-    // SAFE QUERY WRAPPERS — Execute SQL view queries with error handling.
+    // SAFE QUERY WRAPPERS â€” Execute SQL view queries with error handling.
     //
     // Returns structured JSON error on SqlException/timeout instead of
     // propagating unhandled exceptions as raw 500s. (BUG-Q4 fix)
