@@ -53,6 +53,9 @@ public sealed class ForgeMetrics
     private long _sqlMaxTicks;
     private long _sqlFailures;
 
+    // Failover: records diverted to JSONL on disk (channel full or circuit open)
+    private long _failoverCount;
+
     // Channel depths (sampled, not accumulated)
     private int _enrichmentChannelDepth;
     private int _sqlWriterChannelDepth;
@@ -102,6 +105,9 @@ public sealed class ForgeMetrics
         }
     }
 
+    /// <summary>Records a record diverted to failover JSONL on disk.</summary>
+    public void RecordFailover() => Interlocked.Increment(ref _failoverCount);
+
     /// <summary>Updates the sampled channel depths (called periodically).</summary>
     public void SampleChannelDepths(int enrichmentDepth, int sqlWriterDepth)
     {
@@ -138,6 +144,9 @@ public sealed class ForgeMetrics
             SqlMinTicks = Interlocked.Exchange(ref _sqlMinTicks, long.MaxValue),
             SqlMaxTicks = Interlocked.Exchange(ref _sqlMaxTicks, 0),
             SqlFailures = Interlocked.Exchange(ref _sqlFailures, 0),
+
+            // Failover
+            FailoverCount = Interlocked.Exchange(ref _failoverCount, 0),
 
             // Channel depths (sampled, not reset)
             EnrichmentChannelDepth = Volatile.Read(ref _enrichmentChannelDepth),
@@ -213,6 +222,9 @@ public readonly record struct MetricsSnapshot
     public long SqlMaxTicks { get; init; }
     public long SqlFailures { get; init; }
 
+    // ── Failover ──
+    public long FailoverCount { get; init; }
+
     // ── Channels ──
     public int EnrichmentChannelDepth { get; init; }
     public int SqlWriterChannelDepth { get; init; }
@@ -246,6 +258,7 @@ public readonly record struct MetricsSnapshot
             $"  PIPE→CH    {PipeCount,8:N0} rec  {pipeRps,8:N1}/s  avg {PipeAvgUs,8:N1}μs  min {PipeMinUs,8:N1}μs  max {PipeMaxUs,8:N1}μs  drops {PipeDrops}\n" +
             $"  ENRICH→CH  {EnrichCount,8:N0} rec  {enrichRps,8:N1}/s  avg {EnrichAvgUs,8:N1}μs  min {EnrichMinUs,8:N1}μs  max {EnrichMaxUs,8:N1}μs  drops {EnrichDrops}\n" +
             $"  SQL→DB     {SqlCount,8:N0} rec  {sqlRps,8:N1}/s  avg {SqlAvgMs,8:N1}ms  min {SqlMinMs,8:N1}ms  max {SqlMaxMs,8:N1}ms  batches {SqlBatchCount}  avg/rec {SqlAvgPerRecordUs,8:N1}μs  ~{SqlAvgBatchSize:N1}rec/batch  fails {SqlFailures}\n" +
-            $"  CHANNELS   enrich={EnrichmentChannelDepth:N0}  sqlWriter={SqlWriterChannelDepth:N0}";
+            $"  CHANNELS   enrich={EnrichmentChannelDepth:N0}  sqlWriter={SqlWriterChannelDepth:N0}" +
+            (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "");
     }
 }

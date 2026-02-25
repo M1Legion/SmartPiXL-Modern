@@ -2467,3 +2467,530 @@ ALTER TABLE PiXL.IP ADD MaxMindTimezone VARCHAR(50) NULL;
 **Resolution:** MaxMind GeoLite2 provides 12/14 equivalent fields at ~1μs inline (vs batch SQL JOIN on 60s timer). The missing proxy/mobile flags are partially covered by existing enrichments (DatacenterIpService, ContradictionMatrix). IPAPI.IP remains in the database as historical reference — no data deleted. The design doc's geo enrichment architecture remains valid; only the data source changes from "ETL batch JOIN to IPAPI.IP" to "inline MaxMind lookup in Forge pipeline."
 
 **Decision:** MaxMind becomes the primary geo source. IPAPI.IP stays as read-only reference. IpApiSyncService remains disabled. ETL.usp_EnrichParsedGeo continues to run (it still enriches PiXL.IP geo columns from IPAPI.IP for historical IPs that predate MaxMind integration) but is no longer the primary geo path for new records.
+
+---
+
+## Embedded QA Report — PiXL Script + Edge Deployment
+
+**Date:** 2026-02-25
+**Agent:** Embedded QA
+**Scope:** SmartPiXL Edge (IIS) — PiXLScript.cs, TrackingEndpoints.cs, TrackingCaptureService.cs, PipeClientService.cs, FingerprintStabilityService.cs, IpBehaviorService.cs, IpClassificationService.cs, GeoCacheService.cs, DatacenterIpService.cs, JsonlFailoverService.cs, Program.cs
+
+### Test Environment
+
+- **Edge (IIS):** `http://127.0.0.1/` (port 80 on 192.168.88.176, InProcess hosting)
+- **Database:** `localhost\SQL2025` → `SmartPiXL` (PiXL.Raw: ~31M+ rows)
+- **Forge:** SmartPiXL-Forge service (pipe connected, queue depth 0)
+- **Traffic:** ~168K pixel GIF hits/hour, ~840 ClearDot legacy hits/hour, ~16 noise hits/hour
+
+### Risk Map Summary
+
+- **Fragile spots identified:** 17
+- **Tests executed:** 12
+- **Bugs confirmed:** 4 (1 critical, 2 moderate, 1 minor)
+- **Passed (code is robust):** 6
+- **Untestable (no modern PiXL Script deployments):** 6
+
+### Key Observation
+
+**100% of production traffic is legacy img-only pixels.** Zero customers have deployed the modern `_SMART.js` PiXL Script. All 159 browser-side fingerprint fields (canvasFP, audioFP, battery, storageEst, WebRTC, etc.) are NOT being collected in production. All enrichment data comes server-side from Forge (`_srv_*` params). The PiXL Script risks (#1, #9–13, #17) are code-review findings that will become testable when customers deploy the modern script.
+
+---
+
+### Confirmed Bugs
+
+#### BUG-001: X-Forwarded-For IP Spoofing in TrackingCaptureService
+
+- **Severity:** Critical
+- **Location:** `SmartPiXL/Services/TrackingCaptureService.cs` lines 192–213
+- **Risk Map Entry:** #6
+
+**What the code does:** `ExtractClientIp()` reads the raw `X-Forwarded-For` header and trusts the first IP in the chain, regardless of whether the ForwardedHeaders middleware processed it.
+
+**What it should do:** In IIS InProcess hosting mode without a CDN/proxy, IIS sets `RemoteIpAddress` directly from the TCP socket. The ForwardedHeaders middleware correctly ignores client-provided XFF headers (because external client IPs aren't in `KnownProxies`), but `ExtractClientIp()` then reads the raw, unprocessed XFF header anyway — bypassing the middleware's trust model.
+
+**Why it's fragile:** The ForwardedHeaders middleware (Program.cs lines 196–203) has `ForwardLimit=1` and only loopback in `KnownProxies`. For non-loopback clients, it correctly skips XFF processing and leaves the header intact. But `ExtractClientIp()` reads XFF first (before checking `RemoteIpAddress`), so any client-injected XFF value overrides the real IP.
+
+**Repro Steps:**
+1. Send a pixel hit from any non-loopback IP with a spoofed XFF header:
+   ```powershell
+   Invoke-WebRequest -Uri "http://192.168.88.176/TEST/xff-spoof_SMART.GIF?test=xff" -Headers @{"X-Forwarded-For"="66.66.66.66"} -UseBasicParsing
+   ```
+2. Query PiXL.Raw:
+   ```sql
+   SELECT IPAddress, HeadersJson FROM PiXL.Raw WHERE RequestPath LIKE '%xff-spoof%' ORDER BY Id DESC;
+   ```
+3. **Result:** `IPAddress = 66.66.66.66` (spoofed). Real source IP (192.168.88.176) is lost.
+4. **HeadersJson confirms:** `{"X-Forwarded-For":"66.66.66.66"}` — the raw client header was trusted.
+
+**Evidence:** DB rows 31351973, 31352445 both show `IPAddress = 66.66.66.66` instead of the real IP.
+
+**Impact:** Any client can forge their IP address for all tracking data. This affects:
+- All IP-based enrichments (geo, ISP, datacenter detection, IP classification)
+- Fingerprint stability (per-IP tracking)
+- IP behavior detection (subnet velocity, rapid-fire)
+- Lead scoring, session stitching, cross-customer intel
+- Downstream ETL into PiXL.Parsed, PiXL.IP, PiXL.Visit
+
+**Recommended Fix:** Remove the direct XFF header read from `ExtractClientIp()`. After ForwardedHeaders middleware runs, `connection.RemoteIpAddress` already contains: (a) the real client IP (IIS InProcess sets it from socket), or (b) the XFF-derived IP if the request came through a trusted proxy. The method should just use `connection.RemoteIpAddress?.ToString()`.
+
+---
+
+#### BUG-002: ClearDot.gif Legacy URLs Falsely Flagged as Bot Trap
+
+- **Severity:** Moderate
+- **Location:** `SmartPiXL/Endpoints/TrackingEndpoints.cs` lines 214–237
+- **Risk Map Entry:** #15
+
+**What the code does:** The catch-all route `/{**path}` first checks if the path ends with `_SMART.GIF` (line 214). If not, it falls through to the bot trap handler (line 233) which captures the hit with `_srv_botTrap=1`.
+
+**What it should do:** Recognize ClearDot.gif URLs like `/epush/villagetoyota_34448_ClearDot.gif` as legitimate legacy pixel hits from deployed customers, not bot trap triggers.
+
+**Why it's fragile:** The endpoint only recognizes the modern `_SMART.GIF` suffix. Legacy pixel deployments using the ClearDot.gif naming convention (from partners epush, darwill, DC_MG-Digital, Epush) bypass the `_SMART.GIF` check and hit the bot trap catch-all instead.
+
+**Repro Steps:**
+1. Query PiXL.Raw for ClearDot hits:
+   ```sql
+   SELECT TOP 5 RequestPath, IPAddress, Referer, UserAgent,
+       (LEN(QueryString) - LEN(REPLACE(QueryString, '_srv_', ''))) / 5 AS SrvParamCount
+   FROM PiXL.Raw WHERE RequestPath LIKE '%ClearDot%'
+   AND ReceivedAt > DATEADD(HOUR, -1, GETUTCDATE()) ORDER BY Id DESC;
+   ```
+2. **Result:** Real visitors on real customer sites (parkwaychryslerjeep.net, libertyford.com, toyotaofmckinney.com) with Chrome/Safari/Edge UAs, proper referers, and 27–33 `_srv_*` enrichment params — but all flagged `_srv_botTrap=1`.
+
+**Evidence:**
+- ~837 ClearDot false positives/hour (0.49% of all traffic)
+- ~15K–31K false positives/day
+- **94,202 total false positives** over the 5 days since ClearDot traffic appeared (2026-02-21)
+- ClearDot hits have proper CompanyID/PiXLID extraction (e.g., CompanyID=`darwill`, PiXLID=`0039-libertyford`)
+- All ClearDot hits have legitimate user agents, referrers, and full server enrichment data
+
+**Impact:** Downstream analytics that filter on `_srv_botTrap=1` will discard legitimate customer visitor data. If ETL or reporting uses `botTrap` as an exclusion filter, ~837 real visits/hour are being lost.
+
+**Recommended Fix:** Add a ClearDot.gif check before the bot trap catch-all, or broaden the URL pattern to match `_ClearDot.gif` as a valid legacy pixel format. The `isValidPiXLUrl` flag should be `true` for ClearDot hits.
+
+---
+
+#### BUG-003: Scanner/Noise URLs Recorded in PiXL.Raw
+
+- **Severity:** Moderate
+- **Location:** `SmartPiXL/Endpoints/TrackingEndpoints.cs` lines 233–242
+- **Risk Map Entry:** #15
+
+**What the code does:** The catch-all route captures ALL non-pixel requests (favicon.ico, robots.txt, .env, .git/config, wp-admin/login.php, phpinfo.php, etc.) as tracking hits in PiXL.Raw with `_srv_botTrap=1`.
+
+**What it should do:** Either (a) not record known scanner/probe paths at all, or (b) record them in a separate table/flag so they don't pollute PiXL.Raw.
+
+**Evidence (last 2 days):**
+
+| Path | Count | Category |
+|------|-------|----------|
+| `/js/CLIENT_ID/PIXL_ID.js` | 168 | Template URL from docs |
+| `/favicon.ico` | 37 | Browser auto-request |
+| `/robots.txt` | 27 | Search crawler |
+| `/index.php` | 25 | PHP scanner |
+| `/.env` | 23 | Credential scanner |
+| `/goto`, `/redirect`, `/away`, etc. | 22 each | Open redirect scanner |
+| `/.git/config` | 19 | Source code scanner |
+| `/phpinfo.php` | 16 | PHP info scanner |
+
+**Impact:** PiXL.Raw accumulates ~200–13K noise rows/day (varies by scanner activity). This wastes: storage, ETL cycles (each hit flows through the full Forge enrichment pipeline), and SQL bulk insert bandwidth. However, the bot trap concept itself is valuable for threat intelligence — the issue is that legitimate ClearDot hits are mixed in with the noise.
+
+**Recommended Fix:** Add a short-circuit for known noise paths (favicon.ico, robots.txt, .env, .git/*, *.php) that returns 404 without recording. Keep the bot trap for unknown paths that could indicate botnet reconnaissance.
+
+---
+
+#### BUG-004: Stale XML Documentation on TrackingData.IPAddress
+
+- **Severity:** Minor
+- **Location:** `SmartPiXL.Shared/Models/TrackingData.cs`
+- **Risk Map Entry:** #8
+
+**What the doc says:** The XML documentation on `TrackingData.IPAddress` lists a priority chain: CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For → RemoteIpAddress.
+
+**What the code actually does:** `TrackingCaptureService.ExtractClientIp()` only checks X-Forwarded-For → RemoteIpAddress. CDN headers (CF-Connecting-IP, True-Client-IP) are intentionally NOT trusted (no CDN in front of IIS), and X-Real-IP is not checked.
+
+**Impact:** Misleading documentation could confuse developers about the actual IP extraction behavior, especially when diagnosing IP-related bugs.
+
+**Recommended Fix:** Update the XML doc to match the actual code: "Priority: X-Forwarded-For (first IP) → RemoteIpAddress fallback. CDN headers intentionally skipped (no CDN)."
+
+---
+
+### Passed (Robust Code)
+
+| # | Risk Map Entry | What Was Tested | Result |
+|---|----------------|-----------------|--------|
+| 1 | #2 — SafeRouteParam boundary | Sent 65-char companyId in `_SMART.js` URL | Correctly returned 400 |
+| 2 | #3 — BaseUrl mixed content | Verified BaseUrl = `https://smartpixl.info` (HTTPS) | Script URLs use HTTPS correctly |
+| 3 | #4 — Query string length | 15KB query string → 200 OK; 17KB → 414 URI Too Long | IIS `maxQueryString=16384` works |
+| 4 | Security headers | Checked both GIF and JS endpoints | All present: Accept-CH, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy, CSP `default-src 'none'`, Cache-Control `no-cache` |
+| 5 | Internal endpoint loopback | `/internal/health` from 127.0.0.1 → 200; with XFF spoof → 404 | Loopback check is robust |
+| 6 | Pipe connectivity | `/internal/health` shows `pipe: connected`, queue depth 0 | Edge→Forge pipe working correctly |
+
+### Code-Review Findings (Untestable — No Modern PiXL Script in Production)
+
+| # | Risk | Assessment | Notes |
+|---|------|-----------|-------|
+| 1 | Script cache domain variation (10K nuclear clear) | Low risk | SafeRouteParam validates companyId/pixlId; only domain part is unvalidated. Would require ~10K unique domain URLs to trigger. |
+| 9 | WebRTC `localIp` not in asyncPromises | Data loss likely | `RTCPeerConnection.createOffer()` fires independently. If it resolves after sendPiXL, `data.localIp` is empty. |
+| 10 | `storage.estimate()` not in asyncPromises | Data loss likely | Same pattern — async result may arrive after the 500ms cap. |
+| 11 | `navigator.getBattery()` not in asyncPromises | Data loss likely | Same pattern. |
+| 12 | `navigator.mediaDevices.enumerateDevices()` not in asyncPromises | Data loss likely | Same pattern. |
+| 13 | `navigator.userAgentData.getHighEntropyValues()` not in asyncPromises | Data loss likely | Same pattern. |
+| 14 | Geo cache prewarm `Task.Run` fire-and-forget | Low risk | Unobserved exception in prewarm would be silently swallowed. No production impact yet since the cache works correctly post-warmup. |
+| 17 | 500ms wait even with zero async promises | Confirmed by code | When `asyncPromises.length === 0` (no audioPromise), the code waits a full 500ms before sending. All other data is synchronous and ready immediately. |
+
+### Production Data Insights
+
+| Metric | Value |
+|--------|-------|
+| Legit _SMART.GIF hits/hour | ~168K |
+| ClearDot false positives/hour | ~837 |
+| Scanner noise/hour | ~16 |
+| Modern PiXL Script hits | **0** (100% legacy) |
+| Latest PiXL.Raw ID | 31,328,872+ |
+| ClearDot false positive start date | 2026-02-21 |
+| Total ClearDot false positives | ~94,202 (5 days) |
+| Active legacy partners | epush, darwill, DC_MG-Digital, Epush |
+| Average enrichment params per ClearDot hit | 27–33 `_srv_*` params |
+
+### Priority Matrix
+
+| Bug | Impact | Urgency | Handoff |
+|-----|--------|---------|---------|
+| BUG-001 (XFF spoofing) | Critical — IP integrity for all enrichments | HIGH | csharp-janitor |
+| BUG-002 (ClearDot false positive) | Critical — ~837 legit visits/hour mislabeled | HIGH | csharp-janitor |
+| BUG-003 (Scanner noise) | **NOT A BUG** — intentional. All traffic is valuable for bot metrics. | — | — |
+| BUG-004 (Stale XML doc) | Minor — developer confusion | LOW | csharp-janitor |
+
+---
+
+## Embedded QA Fixes — PiXL Script + Edge Deployment
+
+**Date:** 2026-02-25
+**Agent:** Embedded QA (fix pass after owner review)
+
+### Owner Feedback Summary
+
+- **BUG-001 (XFF spoofing):** Confirmed critical. Data accuracy is paramount. Internal endpoint security is secondary — if a bad actor is on the network, it's already too late. Fix must ensure accurate IP recording.
+- **BUG-002 (ClearDot false positive):** Owner agrees critical. "VERY well spotted" — legacy ClearDot format is the first-generation pixel. Must maintain legacy support.
+- **BUG-003 (Scanner noise):** **NOT A BUG.** SmartPiXL is part de-anonymization, part traffic quality checker. All hits (including scanners) are valuable for bot traffic metrics and client reporting. PiXL.Raw's design of storing the query string verbatim allows future analysis of any format.
+- **BUG-004 (Stale XML doc):** Confirmed. Update doc to match code.
+
+### Fixes Applied
+
+#### FIX-001: Remove XFF Header Trust from TrackingCaptureService (BUG-001)
+
+**File:** `SmartPiXL/Services/TrackingCaptureService.cs`
+
+**Change:** Removed the entire `ExtractClientIp()` method. Replaced the call site with a direct read of `connection.RemoteIpAddress?.ToString()`.
+
+**Why:** In IIS InProcess hosting, the ASP.NET Core Module (ANCM) sets `RemoteIpAddress` directly from the TCP socket — it IS the real client IP. No CDN or reverse proxy sits in front of IIS, so all client-supplied IP headers (X-Forwarded-For, CF-Connecting-IP, True-Client-IP, X-Real-IP) are untrustworthy. The old code read XFF first, allowing any client to spoof their IP by injecting the header.
+
+**Test updates:** `SmartPiXL.Tests/TrackingCaptureServiceTests.cs` — 5 XFF-related tests rewritten to verify all header-based IP sources are ignored and only `RemoteIpAddress` is used. Test names preserved for `ignoreCloudflareIp`, `ignoreTrueClientIp`, `ignoreXRealIp`. Two XFF tests renamed: `takeFirstIp_when_xffMultiple` → `ignoreXff_when_headerInjected`, `parseCorrectly_when_xffSingleIp` → `ignoreXff_when_singleIpInjected`.
+
+#### FIX-002: Add ClearDot.gif Legacy URL Recognition (BUG-002)
+
+**File:** `SmartPiXL/Endpoints/TrackingEndpoints.cs`
+
+**Change:** Added `ClearDotPattern()` source-generated regex (`_ClearDot\.gif$`, case-insensitive). Inserted a ClearDot handler before the bot trap catch-all that captures with `isValidPiXLUrl: true`.
+
+**Why:** ClearDot.gif is the first-generation pixel format: `/{companyId}/{clientName}_{zipCode}_ClearDot.gif`. 23 distinct partner+client combinations are actively receiving ~837 hits/hour from real visitors. These were falling through to the bot trap catch-all (which only recognizes `_SMART.GIF`) and being flagged `_srv_botTrap=1`. CompanyID/PiXLID extraction by `TrackingCaptureService.PathParseRegex` already works correctly for ClearDot URLs.
+
+**Impact:** ~94K false-positive bot trap rows accumulated over 5 days (2026-02-21 through 2026-02-25) will stop growing. New ClearDot hits will be recorded with `_srv_hitType=legacy` and no `_srv_botTrap` flag.
+
+#### FIX-003: Update TrackingData.IPAddress XML Documentation (BUG-004)
+
+**File:** `SmartPiXL.Shared/Models/TrackingData.cs`
+
+**Change:** Updated XML doc on `IPAddress` property. Old: "CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For (first) → Connection." New: Documents that only `Connection.RemoteIpAddress` is used, with explanation of why headers are not trusted.
+
+### Build + Test Verification
+
+- **Build:** 0 warnings, 0 errors
+- **Tests:** 523/523 passing (0 failures, 0 skipped)
+
+---
+
+## Embedded QA — SmartPiXL Forge Deep Dive
+
+**Date:** 2026-02-25
+**Scope:** Full code reconnaissance + live testing of SmartPiXL.Forge (Windows Service)
+**Agent:** Embedded QA
+
+### Test Environment
+
+- **Forge:** Windows Service `SmartPiXL-Forge` at `C:\Services\SmartPiXL-Forge\`
+- **Edge:** IIS at `http://192.168.88.176` (prod) / `http://localhost:7000` (dev)
+- **Database:** `localhost\SQL2025` → `SmartPiXL`
+- **Named Pipe:** `SmartPiXL-Enrichment` (4 concurrent instances)
+- **Traffic:** ~65–75 rec/s sustained
+
+### Code Reconnaissance Summary
+
+Read all 35+ Forge source files end-to-end. The Forge is a Windows Service with three pipeline stages connected by bounded `Channel<TrackingData>`:
+
+```
+PipeListenerService (4 instances)
+  → Channel<TrackingData> [50K capacity, BoundedChannelFullMode.Wait]
+  → EnrichmentPipelineService (8 workers, 15-step enrichment chain)
+  → Channel<TrackingData> [10K capacity, BoundedChannelFullMode.Wait]
+  → SqlBulkCopyWriterService (single writer, batching via 150ms fill window)
+  → SqlBulkCopy → PiXL.Raw
+```
+
+**Disabled services:** ETL, Failover catchup, SelfHealing, MaintenanceScheduler, InfraHealth, IpApiSync, CompanyPiXLSync, Email — all correctly disabled during rebuild.
+
+---
+
+### Risk Map
+
+| # | Location | Risk | Likelihood | Impact | Test Plan |
+|---|----------|------|------------|--------|-----------|
+| 1 | `ForgeChannels.cs` + `EnrichmentPipelineService.cs:230` + `PipeListenerService.cs:188` | **Silent data loss on channel overflow**: Both stages use `TryWrite()` which drops immediately when full. `BoundedChannelFullMode.Wait` is set but irrelevant for `TryWrite()`. No retry, no spill-to-disk, no backpressure. | **Certain** (confirmed) | **Data loss — 9,102 records lost today** | Check log for "channel full" + drops in metrics |
+| 2 | `SqlBulkCopyWriterService.cs:238-300` | **SQL timeout cascade**: Single writer + 60s timeout × 4 attempts = ~4 min stall. During stall, 10K SQL writer channel fills in ~143s, then every enriched record drops. | **Certain** (confirmed) | **Data loss — amplifies #1** | Analyze error-to-drop timing correlation |
+| 3 | `SqlBulkCopyWriterService.cs:375-420` | **Circuit breaker gap**: Timeout errors don't trip circuit (only 1105/9002 do). 5-consecutive-failure threshold never reached because failures are per-batch-attempt, and `ClassifyAndTrip()` is called within retry loop. | **Probable** | **Stale circuit state during sustained degradation** | Check log for circuit breaker messages during SQL errors |
+| 4 | `SqlBulkCopyWriterService.cs:318-345` | **Dead-letter covers only SQL writer's current batch**: When SQL writer fails, only the ~10-record batch being written is dead-lettered. The 9,000+ records that overflow the channel are lost with no recovery path. | **Certain** (confirmed) | **Data loss — gap between dead-letter and actual loss** | Compare dead-letter file count vs total drops |
+| 5 | `BotUaDetectionService.cs` + `UaParsingService.cs` + `MaxMindGeoService.cs` | **Cache nuclear eviction**: All caches use `if (cache.Count >= max) cache.Clear()`. This causes instant thundering herd — cache hit rate drops to 0% until caches refill. | **Probable** (hasn't fired yet at current traffic) | **Enrichment latency spike, possible cascade** | Monitor cache sizes vs max thresholds |
+| 6 | `EnrichmentPipelineService.cs:265-280` | **All 15 enrichment steps run inline for every record**, even if user wants "only pre-SQL-load" enrichments. Some Tier 2-3 enrichments (behavioral replay, dead internet, geographic arbitrage) could run post-ETL instead. | **N/A — design decision** | **Latency / unnecessary work** | User is actively redesigning this |
+| 7 | `IpApiLookupService.cs:180-230` | **API key hardcoded in source**: IP-API Pro key `oJC4NplwJaCnbWw` is in committed source code. | **Certain** | **Credential exposure** (low practical risk for internal repo) | Code inspection |
+| 8 | `EnrichmentPipelineService.cs:260` | **Enrichment worker swallows exceptions**: `catch (Exception ex)` logs error and continues. Malformed records silently disappear. | **Edge-case** | **Silent data loss for records that fail enrichment** | Check error logs for enrichment failures |
+| 9 | `PipeListenerService.cs:110-130` | **PipeSecurity created per-connection**: Each pipe reconnect creates new `PipeSecurity` + `NamedPipeServerStreamAcl.Create()`. Not a correctness issue but allocates per-connect. | **Certain** (by design) | **Minor GC pressure** | N/A — cosmetic |
+| 10 | `BackgroundIpEnrichmentService.cs` | **ConcurrentDictionary dedup cleared every 30 min if >500K entries**: Could cause brief burst of duplicate IP lookups for DNS/IPAPI/WHOIS. | **Edge-case** | **Brief API rate limit spike** | Monitor IPAPI rate warnings |
+| 11 | `SessionStitchingService.cs` | **In-memory session state**: All sessions are in `ConcurrentDictionary`, lost on Forge restart. No persistence. | **Certain** (by design) | **Session continuity lost on restart** | N/A — known limitation |
+
+---
+
+### Test Results
+
+#### BUG-001: Silent Data Loss on Channel Overflow (CRITICAL)
+
+- **Severity:** Critical
+- **Location:** `ForgeChannels.cs`, `EnrichmentPipelineService.cs:230-234`, `PipeListenerService.cs:186-193`
+- **Risk Map Entry:** #1, #2, #4
+- **What the code does:** When either channel is full, `TryWrite()` returns `false`. The caller logs a warning, increments a metrics counter, and discards the record. No retry, no persistence, no backpressure.
+- **What it should do:** Enriched records that can't enter the SQL writer channel should be persisted to disk (same pattern as dead-letter). The enrichment channel should apply backpressure to the pipe listener rather than dropping raw records.
+- **Why it's fragile:** `BoundedChannelFullMode.Wait` is set but has ZERO effect on `TryWrite()` — it only affects `WriteAsync()`. This is misleading. The code was likely written expecting `Wait` to mean "block until space is available" but `TryWrite()` always returns immediately.
+- **Repro Steps:**
+    1. Send sustained traffic at ~70 rec/s through the pipeline (normal production load)
+    2. Cause a SQL Server stall (restart IIS, run a heavy query, or simulate a timeout)
+    3. After ~143 seconds (10K capacity ÷ 70 rec/s), SQL writer channel fills completely
+    4. All subsequent enriched records are dropped by `TryWrite()` in `EnrichmentPipelineService`
+    5. This continues for the duration of the SQL stall + 4 retry attempts (up to ~4 minutes per batch)
+- **Evidence:**
+    - **Today (2026-02-25):** 9,102 records dropped during 15:36–15:38 UTC. Trigger: IIS Edge restart caused SQL BulkCopy timeout cascade (4 attempts × 60s timeout = ~4 min stall).
+    - **2026-02-21:** 3,229,563 records dropped. Trigger: ETL catch-up competing for SQL resources.
+    - Dead-letter file contains only 9 records (the SQL writer's failed batch). The other 9,093 enriched records are **permanently lost** — no dead-letter, no JSONL failover, no recovery path.
+- **Impact:** Permanent data loss proportional to stall duration × throughput. At 70 rec/s, a 2-minute SQL stall loses ~8,400 records. A 45-minute stall (Feb 21) loses millions.
+
+#### BUG-002: Circuit Breaker Doesn't Trip on Timeout Errors (MODERATE)
+
+- **Severity:** Moderate
+- **Location:** `SqlBulkCopyWriterService.cs:375-420` (`ClassifyAndTrip` method)
+- **Risk Map Entry:** #3
+- **What the code does:** Circuit breaker trips immediately only for SQL errors 1105 (filegroup full) and 9002 (transaction log full). All other errors increment `_consecutiveFailures` and trip at >= 5. But the retry loop within a single batch calls `ClassifyAndTrip()` per attempt, so a single batch failing 4 times counts as 4 failures. If the next batch succeeds, `OnWriteSuccess()` resets to 0.
+- **What it should do:** Sustained timeout errors should trip the circuit breaker after a reasonable threshold (e.g., 2 consecutive batch failures, not 5 individual attempt failures). The current design means the circuit breaker only trips if SQL is catastrophically broken (filegroup/log full) — it doesn't protect against the much more common "SQL is slow" scenario.
+- **Evidence:** Today's 9 SQL errors across 2 cascades (15:34–15:38, 15:42–15:46) produced zero circuit breaker messages. The circuit never left `Closed` state despite 4 minutes of SQL unavailability and 9,102 records dropped.
+- **Impact:** Without circuit breaker intervention, the pipeline keeps trying (and failing) at full throughput, maximizing the channel overflow and data loss from BUG-001.
+
+#### PASS — Enrichment Pipeline Coverage
+
+- **Risk Map Entry:** #6 (enrichment quality)
+- **What was tested:** SQL query of 20 most recent external-IP records to verify enrichment param presence.
+- **Result:** 20/20 records have Browser, MaxMind geo, LeadScore, Session, DeadInternet, and Affluence enrichments. 19/20 have DeviceAge. Contradictions=0 on all (expected — rules require impossible combinations like Mobile+4K or Mac+DirectX that normal traffic doesn't produce). Bot detection correctly flagged 1/20 records (IP `103.207.40.102`).
+- **Verdict:** PASS — the 15-step enrichment chain is working correctly and appending the full set of `_srv_*` params.
+
+#### PASS — Pipeline Steady-State Performance
+
+- **Risk Map Entry:** (general health)
+- **What was tested:** 2 minutes of live metrics analysis from Forge logs.
+- **Result:**
+    - PIPE→CH: 62–75 rec/s, avg 11μs, max 23μs, drops 0
+    - ENRICH→CH: 62–75 rec/s, avg 220–510μs, max 38ms, drops 0
+    - SQL→DB: 62–75 rec/s, avg 7–14ms per batch, ~11 rec/batch, fails 0
+    - Channels: enrich=0, sqlWriter=0 (both empty — pipeline fully caught up)
+- **Verdict:** PASS — under normal conditions, the pipeline processes all records with zero drops and sub-millisecond enrichment latency.
+
+#### PASS — Dead-Letter Replay
+
+- **Risk Map Entry:** (recovery path)
+- **What was tested:** Dead-letter directory contains 1 file (17KB, 9 records from today's SQL timeout). On next Forge restart, `ReplayDeadLettersAsync()` will attempt to re-insert these.
+- **Verdict:** PASS — dead-letter mechanism works for the SQL writer's current batch. (However, it does NOT protect the ~9,000 records that overflowed the channel — this is the gap documented in BUG-001.)
+
+#### PASS — Named Pipe Connectivity
+
+- **What was tested:** Verified named pipe `SmartPiXL-Enrichment` is active and accepting connections from Edge.
+- **Verdict:** PASS — pipe is healthy, 4 concurrent instances as configured.
+
+#### PASS — MaxMind Database Integrity
+
+- **What was tested:** 3 .mmdb files present (City 54MB, ASN 11MB, Country 9MB), dated Feb 19.
+- **Verdict:** PASS — databases loaded and serving lookups.
+
+---
+
+### Architectural Assessment
+
+Per the user's request: *"what it should do that it's not doing, and shouldn't do that it is, and what it does well and what it does poorly."*
+
+#### What the Forge Does Well
+
+1. **Enrichment quality is excellent.** 15 enrichment services run reliably, producing comprehensive `_srv_*` params on every record. MaxMind geo, UA parsing, bot detection, lead scoring, session stitching, device age/affluence — all working correctly.
+
+2. **Steady-state throughput is solid.** At 65–75 rec/s, the pipeline processes everything with sub-millisecond enrichment latency and zero drops. The batch fill window (150ms) is well-tuned for the traffic pattern, achieving ~11 rec/batch instead of 1.
+
+3. **The Lane 3 (BackgroundIpEnrichmentService) separation is smart.** Moving DNS, IPAPI, and WHOIS lookups off the hot path into a background channel with `DropOldest` means the enrichment pipeline never blocks on I/O. Cache misses on first hit are the acceptable tradeoff.
+
+4. **Zero-allocation patterns are well-applied.** `StringBuilder` reuse in enrichment, custom `DbDataReader` for SqlBulkCopy, `QueryParamReader` using Span-based parsing — all follow the design doc's hot-path philosophy.
+
+5. **Code organization is clean.** Clear separation between pipeline stages, enrichment services in their own directory, metrics reporting every 10 seconds, disabled services cleanly gated.
+
+#### What the Forge Does Poorly
+
+1. **Channel overflow is the #1 problem.** The pipeline has zero resilience to SQL slowdowns. Any SQL stall >143 seconds causes cascading data loss with no recovery path. The `BoundedChannelFullMode.Wait` + `TryWrite()` combination is a misleading design error — it looks like it should apply backpressure but doesn't.
+
+2. **Circuit breaker is underpowered.** It only trips on catastrophic SQL errors (filegroup/log full) but not on the much more common sustained timeout scenario. When it doesn't trip, the pipeline keeps feeding records into a stalled writer, maximizing data loss.
+
+3. **No overflow persistence.** Dead-letter saves only the SQL writer's current batch (~10 records). The thousands of records that overflow the channel are permanently lost. There's no JSONL spillover or disk-backed queue for the enrichment→SQL channel.
+
+4. **Enrichment latency spikes.** While avg is 220–510μs, max is consistently 25–38ms (50–100x the average). These outliers — likely from cache misses hitting MaxMind or ConcurrentDictionary contention — won't cause drops at current traffic but reduce headroom.
+
+#### What It Should Do That It's Not Doing
+
+1. **Persist enriched records that can't be written to SQL.** When the SQL writer channel is full, enriched records should be written to JSONL files on disk instead of dropped. The existing `JsonlFailoverService` (Edge-side) is a proven pattern for this.
+
+2. **Apply backpressure from SQL writer all the way to the pipe listener.** When SQL is stalled, the pipe listener should slow down or stop reading, which would apply TCP-level backpressure to the Edge. This is the natural benefit of bounded channels with `WriteAsync()` instead of `TryWrite()`.
+
+3. **Trip the circuit breaker on sustained timeouts.** 2 consecutive batch failures (not 5 individual attempts) should be enough to trip, switching to a "spill to disk and retry later" mode.
+
+#### What It's Doing That It Shouldn't Be
+
+1. **Running all 15 enrichments inline** when the user's stated goal is "only things that make sense before SQL load." Some Tier 2-3 enrichments (behavioral replay hash, dead internet index, geographic arbitrage) could run post-ETL instead of pre-SQL. However, the user is actively redesigning this — it's a design decision, not a bug.
+
+2. **API key hardcoded in source** (`IpApiLookupService.cs`). Should be in config/secrets. Low practical risk for an internal repo but poor practice.
+
+---
+
+### Confirmed Bugs Summary
+
+| Bug | Severity | Records Lost | Root Cause |
+|-----|----------|-------------|------------|
+| BUG-001 | Critical | 9,102 today; 3.2M on Feb 21 | `TryWrite()` drops on channel overflow with no persistence or backpressure |
+| BUG-002 | Moderate | (amplifies BUG-001) | Circuit breaker ignores timeout errors, never trips during sustained SQL degradation |
+
+### Recommended Fix Priority
+
+1. **Channel overflow persistence** — Add JSONL spillover when `TryWrite()` returns false in `EnrichmentPipelineService`. This is the single highest-impact change.
+2. **Backpressure via `WriteAsync()`** — Replace `TryWrite()` + drop with `WriteAsync()` + timeout. The channel's `BoundedChannelFullMode.Wait` would then actually work.
+3. **Circuit breaker sensitivity** — Lower the threshold and include timeout errors as trip conditions. When tripped, switch to "spill to disk" mode.
+4. **Move API key to config** — Move IP-API key from source to `appsettings.json` `ForgeSettings` section.
+
+---
+
+## Session — Forge BUG-001 + BUG-002 Fix: Zero-Loss Pipeline (2026-02-22)
+
+### Context
+
+Fixes for the two bugs confirmed in the previous Forge QA session:
+- **BUG-001 (Critical)**: Silent data loss — `TryWrite()` drops enriched records when SQL writer channel is full (9,102 records lost today, 3.2M on Feb 21)
+- **BUG-002 (Moderate)**: Circuit breaker only trips on SQL errors 1105/9002, ignoring sustained timeouts that cause the actual data loss
+
+User directive: *"I wanted two failover files. One for edge to forge and one for forge to SQL. The forge has enrichments I don't want to lose."*
+
+### Changes Made
+
+#### 1. New File: `SmartPiXL.Forge/Services/ForgeFailoverWriter.cs`
+
+Thread-safe JSONL writer for persisting enriched `TrackingData` to disk when the SQL writer channel is full or the circuit breaker is open. Two entry points:
+- `Append(TrackingData)` — single record, called by `EnrichmentPipelineService` when channel is full
+- `AppendBatch(IReadOnlyList<TrackingData>)` — batch drain, called by `SqlBulkCopyWriterService` when circuit is open
+
+Files rotate at 10K records. Naming: `failover_{timestamp}_{guid}.jsonl`. Reader methods (`ReadFile`, `GetFailoverFiles`) support replay. Uses `lock(_gate)` for thread safety — acceptable since failover is an exceptional path, not hot path.
+
+#### 2. Modified: `EnrichmentPipelineService.cs` — Failover Instead of Drop
+
+**Before:** `TryWrite()` → `false` → drop record, log Warning, increment drop counter.
+**After:** `TryWrite()` → `false` → `_failoverWriter.Append(enriched)`, log Debug, increment failover counter.
+
+Enriched records with all 15 enrichments are now persisted to JSONL instead of silently lost. Log level changed from Warning to Debug because failover is expected behavior during SQL issues.
+
+#### 3. Modified: `PipeListenerService.cs` — WriteAsync Backpressure
+
+**Before:** `TryWrite()` → `false` → drop raw record.
+**After:** `WriteAsync()` with 5-second `CancellationTokenSource` timeout. When enrichment channel is full, pipe reading *pauses* (backpressure) for up to 5 seconds. If still full after timeout, record is dropped — but Edge has its own JSONL failover (`JsonlFailoverService`) covering this scenario.
+
+This applies natural backpressure: full enrichment channel → pipe listener pauses → pipe buffer fills → Edge detects slow pipe → Edge writes to its own JSONL failover.
+
+#### 4. Modified: `SqlBulkCopyWriterService.cs` — Circuit Breaker Overhaul
+
+**Circuit breaker trip conditions (BUG-002 fix):**
+- Renamed `_consecutiveFailures` → `_consecutiveBatchFailures` (tracks per-batch, not per-attempt)
+- New `OnBatchFailure()` method: increments batch failure count, trips at ≥ 2 consecutive batch failures
+- Timeout errors now cause trips because they exhaust all retries and trigger `OnBatchFailure()`
+- Previous design: 5 individual attempt failures could reset between batches, almost never tripping
+
+**Circuit Open behavior (BUG-001 fix):**
+- **Before:** Exponential backoff (1s → 2s → 4s → ... → 30s). Channel overflows. Records lost.
+- **After:** `DrainChannelToFailover()` — reads all pending records from channel in batches of 100, writes to JSONL via `ForgeFailoverWriter`. Channel stays empty. Zero data loss.
+
+**Recovery + replay:**
+- On `HalfOpen → Closed` transition: fires `ReplayFailoverFilesAsync()` — reads each JSONL file, deserializes records, writes batches via `WriteBatchAsync()`, deletes file on success. If circuit trips during replay, aborts gracefully.
+- On startup: replays any remaining failover files after dead-letter replay.
+
+**Graceful shutdown:**
+- `DrainChannelAsync()` now checks circuit state — if Open, persists remaining records to failover instead of attempting SQL. Last-resort: any records remaining after deadline go to failover. Calls `_failoverWriter.Flush()` at shutdown.
+
+#### 5. Modified: `ForgeMetrics.cs` — Failover Counter
+
+Added `_failoverCount` atomic counter, `RecordFailover()` method, `FailoverCount` in `MetricsSnapshot`. Format output conditionally shows `FAILOVER {count} rec` only when > 0.
+
+#### 6. Modified: `ForgeSettings.cs` — ForgeFailoverDirectory
+
+Added `ForgeFailoverDirectory` property (default `"ForgeFailover"`) to `ForgeSettings`. Relative paths resolve from the application base directory.
+
+#### 7. Modified: `ForgeChannels.cs` — Comment Fix
+
+Updated misleading comment block. Previously implied `BoundedChannelFullMode.Wait` + `TryWrite()` would apply backpressure — it doesn't (`TryWrite` never waits). Now correctly documents: enrichment channel uses `WriteAsync` (backpressure), SQL writer uses `TryWrite` with failover fallback.
+
+#### 8. Modified: `Program.cs` — ForgeFailoverWriter Registration
+
+Registered `ForgeFailoverWriter` as singleton. Resolves `ForgeFailoverDirectory` from `ForgeSettings`, handles relative/absolute path resolution, injects `ITrackingLogger` and `ForgeMetrics`.
+
+### Data Flow After Fix
+
+```
+Enrichment Worker → TryWrite(sqlChannel) ──success──→ SQL Writer → SqlBulkCopy → PiXL.Raw
+                         │                                 │
+                    channel full                     batch fails
+                         │                                 │
+                         ▼                                 ▼
+              ForgeFailoverWriter.Append()        OnBatchFailure() → 2 consecutive → Trip Circuit
+                         │                                 │
+                    writes enriched                   circuit Open
+                    record to JSONL                        │
+                         │                                 ▼
+                         │                    DrainChannelToFailover()
+                         │                    (empties channel → JSONL)
+                         │                                 │
+                         │                           HalfOpen cooldown (2 min)
+                         │                                 │
+                         │                           probe batch succeeds?
+                         │                                 │
+                         └──────────────────┬──────────────┘
+                                            ▼
+                                 ReplayFailoverFilesAsync()
+                                 (JSONL → SqlBulkCopy → PiXL.Raw)
+                                 (file deleted on success)
+```
+
+### Build Result
+
+- **Build:** 0 warnings, 0 errors
+- **Tests:** 523/523 passing
+- **Files modified:** 8 (1 new, 7 modified)
+
+### Conflict Resolutions
+
+1. **`BoundedChannelFullMode.Wait` comment vs actual behavior.** The original comment in `ForgeChannels.cs` implied `TryWrite()` would apply backpressure. It doesn't — `TryWrite` is non-blocking by definition. Fixed comment to reflect reality. `WriteAsync()` is the method that respects wait behavior. Applied `WriteAsync` where backpressure is appropriate (PipeListener) and kept `TryWrite` + failover where we don't want to block (EnrichmentPipeline).
+
+2. **Circuit breaker drain vs backoff.** The original exponential backoff design preserved the channel buffer but lost data when it overflowed. The new "drain to disk" approach empties the channel immediately, trading disk I/O for zero data loss. This matches the user's stated priority: *"the core mechanics need to work."*

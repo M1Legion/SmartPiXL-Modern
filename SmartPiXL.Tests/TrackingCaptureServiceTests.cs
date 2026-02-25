@@ -62,71 +62,79 @@ public sealed class TrackingCaptureServiceTests
     }
 
     // ========================================================================
-    // IP EXTRACTION - Only XFF and RemoteIpAddress are trusted (no CDN)
-    // CDN-specific headers (CF-Connecting-IP, True-Client-IP, X-Real-IP)
-    // are intentionally IGNORED — they can be spoofed without a CDN.
+    // IP EXTRACTION — Only Connection.RemoteIpAddress is trusted (no CDN/proxy)
+    // All header-based IP sources (XFF, CF-Connecting-IP, True-Client-IP,
+    // X-Real-IP) are intentionally IGNORED — they can be spoofed by any client
+    // since there is no CDN or reverse proxy in front of IIS.
     // ========================================================================
 
     [Fact]
     public void CaptureFromRequest_should_ignoreCloudflareIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.88.100");
         context.Request.Headers["CF-Connecting-IP"] = "203.0.113.50";
         context.Request.Headers["X-Forwarded-For"] = "10.0.0.1, 172.16.0.1";
         context.Request.Headers["X-Real-IP"] = "192.168.1.1";
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        // CF-Connecting-IP is ignored; falls through to XFF first entry
-        result.IPAddress.Should().Be("10.0.0.1");
+        // All headers ignored — only RemoteIpAddress used
+        result.IPAddress.Should().Be("192.168.88.100");
     }
 
     [Fact]
     public void CaptureFromRequest_should_ignoreTrueClientIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.20.30.40");
         context.Request.Headers["True-Client-IP"] = "198.51.100.25";
         context.Request.Headers["X-Forwarded-For"] = "10.0.0.1";
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        // True-Client-IP is ignored; falls through to XFF
-        result.IPAddress.Should().Be("10.0.0.1");
+        // True-Client-IP and XFF are both ignored
+        result.IPAddress.Should().Be("10.20.30.40");
     }
 
     [Fact]
     public void CaptureFromRequest_should_ignoreXRealIp_whenNoCdnConfigured()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("172.31.0.5");
         context.Request.Headers["X-Real-IP"] = "93.184.216.34";
         context.Request.Headers["X-Forwarded-For"] = "10.0.0.1, 172.16.0.1";
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        // X-Real-IP is ignored; falls through to XFF first entry
-        result.IPAddress.Should().Be("10.0.0.1");
+        // X-Real-IP and XFF are both ignored
+        result.IPAddress.Should().Be("172.31.0.5");
     }
 
     [Fact]
-    public void CaptureFromRequest_should_takeFirstIp_when_xffMultiple()
+    public void CaptureFromRequest_should_ignoreXff_when_headerInjected()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.1");
         context.Request.Headers["X-Forwarded-For"] = "151.101.1.140, 10.0.0.1, 172.16.0.1";
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.IPAddress.Should().Be("151.101.1.140");
+        // XFF chain is entirely ignored — RemoteIpAddress is the TCP socket IP
+        result.IPAddress.Should().Be("203.0.113.1");
     }
 
     [Fact]
-    public void CaptureFromRequest_should_parseCorrectly_when_xffSingleIp()
+    public void CaptureFromRequest_should_ignoreXff_when_singleIpInjected()
     {
         var context = CreateHttpContext("/1/1_SMART.GIF", "sw=1920");
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("198.51.100.99");
         context.Request.Headers["X-Forwarded-For"] = "8.8.8.8";
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.IPAddress.Should().Be("8.8.8.8");
+        // Single XFF value is still ignored
+        result.IPAddress.Should().Be("198.51.100.99");
     }
 
     [Fact]

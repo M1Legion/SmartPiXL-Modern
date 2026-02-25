@@ -74,4 +74,12 @@ public sealed class ForgeSettings
     /// Seconds between failover directory scans. Default 60.
     /// </summary>
     public int FailoverScanIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Directory where the Forge writes enriched JSONL failover files when the
+    /// SQL writer channel is full or the circuit breaker is open. Enriched records
+    /// are persisted here instead of being dropped, and replayed when SQL recovers.
+    /// Relative paths resolve from <c>AppContext.BaseDirectory</c>.
+    /// </summary>
+    public string ForgeFailoverDirectory { get; set; } = "ForgeFailover";
 }

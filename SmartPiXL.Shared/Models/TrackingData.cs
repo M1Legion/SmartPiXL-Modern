@@ -48,8 +48,13 @@ public sealed record TrackingData
     public string? PiXLID { get; init; }
     
     /// <summary>
-    /// Real client IP address, extracted from the proxy header priority chain:
-    /// CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For (first) → Connection.
+    /// Real client IP address from the TCP socket (<c>Connection.RemoteIpAddress</c>).
+    /// <para>
+    /// In IIS InProcess hosting, set directly by the ASP.NET Core Module (ANCM) from
+    /// the incoming TCP connection. No CDN or reverse proxy sits in front of IIS, so
+    /// client-supplied headers (X-Forwarded-For, CF-Connecting-IP, True-Client-IP) are
+    /// NOT trusted and are intentionally ignored.
+    /// </para>
     /// </summary>
     public string? IPAddress { get; init; }
     

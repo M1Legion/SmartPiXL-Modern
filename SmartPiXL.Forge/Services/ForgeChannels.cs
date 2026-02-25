@@ -11,8 +11,9 @@ namespace SmartPiXL.Forge.Services;
 //   FailoverCatchupService     → Enrichment channel → EnrichmentPipelineService
 //   EnrichmentPipelineService  → SqlWriter channel  → SqlBulkCopyWriterService
 //
-// Registered as a singleton in DI. Both channels use BoundedChannelFullMode.Wait
-// so TryWrite returns false immediately when full (callers drop or log).
+// Registered as a singleton in DI. Both channels use BoundedChannelFullMode.Wait:
+//   - Enrichment channel: WriteAsync blocks when full (backpressure to pipe)
+//   - SqlWriter channel: TryWrite falls back to ForgeFailoverWriter on full
 // ============================================================================
 
 /// <summary>

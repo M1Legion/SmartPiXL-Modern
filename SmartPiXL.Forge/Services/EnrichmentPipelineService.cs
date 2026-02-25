@@ -99,6 +99,9 @@ public sealed class EnrichmentPipelineService : BackgroundService
     // ── Lane 3 — Background IP enrichment (fire-and-forget) ─────────────
     private readonly BackgroundIpEnrichmentService? _backgroundIp;
 
+    // ── Forge failover writer (enriched records → JSONL on disk) ───────
+    private readonly ForgeFailoverWriter _failoverWriter;
+
     // ── Constructor-computed flags — skip shared variable extraction ─────
     // When all consumers of a shared variable are null, we skip the
     // QueryParamReader scan entirely. Zero cost for disabled services.
@@ -112,6 +115,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         IOptions<ForgeSettings> forgeSettings,
         ITrackingLogger logger,
         ForgeMetrics metrics,
+        ForgeFailoverWriter failoverWriter,
         BotUaDetectionService? botDetection = null,
         UaParsingService? uaParsing = null,
         DnsLookupService? dnsLookup = null,
@@ -134,6 +138,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _forgeSettings = forgeSettings.Value;
         _logger = logger;
         _metrics = metrics;
+        _failoverWriter = failoverWriter;
         _botDetection = botDetection;
         _uaParsing = uaParsing;
         _dnsLookup = dnsLookup;
@@ -229,8 +234,10 @@ public sealed class EnrichmentPipelineService : BackgroundService
 
                     if (!_sqlWriterChannel.Writer.TryWrite(enriched))
                     {
-                        _metrics.RecordDrop(Stage.Enrichment);
-                        _logger.Warning($"Worker {workerId}: SQL writer channel full — dropping enriched record");
+                        // SQL writer channel full — persist to JSONL failover instead of dropping.
+                        // These records are already enriched with all _srv_* params.
+                        _failoverWriter.Append(enriched);
+                        _logger.Debug($"Worker {workerId}: SQL writer channel full — record persisted to failover");
                     }
                     else
                     {

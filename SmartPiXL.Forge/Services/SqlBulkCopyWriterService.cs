@@ -20,7 +20,20 @@ namespace SmartPiXL.Forge.Services;
 // KEY DIFFERENCES FROM EDGE's DatabaseWriterService:
 //   - Reads from ForgeChannels.SqlWriter (enrichment pipeline output)
 //   - No TryQueue() method (EnrichmentPipelineService writes directly to channel)
+//   - ForgeFailoverWriter: when SQL is down, drains channel to JSONL on disk
+//   - Replays failover files when SQL recovers
 //   - Otherwise identical: circuit breaker, retry, dead-letter, custom DbDataReader
+//
+// CIRCUIT BREAKER:
+//   Closed  → SQL is healthy. Records flow via SqlBulkCopy.
+//   Open    → SQL is down/slow. Drains channel to JSONL failover files.
+//              No SQL writes attempted. Probes after HalfOpenCooldown.
+//   HalfOpen → Tries one batch. If it succeeds → Closed (replays failover).
+//              If it fails → back to Open.
+//
+// TRIP CONDITIONS:
+//   - SQL error 1105 (filegroup full) or 9002 (log full): immediate trip
+//   - 2 consecutive batch failures (any error including timeouts): trip
 //
 // WHY DbDataReader INSTEAD OF DataTable?
 //   DataTable.Clone() + N DataRow allocations per batch = significant GC pressure.
@@ -47,14 +60,14 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     private readonly TrackingSettings _settings;
     private readonly ITrackingLogger _logger;
     private readonly ForgeMetrics _metrics;
+    private readonly ForgeFailoverWriter _failoverWriter;
 
     // ── Circuit breaker ────────────────────────────────────────────────
     private volatile ForgeCircuitState _circuitState = ForgeCircuitState.Closed;
     private string? _lastTripReason;
-    private int _consecutiveFailures;
+    private int _consecutiveBatchFailures;
     private DateTime _circuitOpenedUtc;
     private static readonly TimeSpan HalfOpenCooldown = TimeSpan.FromMinutes(2);
-    private static readonly int MaxBackoffMs = 30_000;
 
     // ── Batch fill window ─────────────────────────────────────────────
     // After the first item arrives, wait up to this duration for more items.
@@ -84,7 +97,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     {
         if (_circuitState == ForgeCircuitState.Closed) return false;
         _circuitState = ForgeCircuitState.Closed;
-        _consecutiveFailures = 0;
+        _consecutiveBatchFailures = 0;
         _logger.Info("Forge circuit breaker manually reset to Closed");
         return true;
     }
@@ -109,12 +122,14 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         ForgeChannels channels,
         IOptions<TrackingSettings> settings,
         ITrackingLogger logger,
-        ForgeMetrics metrics)
+        ForgeMetrics metrics,
+        ForgeFailoverWriter failoverWriter)
     {
         _channel = channels.SqlWriter;
         _settings = settings.Value;
         _logger = logger;
         _metrics = metrics;
+        _failoverWriter = failoverWriter;
         _deadLetterDir = Path.Combine(AppContext.BaseDirectory, "DeadLetter");
     }
 
@@ -127,6 +142,9 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         // Replay any dead-letter files from a prior crash
         await ReplayDeadLettersAsync(stoppingToken);
 
+        // Replay any failover JSONL files from a prior SQL outage
+        await ReplayFailoverFilesAsync(stoppingToken);
+
         var batch = new List<TrackingData>(_settings.BatchSize);
         var reader = _channel.Reader;
 
@@ -134,18 +152,21 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         {
             batch.Clear();
 
-            // ── Circuit breaker: backoff when open, probe when half-open ──
+            // ── Circuit breaker: drain to failover when open, probe when half-open ──
             if (_circuitState == ForgeCircuitState.Open)
             {
                 if (DateTime.UtcNow - _circuitOpenedUtc >= HalfOpenCooldown)
                 {
                     _circuitState = ForgeCircuitState.HalfOpen;
                     _logger.Info("Forge circuit breaker → HalfOpen, probing next batch");
+                    // Fall through to read a batch and try writing it
                 }
                 else
                 {
-                    var backoff = Math.Min(1000 * (1 << Math.Min(_consecutiveFailures, 14)), MaxBackoffMs);
-                    await Task.Delay(backoff, stoppingToken);
+                    // SQL is down — drain the channel to failover files so enriched
+                    // records are preserved on disk instead of overflowing the channel.
+                    DrainChannelToFailover();
+                    await Task.Delay(1000, stoppingToken);
                     continue;
                 }
             }
@@ -206,6 +227,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
     /// <summary>
     /// Drains remaining channel items during graceful shutdown.
+    /// Attempts SQL write first; if that fails, persists to failover.
     /// </summary>
     private async Task DrainChannelAsync(List<TrackingData> batch)
     {
@@ -224,16 +246,40 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             }
 
             if (batch.Count > 0)
-                await WriteBatchAsync(batch, CancellationToken.None);
+            {
+                if (_circuitState == ForgeCircuitState.Open)
+                {
+                    // SQL is down — persist to failover instead of trying SQL
+                    _failoverWriter.AppendBatch(batch);
+                }
+                else
+                {
+                    await WriteBatchAsync(batch, CancellationToken.None);
+                }
+            }
             else
                 break;
         }
 
         var remaining = _channel.Reader.Count;
         if (remaining > 0)
-            _logger.Warning($"Forge shutdown timeout — {remaining} items dropped");
+        {
+            // Last resort — write any remaining records to failover
+            var finalBatch = new List<TrackingData>(remaining);
+            while (_channel.Reader.TryRead(out var item))
+                finalBatch.Add(item);
+
+            if (finalBatch.Count > 0)
+            {
+                _failoverWriter.AppendBatch(finalBatch);
+                _logger.Warning($"Forge shutdown — {finalBatch.Count} remaining items persisted to failover");
+            }
+        }
         else
             _logger.Info("Forge queue drained successfully");
+
+        // Ensure failover writer flushes to disk
+        _failoverWriter.Flush();
     }
 
     /// <summary>
@@ -276,28 +322,28 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             catch (SqlException sqlEx) when (IsCircuitTripError(sqlEx))
             {
                 ClassifyAndTrip(sqlEx);
+                OnBatchFailure();
                 break;
             }
             catch (SqlException sqlEx) when (attempt < MaxRetries)
             {
                 _logger.Warning($"Forge SQL error on batch attempt {attempt + 1}: [{sqlEx.Number}] {sqlEx.Message}");
-                ClassifyAndTrip(sqlEx);
             }
             catch (SqlException sqlEx)
             {
                 _logger.Error($"Forge: all {MaxRetries + 1} attempts failed for batch of {batch.Count}: {sqlEx.Message}");
                 ClassifyAndTrip(sqlEx);
+                OnBatchFailure();
                 break;
             }
             catch (Exception ex) when (attempt < MaxRetries)
             {
                 _logger.Warning($"Forge non-SQL error on batch attempt {attempt + 1}: {ex.Message}");
-                _consecutiveFailures++;
             }
             catch (Exception ex)
             {
                 _logger.Error($"Forge: all {MaxRetries + 1} attempts failed for batch of {batch.Count}: {ex.Message}");
-                _consecutiveFailures++;
+                OnBatchFailure();
                 break;
             }
         }
@@ -399,18 +445,31 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
                     return;
 
                 case 1205:
-                    _consecutiveFailures++;
-                    _logger.Warning($"Forge deadlock on batch write (attempt {_consecutiveFailures}): {err.Message}");
+                    _logger.Warning($"Forge deadlock on batch write: {err.Message}");
                     return;
             }
         }
 
-        _consecutiveFailures++;
+        // Don't increment here — OnBatchFailure handles counting
         _logger.Error($"Forge SQL error writing batch: {sqlEx.Message}");
+    }
 
-        if (_consecutiveFailures >= 5)
-            TripCircuit("RepeatedSqlFailure",
-                $"5 consecutive SQL failures. Last: [{sqlEx.Number}] {sqlEx.Message}");
+    /// <summary>
+    /// Called when a batch exhausts all retry attempts. Tracks consecutive
+    /// batch failures and trips the circuit breaker after 2 in a row.
+    /// This is counted per-BATCH (not per-attempt), so a single batch
+    /// failing 4 times counts as 1 batch failure.
+    /// </summary>
+    private void OnBatchFailure()
+    {
+        _consecutiveBatchFailures++;
+
+        if (_circuitState != ForgeCircuitState.Open && _consecutiveBatchFailures >= 2)
+        {
+            TripCircuit("ConsecutiveBatchFailures",
+                $"{_consecutiveBatchFailures} consecutive batches failed. " +
+                "Switching to failover — enriched records will be persisted to disk.");
+        }
     }
 
     private void TripCircuit(string reason, string detail)
@@ -418,22 +477,112 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         _circuitState = ForgeCircuitState.Open;
         _circuitOpenedUtc = DateTime.UtcNow;
         _lastTripReason = reason;
-        _consecutiveFailures++;
         _logger.Error($"Forge circuit breaker TRIPPED → Open. Reason: {reason}. {detail}");
     }
 
     private void OnWriteSuccess()
     {
+        var previousState = _circuitState;
+
         if (_circuitState == ForgeCircuitState.HalfOpen)
         {
             _circuitState = ForgeCircuitState.Closed;
-            _consecutiveFailures = 0;
-            _logger.Info("Forge circuit breaker → Closed (probe write succeeded)");
+            _consecutiveBatchFailures = 0;
+            _logger.Info("Forge circuit breaker → Closed (probe write succeeded, SQL recovered)");
+
+            // Replay failover files now that SQL is back — fire-and-forget.
+            // This runs on a separate task so the write loop isn't blocked.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ReplayFailoverFilesAsync(CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"Forge failover replay after recovery failed: {ex.Message}");
+                }
+            });
         }
-        else if (_consecutiveFailures > 0)
+        else if (_consecutiveBatchFailures > 0)
         {
-            _consecutiveFailures = 0;
+            _consecutiveBatchFailures = 0;
         }
+    }
+
+    /// <summary>
+    /// Drains all pending records from the SQL writer channel directly to
+    /// failover JSONL files. Called when the circuit breaker is Open to prevent
+    /// channel overflow while SQL is unavailable. Records are already enriched.
+    /// </summary>
+    private void DrainChannelToFailover()
+    {
+        var drainBatch = new List<TrackingData>(100);
+
+        while (_channel.Reader.TryRead(out var item))
+        {
+            drainBatch.Add(item);
+
+            if (drainBatch.Count >= 100)
+            {
+                _failoverWriter.AppendBatch(drainBatch);
+                drainBatch.Clear();
+            }
+        }
+
+        if (drainBatch.Count > 0)
+            _failoverWriter.AppendBatch(drainBatch);
+    }
+
+    /// <summary>
+    /// Replays failover JSONL files from a prior SQL outage. Each file contains
+    /// enriched records that were persisted to disk instead of being dropped.
+    /// Writes directly via SqlBulkCopy, bypassing the channel.
+    /// </summary>
+    private async Task ReplayFailoverFilesAsync(CancellationToken ct)
+    {
+        var files = _failoverWriter.GetFailoverFiles();
+        if (files.Length == 0) return;
+
+        _logger.Info($"Forge found {files.Length} failover file(s) to replay");
+        var totalReplayed = 0;
+
+        foreach (var file in files)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            var records = _failoverWriter.ReadFile(file);
+            if (records.Count == 0)
+            {
+                _failoverWriter.DeleteFile(file);
+                continue;
+            }
+
+            _logger.Info($"Forge replaying {records.Count} failover records from {Path.GetFileName(file)}");
+
+            // Write in batches through the normal WriteBatchAsync path (retry + dead-letter)
+            for (var i = 0; i < records.Count; i += _settings.BatchSize)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                var batchEnd = Math.Min(i + _settings.BatchSize, records.Count);
+                var batch = records.GetRange(i, batchEnd - i);
+                await WriteBatchAsync(batch, ct);
+
+                // If circuit tripped during replay, stop — we'll retry on next recovery
+                if (_circuitState == ForgeCircuitState.Open)
+                {
+                    _logger.Warning($"Forge circuit tripped during failover replay — aborting replay, will retry on next recovery");
+                    return;
+                }
+            }
+
+            totalReplayed += records.Count;
+            _failoverWriter.DeleteFile(file);
+        }
+
+        if (totalReplayed > 0)
+            _logger.Info($"Forge failover replay complete: {totalReplayed:N0} records recovered");
     }
 
     // ========================================================================

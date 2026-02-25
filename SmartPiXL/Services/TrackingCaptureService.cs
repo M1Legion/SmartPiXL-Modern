@@ -144,10 +144,12 @@ public sealed partial class TrackingCaptureService
         // This is the single largest allocation in the hot path after the query string itself.
         var headersJson = BuildHeadersJson(headers);
         
-        // Extract the real client IP, walking through reverse proxy headers in priority order.
-        // The ForwardedHeaders middleware may have already set RemoteIpAddress, but we also
-        // check CDN-specific headers that the middleware doesn't know about (CF-Connecting-IP).
-        var clientIp = ExtractClientIp(headers, connection);
+        // Extract the real client IP from the TCP connection.
+        // In IIS InProcess hosting, RemoteIpAddress is set directly from the TCP socket
+        // by the ASP.NET Core Module — it is the true client IP. No CDN/proxy sits in
+        // front of IIS, so client-supplied headers (X-Forwarded-For, CF-Connecting-IP,
+        // True-Client-IP) are NOT trusted and are intentionally ignored here.
+        var clientIp = connection.RemoteIpAddress?.ToString();
         
         return new TrackingData
         {
@@ -167,51 +169,12 @@ public sealed partial class TrackingCaptureService
         };
     }
     
-    /// <summary>
-    /// Extracts the real client IP from reverse proxy headers in priority order.
-    /// <para>
-    /// Priority chain (first non-empty wins):
-    /// <list type="number">
-    ///   <item><description><c>X-Forwarded-For</c> — Standard proxy header (first IP in chain, set by IIS)</description></item>
-    ///   <item><description><c>RemoteIpAddress</c> — Direct TCP connection IP (fallback)</description></item>
-    /// </list>
-    /// </para>
-    /// <para>
-    /// CDN-specific headers (<c>CF-Connecting-IP</c>, <c>True-Client-IP</c>) are NOT trusted
-    /// because there is no CDN in front of IIS — any client could inject those headers
-    /// directly, spoofing their IP address. Only <c>X-Forwarded-For</c> (set by IIS) and
-    /// the TCP <c>RemoteIpAddress</c> are reliable in this deployment.
-    /// </para>
-    /// <para>
-    /// For <c>X-Forwarded-For</c>, which may contain a chain like <c>"client, proxy1, proxy2"</c>,
-    /// we extract only the first IP (the original client) using Span-based comma search
-    /// to avoid a <c>string.Split</c> allocation.
-    /// </para>
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string? ExtractClientIp(IHeaderDictionary headers, ConnectionInfo connection)
-    {
-        // NOTE: CF-Connecting-IP and True-Client-IP are intentionally NOT checked here.
-        // There is no Cloudflare/Akamai CDN in front of IIS, so those headers could be
-        // injected by any client to spoof their IP. Only IIS-set headers are trusted.
-        
-        // Standard proxy header — may contain a chain: "client, proxy1, proxy2"
-        // Use Span-based first-IP extraction: no substring allocation when no comma present
-        var forwardedFor = headers["X-Forwarded-For"].ToString();
-        if (forwardedFor.Length > 0)
-        {
-            var span = forwardedFor.AsSpan();
-            var firstComma = span.IndexOf(',');
-            // If there's a comma, take everything before it (the original client IP).
-            // If no comma, the entire value IS the client IP.
-            return firstComma > 0 
-                ? span[..firstComma].Trim().ToString()
-                : forwardedFor.Trim();
-        }
-        
-        // Fallback: direct TCP connection IP (or IP set by ForwardedHeaders middleware)
-        return connection.RemoteIpAddress?.ToString();
-    }
+    // ExtractClientIp removed — BUG-001 fix.
+    // In IIS InProcess hosting, connection.RemoteIpAddress is the TCP socket IP set by
+    // the ASP.NET Core Module (ANCM). No CDN or reverse proxy sits in front of IIS,
+    // so ALL client-supplied IP headers (X-Forwarded-For, CF-Connecting-IP, True-Client-IP,
+    // X-Real-IP) are untrustworthy and were being used to spoof the recorded IP.
+    // The inline read of connection.RemoteIpAddress in CaptureFromRequest replaces this.
     
     /// <summary>
     /// SIMD-vectorized character set for JSON escape detection.

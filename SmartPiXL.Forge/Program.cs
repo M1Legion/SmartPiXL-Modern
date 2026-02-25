@@ -151,6 +151,21 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundIpEnrich
 builder.Services.AddSingleton<ForgeMetrics>();
 builder.Services.AddHostedService<MetricsReporterService>();
 
+// ── Forge failover writer ─────────────────────────────────────────────────
+// Persists enriched TrackingData to JSONL files when the SQL writer channel
+// is full or the circuit breaker is open. Records are replayed on recovery.
+// Separate from Edge failover (pipe unavailable) — these records are ENRICHED.
+builder.Services.AddSingleton(sp =>
+{
+    var forgeSettings = sp.GetRequiredService<IOptions<ForgeSettings>>().Value;
+    var failoverDir = Path.IsPathRooted(forgeSettings.ForgeFailoverDirectory)
+        ? forgeSettings.ForgeFailoverDirectory
+        : Path.Combine(AppContext.BaseDirectory, forgeSettings.ForgeFailoverDirectory);
+    var logger = sp.GetRequiredService<ITrackingLogger>();
+    var metrics = sp.GetRequiredService<ForgeMetrics>();
+    return new ForgeFailoverWriter(failoverDir, logger, metrics);
+});
+
 // ── Forge-specific pipeline services ──────────────────────────────────────
 
 // PipeListenerService: Named pipe server receiving TrackingData from Edge.

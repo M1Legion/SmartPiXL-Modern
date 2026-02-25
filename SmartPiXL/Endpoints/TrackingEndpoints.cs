@@ -63,6 +63,13 @@ public static partial class TrackingEndpoints
     [GeneratedRegex(@"^/?(?<companyId>[^/]+)/(?<pixlId>[^_]+)_(?<domain>.+)_SMART\.(GIF|js)$", RegexOptions.IgnoreCase)]
     private static partial Regex PiXLUrlPattern();
     
+    // Legacy ClearDot URL pattern: /{companyId}/{clientName}_{zipCode}_ClearDot.gif
+    // Example: /epush/villagetoyota_34448_ClearDot.gif
+    // This is the original pixel format from the first-generation system.
+    // CompanyID and PiXLID are extracted by TrackingCaptureService.PathParseRegex.
+    [GeneratedRegex(@"_ClearDot\.gif$", RegexOptions.IgnoreCase)]
+    private static partial Regex ClearDotPattern();
+    
     // Content type constants — avoid per-request string allocs
     private const string GifContentType = "image/gif";
     private const string JsContentType = "application/javascript";
@@ -228,9 +235,26 @@ public static partial class TrackingEndpoints
                 return Results.Bytes(TransparentGif, GifContentType);
             }
             
-            // ── Bot trap: anything that doesn't match a PiXL URL pattern ────
-            // Return the GIF silently (don't reveal we know it's invalid).
-            // Record the hit with _srv_botTrap=1 for botnet detection analysis.
+            // ── Legacy ClearDot.gif: first-generation pixel format ─────────
+            // Pattern: /{companyId}/{clientName}_{zipCode}_ClearDot.gif
+            // These are legitimate customer pixels from the original platform.
+            // CompanyID/PiXLID are extracted by CaptureService.PathParseRegex.
+            if (ClearDotPattern().IsMatch(path))
+            {
+                CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService,
+                    dcService, geoService, pipeClient, logger, isValidPiXLUrl: true);
+                
+                ctx.Response.ContentType = GifContentType;
+                ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+                ctx.Response.Headers.Pragma = "no-cache";
+                ctx.Response.Headers["Expires"] = "0";
+                return Results.Bytes(TransparentGif, GifContentType);
+            }
+            
+            // ── Catch-all: anything that doesn't match a known pixel format ───
+            // Record every hit — scanner probes, bots, malformed URLs are all valuable
+            // for traffic quality analysis. Flag with _srv_botTrap=1 for downstream
+            // bot traffic metrics and client reporting.
             CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService,
                 dcService, geoService, pipeClient, logger, isValidPiXLUrl: false);
             

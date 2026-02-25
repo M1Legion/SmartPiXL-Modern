@@ -34,6 +34,9 @@ namespace SmartPiXL.Forge.Services;
 // RESILIENCE:
 //   Each pipe instance auto-reconnects on disconnect. Malformed JSON lines
 //   are logged and skipped — one bad record never crashes the listener.
+//   When the enrichment channel is full, WriteAsync blocks (backpressure)
+//   up to 5 seconds. If still full, the record is logged and dropped —
+//   the Edge has its own JSONL failover for pipe-unavailable scenarios.
 // ============================================================================
 
 /// <summary>
@@ -154,6 +157,9 @@ public sealed class PipeListenerService : BackgroundService
     /// <summary>
     /// Reads JSON lines from the connected pipe stream, deserializes each into
     /// a <see cref="TrackingData"/> record, and enqueues it to the enrichment channel.
+    /// Uses <see cref="ChannelWriter{T}.WriteAsync"/> for backpressure — when the
+    /// enrichment channel is full, reading pauses until space is available (up to 5s).
+    /// This applies natural TCP-level backpressure to the Edge's pipe client.
     /// Continues until the client disconnects or cancellation is requested.
     /// </summary>
     private async Task ReadRecordsAsync(NamedPipeServerStream pipe, int instanceId, CancellationToken ct)
@@ -183,15 +189,24 @@ public sealed class PipeListenerService : BackgroundService
                         continue;
                     }
 
-                    if (!_enrichmentChannel.Writer.TryWrite(record))
+                    // WriteAsync with timeout — applies backpressure when channel is full.
+                    // BoundedChannelFullMode.Wait causes WriteAsync to block until space
+                    // is available. The 5s timeout prevents indefinite blocking if the
+                    // enrichment pipeline is completely stalled.
+                    try
                     {
-                        _metrics.RecordDrop(Stage.PipeDeserialize);
-                        _logger.Warning($"Pipe instance {instanceId}: enrichment channel full, dropping record");
-                    }
-                    else
-                    {
+                        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        writeCts.CancelAfter(TimeSpan.FromSeconds(5));
+                        await _enrichmentChannel.Writer.WriteAsync(record, writeCts.Token);
                         _metrics.Record(Stage.PipeDeserialize, ts);
                         recordCount++;
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // 5s timeout expired — enrichment channel is critically backed up.
+                        // Edge has its own JSONL failover if we can't keep up.
+                        _metrics.RecordDrop(Stage.PipeDeserialize);
+                        _logger.Warning($"Pipe instance {instanceId}: enrichment channel full for 5s — dropping record (Edge failover handles persistence)");
                     }
                 }
                 catch (JsonException ex)
