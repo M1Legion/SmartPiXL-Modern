@@ -1,0 +1,31 @@
+================================================
+  Building Merged IP Intelligence Table (v2)
+  2026-02-24 14:09:00
+================================================
+ 
+Phase 1: Inserting DB-IP backbone...
+  Table created. Inserting DB-IP backbone...
+  Inserted: 3,746,685 ranges
+  2026-02-24 14:09:10
+ 
+Phase 2: Building MaxMind temp tables...
+  MaxMind CityBlock: 1,349,448 ranges
+  MaxMind ASN: 507,792 ranges
+  2026-02-24 14:09:12
+ 
+Phase 3: Updating MaxMind City fields (100K batches)...
+  MM City: 98,527 updated  2026-02-24 14:09:15
+  MM City: 188,468 updated  2026-02-24 14:09:48
+  MM City: 285,518 updated  2026-02-24 14:10:10
+  MM City: 380,666 updated  2026-02-24 14:11:03
+  MM City: 478,643 updated  2026-02-24 14:11:34
+  MM City: 575,237 updated  2026-02-24 14:12:31
+  MM City: 673,314 updated  2026-02-24 14:13:08
+  MM City: 771,398 updated  2026-02-24 14:13:47
+  MM City: 869,559 updated  2026-02-24 14:14:28
+  MM City: 967,838 updated  2026-02-24 14:15:14
+  MM City: 1,066,299 updated  2026-02-24 14:15:50
+  MM City: 1,165,737 updated  2026-02-24 14:16:11
+  MM City: 1,264,426 updated  2026-02-24 14:17:05
+HResult 0x254, Level 21, State 1
+Cannot continue the execution because the session is in the kill state.

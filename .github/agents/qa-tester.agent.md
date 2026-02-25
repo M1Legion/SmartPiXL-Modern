@@ -6,15 +6,15 @@ model: Claude Opus 4.6 (copilot)
 argument-hint: 'Specify target: "tron ops", "tron metrics", "atlas", "traffic-alert", or "full sweep"'
 handoffs:
   - label: 'File Bug Report'
-    agent: doc-specialist
+    agent: Doc Specialist
     prompt: 'Document the QA findings above as actionable bug reports in IMPLEMENTATION-LOG.md.'
     send: false
   - label: 'Fix Dashboard Bugs'
-    agent: csharp-janitor
+    agent: C# Janitor
     prompt: 'Fix the Sentinel endpoint and dashboard bugs identified in the QA report above.'
     send: false
   - label: 'Fix Frontend Bugs'
-    agent: javascript-janitor
+    agent: JavaScript Janitor
     prompt: 'Fix the JavaScript/HTML bugs identified in the QA report above in tron.html, atlas.html, and the tron/*.mjs modules.'
     send: false
 ---

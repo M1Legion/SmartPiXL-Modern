@@ -1,0 +1,141 @@
+================================================
+  ASN Enrichment: bgp.tools Classification
+  2026-02-23 15:01:55
+================================================
+ 
+Step 1: Extracting ASN numbers from IPAPI.IP (344M rows)...
+Unique ASNs in IPAPI: 72,022
+Total IPs with ASN:   322,296,768
+ 
+Step 2: Joining with bgp.tools classification...
+ 
+-- 2a. Traffic by ASN Class (weighted by IP count) --
+AsnClass|UniqueAsns|TotalIPs|TotalIPs_Fmt|PctOfTraffic
+--------|----------|--------|------------|------------
+Eyeball|7552|188636601|188,636,601|58.53
+Unknown|62329|48586345|48,586,345|15.08
+T1|15|45439014|45,439,014|14.10
+Content|1105|27712115|27,712,115|8.60
+Carrier|576|11804229|11,804,229|3.66
+(not in bgp.tools)|444|118457|118,457|.04
+VIVIENDA|1|7|7|.00
+ 
+-- 3a. Top 15 Eyeball ASNs (consumer ISPs) --
+Asn|AsnName|CountryCode|IpCount|IpCount_Fmt
+---|-------|-----------|-------|-----------
+7922|Comcast Cable Communications, LLC|US|42783792|42,783,792
+20115|Charter Communications LLC|US|9244422|9,244,422
+209|Lumen (ex. Qwest)|US|6461695|6,461,695
+10796|Charter Communications Inc|US|5167846|5,167,846
+20001|Charter Communications Inc|US|4854927|4,854,927
+5650|Verizon (fka. Frontier)|US|4841125|4,841,125
+33363|Charter Communications, Inc|US|4229016|4,229,016
+11427|Charter Communications Inc|US|3955557|3,955,557
+6128|Cablevision Systems Corp.|US|3756743|3,756,743
+11426|Charter Communications Inc|US|3350332|3,350,332
+7029|Windstream Communications LLC|US|3092415|3,092,415
+11351|Charter Communications Inc|US|2860215|2,860,215
+577|Bell Canada|CA|2808415|2,808,415
+8151|UNINET|MX|2215745|2,215,745
+19108|Optimum|US|2106950|2,106,950
+ 
+-- 3b. Top 15 Content ASNs (CDN/cloud -- likely bots) --
+Asn|AsnName|CountryCode|IpCount|IpCount_Fmt
+---|-------|-----------|-------|-----------
+22773|Cox Communications Inc.|US|8146819|8,146,819
+16509|Amazon.com, Inc.|US|5356851|5,356,851
+14618|Amazon.com, Inc.|US|4831059|4,831,059
+8075|Microsoft Corporation|US|3748980|3,748,980
+396982|Google Cloud Platform|US|1061329|1,061,329
+14061|DigitalOcean LLC|US|650516|650,516
+31898|Oracle Cloud|US|333735|333,735
+20473|The Constant Company, LLC|US|272048|272,048
+16276|OVH SAS|FR|189688|189,688
+36352|HostPapa|US|181392|181,392
+33070|Rackspace Hosting|US|177929|177,929
+714|Apple Inc.|US|164949|164,949
+36351|IBM Cloud|US|159491|159,491
+63949|Akamai (Linode)|SG|147318|147,318
+13335|Cloudflare, Inc.|US|144161|144,161
+ 
+-- 3c. Top 15 Transit ASNs (backbone carriers) --
+Asn|AsnName|CountryCode|IpCount|IpCount_Fmt
+---|-------|-----------|-------|-----------
+ 
+-- 3d. Top 15 Carrier ASNs --
+Asn|AsnName|CountryCode|IpCount|IpCount_Fmt
+---|-------|-----------|-------|-----------
+3462|HiNet (Chunghwa Telecom)|TW|2775066|2,775,066
+55836|Reliance Jio Infocomm Limited|IN|1710171|1,710,171
+7545|TPG Telecom Limited|AU|704199|704,199
+2828|Verizon (fka XO Communications)|US|659066|659,066
+4788|TM Technology Services Sdn. Bhd.|MY|632219|632,219
+8452|Telecom Egypt|EG|448046|448,046
+4134|China Telecom Backbone|CN|422854|422,854
+721|United States Department of Defense (DoD)|US|399431|399,431
+9829|BSNL (Bharat Sanchar Nigam Ltd)|IN|327856|327,856
+9009|M247 Europe SRL|RO|266929|266,929
+7713|PT Telkom Indonesia Tbk|ID|262253|262,253
+4766|Korea Telecom|KR|241315|241,315
+4837|China Unicom Backbone|CN|211720|211,720
+12322|Free SAS|FR|180017|180,017
+4771|Spark New Zealand Trading Ltd.|NZ|178026|178,026
+ 
+-- 4. MaxMind ASN vs bgp.tools Coverage --
+Coverage|AsnCount
+--------|--------
+In both MaxMind + bgp.tools|68977
+MaxMind only (not in bgp.tools)|97
+bgp.tools only (not in MaxMind)|48773
+In IPAPI but not in bgp.tools|444
+ 
+-- 5. ASN Name Comparison (MaxMind vs bgp.tools, top 20 by IP count) --
+Asn|MaxMind_Name|BgpTools_Name|Class|CountryCode|IpCount
+---|------------|-------------|-----|-----------|-------
+7922|Comcast Cable Communications, LLC|Comcast Cable Communications, LLC|Eyeball|US|42783792
+7018|AT&T Enterprises, LLC|AT&T Enterprises, LLC|T1|US|26801596
+701|Verizon Business|Verizon Business|T1|US|12259630
+20115|Charter Communications LLC|Charter Communications LLC|Eyeball|US|9244422
+6167|Verizon Business|Verizon Wireless|Unknown|US|8412933
+22773|Cox Communications Inc.|Cox Communications Inc.|Content|US|8146819
+209|CenturyLink Communications, LLC|Lumen (ex. Qwest)|Eyeball|US|6461695
+16509|Amazon.com, Inc.|Amazon.com, Inc.|Content|US|5356851
+10796|Charter Communications Inc|Charter Communications Inc|Eyeball|US|5167846
+20001|Charter Communications Inc|Charter Communications Inc|Eyeball|US|4854927
+5650|Frontier Communications of America, Inc.|Verizon (fka. Frontier)|Eyeball|US|4841125
+14618|Amazon.com, Inc.|Amazon.com, Inc.|Content|US|4831059
+33363|Charter Communications, Inc|Charter Communications, Inc|Eyeball|US|4229016
+11427|Charter Communications Inc|Charter Communications Inc|Eyeball|US|3955557
+6128|Cablevision Systems Corp.|Cablevision Systems Corp.|Eyeball|US|3756743
+8075|Microsoft Corporation|Microsoft Corporation|Content|US|3748980
+11426|Charter Communications Inc|Charter Communications Inc|Eyeball|US|3350332
+7029|Windstream Communications LLC|Windstream Communications LLC|Eyeball|US|3092415
+174|Cogent Communications, LLC|Cogent Communications, LLC|T1|US|2992963
+11351|Charter Communications Inc|Charter Communications Inc|Eyeball|US|2860215
+ 
+-- 6. bgp.tools ASN Country vs RIR Country (disagreements) --
+   Where bgp.tools says ASN is in country X but RIR allocated IPs to country Y
+Asn|Name|Class|BgpCC|IpCount
+---|----|-----|-----|-------
+7922|Comcast Cable Communications, LLC|Eyeball|US|42783792
+7018|AT&T Enterprises, LLC|T1|US|26801596
+701|Verizon Business|T1|US|12259630
+20115|Charter Communications LLC|Eyeball|US|9244422
+6167|Verizon Wireless|Unknown|US|8412933
+22773|Cox Communications Inc.|Content|US|8146819
+209|Lumen (ex. Qwest)|Eyeball|US|6461695
+16509|Amazon.com, Inc.|Content|US|5356851
+10796|Charter Communications Inc|Eyeball|US|5167846
+20001|Charter Communications Inc|Eyeball|US|4854927
+5650|Verizon (fka. Frontier)|Eyeball|US|4841125
+14618|Amazon.com, Inc.|Content|US|4831059
+33363|Charter Communications, Inc|Eyeball|US|4229016
+11427|Charter Communications Inc|Eyeball|US|3955557
+6128|Cablevision Systems Corp.|Eyeball|US|3756743
+8075|Microsoft Corporation|Content|US|3748980
+11426|Charter Communications Inc|Eyeball|US|3350332
+7029|Windstream Communications LLC|Eyeball|US|3092415
+174|Cogent Communications, LLC|T1|US|2992963
+11351|Charter Communications Inc|Eyeball|US|2860215
+ 
+ASN enrichment analysis complete.

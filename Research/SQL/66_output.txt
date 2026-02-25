@@ -1,0 +1,17 @@
+================================================
+  Building Merged IP Intelligence Table
+  2026-02-24 13:56:29
+================================================
+ 
+Step 1: Building MaxMind CityBlock integer ranges...
+  MaxMind CityBlock ranges: 1,349,448
+Step 2: Building MaxMind ASN integer ranges...
+  MaxMind ASN ranges: 507,792
+ 
+Step 3: Creating Ref.MergedIpRange...
+  Table created.
+ 
+Step 4: Populating merged table in 200K batches...
+  DB-IP ranges to process: 3,746,685
+HResult 0x254, Level 21, State 1
+Cannot continue the execution because the session is in the kill state.

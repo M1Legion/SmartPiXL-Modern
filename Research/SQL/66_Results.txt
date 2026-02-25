@@ -1,0 +1,15 @@
+================================================
+  Building Merged IP Intelligence Table
+  2026-02-23 23:04:11
+================================================
+ 
+Step 1: Building MaxMind CityBlock integer ranges...
+  MaxMind CityBlock ranges: 1,349,448
+Step 2: Building MaxMind ASN integer ranges...
+  MaxMind ASN ranges: 507,792
+ 
+Step 3: Creating Ref.MergedIpRange...
+  Table created.
+ 
+
+Sqlcmd: Warning: The last operation was terminated because the user pressed CTRL+C.

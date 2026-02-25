@@ -1,0 +1,79 @@
+================================================
+  City + Region Accuracy: 3-Source Comparison
+  2026-02-23 15:04:18
+================================================
+ 
+Step 1: Sampling 50K US + 50K non-US IPs (TABLESAMPLE)...
+Total sample: 100,000
+ 
+Step 2: Building MaxMind integer ranges...
+MaxMind ranges: 1,349,448
+ 
+Step 3: Range-joining MaxMind + DB-IP to sample...
+Comparison rows: 100,000
+ 
+================================================
+  CITY ACCURACY
+================================================
+ 
+-- 4a. Exact City Match (case-insensitive) --
+SampleGroup|Total|MM_CityMatch|MM_CityPct|DBIP_CityMatch|DBIP_CityPct
+-----------|-----|------------|----------|--------------|------------
+US|50000|24726|73.89|23874|47.75
+Non-US|50000|26826|68.24|14451|28.90
+Overall|100000|51552|70.84|38325|38.33
+ 
+-- 5. Region Match --
+SampleGroup|Total|MM_RegionMatch|MM_RegionPct|DBIP_RegionMatch|DBIP_RegionPct
+-----------|-----|--------------|------------|----------------|--------------
+US|50000|32028|95.80|42987|85.97
+Non-US|50000|31690|80.96|28335|56.67
+Overall|100000|63718|87.80|71322|71.32
+ 
+-- 6. Zip Code Match (MaxMind only, US only) --
+ExactZipMatch|BothHaveZip|ZipMatchPct|Zip3Match|Zip3MatchPct
+-------------|-----------|-----------|---------|------------
+19059|33321|57.20|27182|81.58
+ 
+-- 7. Lat/Lon Proximity (km) --
+   Using equirectangular approximation
+SampleGroup|Total|MM_Under10km|MM_Under25km|MM_Under50km|MM_Under100km|MM_AvgKm|DBIP_Under10km|DBIP_Under25km|DBIP_Under50km|DBIP_Under100km|DBIP_AvgKm
+-----------|-----|------------|------------|------------|-------------|--------|--------------|--------------|--------------|---------------|----------
+US|50000|25247|29029|30705|31718|594.5|32918|38067|40609|42277|223.2
+Non-US|50000|32259|36140|37907|39186|448.8|25439|31459|34189|36643|357.9
+Overall|100000|57506|65169|68612|70904|521.6|58357|69526|74798|78920|290.5
+ 
+-- 8. City Disagreement Analysis --
+   Where MaxMind and DB-IP give different cities, which is closer to IPAPI?
+Outcome|Cnt
+-------|---
+MaxMind right, DB-IP wrong|30394
+DB-IP right, MaxMind wrong|3325
+Both wrong (neither matches IPAPI)|14326
+ 
+-- 9. Top 20 US City Mismatches (MM vs IPAPI where DB-IP agrees with IPAPI) --
+   These are cases where MaxMind is likely wrong
+IPAPI_City|IPAPI_Region|MM_City|MM_Region|DBIP_City|Cnt
+----------|------------|-------|---------|---------|---
+Vestal|New York|Binghamton|New York|Vestal|45
+Calumet City|Illinois|Hammond|Indiana|Calumet City|39
+Pullman|Washington|Palouse|Washington|Pullman|39
+New York|New York|Brooklyn|New York|New York|38
+Kansas City|Missouri|West Jordan|Utah|Kansas City|34
+Nashville|Tennessee|Murfreesboro|Tennessee|Nashville|34
+Ashburn|Virginia|Phoenix|Arizona|Ashburn|33
+Miami|Florida|Hollywood|Florida|Miami|33
+Oak Grove|Kentucky|Cromwell|Kentucky|Oak Grove|33
+Poughkeepsie|New York|Wilton|Connecticut|Poughkeepsie|33
+DeFuniak Springs|Florida|Eufaula|Alabama|DeFuniak Springs|32
+Orono|Maine|Gray|Maine|Orono|32
+St. Petersburg|Florida|Wesley Chapel|Florida|St. Petersburg|32
+Jonesboro|Georgia|Cumming|Georgia|Jonesboro|31
+Madison|Wisconsin|Allston|Massachusetts|Madison|31
+Prattville|Alabama|Deatsville|Alabama|Prattville|31
+San Diego|California|Lakeside|California|San Diego|31
+Mentor|Ohio|Willoughby|Ohio|Mentor|30
+Omaha|Nebraska|Mansfield|Ohio|Omaha|30
+Boston|Massachusetts|Dedham|Massachusetts|Boston|29
+ 
+City/Region accuracy analysis complete.

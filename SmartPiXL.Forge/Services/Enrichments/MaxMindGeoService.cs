@@ -30,6 +30,8 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 //   _srv_mmLon={longitude}
 //   _srv_mmASN={AS number}
 //   _srv_mmASNOrg={AS organization}
+//   _srv_mmZip={postal code}
+//   _srv_mmTZ={IANA timezone}
 // ============================================================================
 
 /// <summary>
@@ -57,13 +59,15 @@ public sealed class MaxMindGeoService : IDisposable
         double? Latitude,
         double? Longitude,
         int? Asn,
-        string? AsnOrg);
+        string? AsnOrg,
+        string? PostalCode,
+        string? TimeZone);
 
-    public MaxMindGeoService(ITrackingLogger logger)
+    public MaxMindGeoService(ITrackingLogger logger, string? databaseDirectory = null)
     {
         _logger = logger;
 
-        var baseDir = Path.Combine(AppContext.BaseDirectory, "MaxMind");
+        var baseDir = databaseDirectory ?? Path.Combine(AppContext.BaseDirectory, "MaxMind");
 
         _cityReader = TryLoadDatabase(baseDir, "GeoLite2-City.mmdb");
         _asnReader = TryLoadDatabase(baseDir, "GeoLite2-ASN.mmdb");
@@ -99,6 +103,8 @@ public sealed class MaxMindGeoService : IDisposable
         double? lon = null;
         int? asn = null;
         string? asnOrg = null;
+        string? postalCode = null;
+        string? timeZone = null;
 
         // City lookup (includes country + region + city + coordinates)
         if (_cityReader is not null)
@@ -112,6 +118,8 @@ public sealed class MaxMindGeoService : IDisposable
                     city = cityResult.City?.Name;
                     lat = cityResult.Location?.Latitude;
                     lon = cityResult.Location?.Longitude;
+                    postalCode = cityResult.Postal?.Code;
+                    timeZone = cityResult.Location?.TimeZone;
                 }
             }
             catch (GeoIP2Exception)
@@ -153,7 +161,7 @@ public sealed class MaxMindGeoService : IDisposable
             }
         }
 
-        var result = new MaxMindResult(countryCode, region, city, lat, lon, asn, asnOrg);
+        var result = new MaxMindResult(countryCode, region, city, lat, lon, asn, asnOrg, postalCode, timeZone);
 
         if (_cache.Count >= MaxCacheSize)
             _cache.Clear();

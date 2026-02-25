@@ -6,7 +6,7 @@ model: Claude Opus 4.6 (copilot)
 argument-hint: 'Specify subsystem to test, or "coverage report" for gap analysis'
 handoffs:
   - label: 'Fix Failing Tests'
-    agent: csharp-janitor
+    agent: C# Janitor
     prompt: 'Fix the issues causing the test failures identified above.'
     send: false
 ---

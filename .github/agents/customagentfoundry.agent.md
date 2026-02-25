@@ -73,7 +73,7 @@ mcp-servers:                            # MCP server configs for cloud agents
 # OPTIONAL - Workflow handoffs
 handoffs:
   - label: 'Start Implementation'      # Button text shown after response
-    agent: implementation               # Target agent identifier
+    agent: Implementation Agent         # MUST match the target agent's name: field (display name, NOT filename)
     prompt: 'Implement the plan above.' # Pre-filled prompt text
     send: false                         # Auto-submit? (default: false)
     model: 'GPT-5 (copilot)'          # Override model for handoff
@@ -159,6 +159,7 @@ Draft → Review → Revise → Finalize
 ```
 
 Handoff rules:
+- **CRITICAL**: The `agent:` field MUST use the target agent's `name:` value (the display name from its YAML frontmatter), NOT the filename. Example: `agent: C# Janitor` not `agent: csharp-janitor`. VS Code resolves agents by display name.
 - Use `send: false` when the user should review before proceeding
 - Use `send: true` only for fully automated workflow steps
 - Write descriptive button labels that indicate the action

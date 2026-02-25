@@ -6,11 +6,11 @@ model: Claude Opus 4.6 (copilot)
 argument-hint: 'Specify subsystem to audit, or say "full audit" for everything'
 handoffs:
   - label: 'Fix Issues Found'
-    agent: csharp-janitor
+    agent: C# Janitor
     prompt: 'Fix the issues identified in the adversarial review above.'
     send: false
   - label: 'Update Documentation'
-    agent: doc-specialist
+    agent: Doc Specialist
     prompt: 'Update documentation based on the drift findings above.'
     send: false
 ---

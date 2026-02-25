@@ -1,0 +1,150 @@
+================================================
+  Merged Free DB vs IPAPI (Paid) Comparison
+  2026-02-24 14:30:28
+================================================
+ 
+Step 1: Sampling 100K IPs from IPAPI...
+  Sampled: 100,000
+ 
+Step 2: Looking up each IP in Ref.MergedIpRange...
+  Comparison rows: 100,000
+  Merged DB hit rate: 99,971 / 100,000 (99.97%)
+ 
+================================================
+  COUNTRY ACCURACY: Merged vs IPAPI
+================================================
+ 
+-- 3a. Overall country match --
+WithMergedData CountryMatch MatchPct
+-------------- ------------ --------
+         99971        98135    98.16
+ 
+-- 3b. Country match by confidence level --
+SourcesAgreed HowDecided                     Cnt         Matches     MatchPct
+------------- ------------------------------ ----------- ----------- --------
+            3 All-3-agree                          92506       92178    99.65
+            3 DBIP+MM-agree                         3509        3436    97.92
+            3 MM+RIR-agree                          1893         647    34.18
+            2 DBIP+RIR-agree                        1609        1604    99.69
+            3 DBIP+RIR-agree                         272         168    61.76
+            3 3-way-split                            101          29    28.71
+            2 DBIP+RIR-only                           81          73    90.12
+ 
+-- 3c. Top 15 country mismatches --
+IPAPI_CC                                           M_CC M_CCSource                     Cnt        
+-------------------------------------------------- ---- ------------------------------ -----------
+CA                                                 US   All-3-agree                            231
+US                                                 GB   MM+RIR-agree                           147
+JP                                                 US   MM+RIR-agree                           121
+GB                                                 US   DBIP+RIR-agree                         107
+GB                                                 US   MM+RIR-agree                           102
+CA                                                 US   MM+RIR-agree                           102
+GB                                                 CA   MM+RIR-agree                            72
+DE                                                 US   MM+RIR-agree                            57
+US                                                 SC   MM+RIR-agree                            46
+US                                                 RS   MM+RIR-agree                            40
+JP                                                 SG   3-way-split                             38
+US                                                 AE   MM+RIR-agree                            37
+IL                                                 US   MM+RIR-agree                            36
+IN                                                 US   All-3-agree                             35
+IN                                                 US   MM+RIR-agree                            35
+ 
+================================================
+  CITY + REGION ACCURACY: Merged vs IPAPI
+================================================
+ 
+-- 4a. City match (case-insensitive) --
+Segment Total       CityMatch   CityMatchPct HasCity    
+------- ----------- ----------- ------------ -----------
+Non-US        29586       19252        65.07       29586
+US            70414       44517        63.25       70385
+Overall      100000       63769        63.79       99971
+ 
+-- 4b. Region match --
+Segment Total       RegionMatch RegionMatchPct
+------- ----------- ----------- --------------
+Non-US        29586       22776          76.98
+US            70414       64571          91.74
+Overall      100000       87347          87.37
+ 
+-- 4c. Zip match (US only) --
+ExactZip    Zip3Match   BothHaveZip ExactPct Zip3Pct
+----------- ----------- ----------- -------- -------
+      25280       38437       51115    49.46   75.20
+ 
+================================================
+  LAT/LON PROXIMITY: Merged vs IPAPI
+================================================
+ 
+Segment Total       HasBothLatLon Under10km   Under25km   Under50km   Under100km  AvgKm     
+------- ----------- ------------- ----------- ----------- ----------- ----------- ----------
+Non-US        29586         29586       14877       18251       19594       21208      377.5
+US            70414         70385       43126       51107       55529       58424      217.1
+Overall      100000         99971       58003       69358       75123       79632      264.6
+ 
+================================================
+  ASN ACCURACY: Merged vs IPAPI
+================================================
+ 
+-- 6a. ASN number match --
+MergedHasAsn IpapiHasAsn AsnMatch    AsnMatchPct
+------------ ----------- ----------- -----------
+       88056       90407       86142       98.60
+ 
+-- 6b. ASN class distribution for sample --
+M_AsnClass           Cnt         Pct    
+-------------------- ----------- -------
+Eyeball                    38741   38.74
+Unknown                    19768   19.77
+T1                         16174   16.17
+NULL                       11944   11.94
+Content                     7262    7.26
+Carrier                     6111    6.11
+ 
+-- 6c. Mobile IPs by ASN class --
+   IPAPI marks IP as mobile; does bgp.tools ASN class agree?
+AsnClass             MobileCount Total       MobilePct
+-------------------- ----------- ----------- ---------
+Unknown                        0       19768       .00
+Content                        0        7262       .00
+T1                             0       16174       .00
+Carrier                        0        6111       .00
+Eyeball                        0       38741       .00
+(no data)                      0       11944       .00
+ 
+-- 6d. Proxy IPs by ASN class --
+AsnClass             ProxyCount  Total       ProxyPct
+-------------------- ----------- ----------- --------
+Unknown                        0       19768      .00
+Content                        0        7262      .00
+T1                             0       16174      .00
+Carrier                        0        6111      .00
+Eyeball                        0       38741      .00
+(no data)                      0       11944      .00
+ 
+-- 7. Timezone match --
+MergedHasTz TzMatch     TzMatchPct
+----------- ----------- ----------
+      98281       80709      82.12
+ 
+================================================
+  FINAL SCORECARD: Free Merged DB vs IPAPI
+================================================
+ 
+Metric            Score   Note                       
+----------------- ------- ---------------------------
+Country match       98.16 vs 100% (IPAPI is baseline)
+City match (US)     63.25 MaxMind city names         
+Region match (US)   91.74 MaxMind region names       
+ASN match           98.60 MaxMind ASN numbers        
+Timezone match      82.12 MaxMind timezone           
+ 
+-- What the free DB adds that IPAPI misses: --
+Feature                  Source                                           Advantage                                          
+------------------------ ------------------------------------------------ ---------------------------------------------------
+ASN classification       bgp.tools: Eyeball / Content / Transit / Carrier IPAPI has no equivalent                            
+RIR allocation data      ARIN/RIPE/APNIC/LACNIC/AFRINIC delegations       Shows original IP assignment, date allocated       
+Country confidence score Consensus of 3 independent sources               IPAPI gives one answer with no confidence indicator
+Accuracy radius          MaxMind GeoLite2                                 IPAPI gives coordinates but no error estimate      
+ 
+Comparison complete.

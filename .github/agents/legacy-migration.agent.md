@@ -6,7 +6,7 @@ model: Claude Opus 4.6 (copilot)
 argument-hint: 'Specify research area: Xavier SQL pipeline, legacy matching, data comparison, or migration plan'
 handoffs:
   - label: 'Implement Migration'
-    agent: mssql-specialist
+    agent: MSSQL Specialist
     prompt: 'Implement the migration plan designed above. Create the necessary SQL scripts and C# services.'
     send: false
 ---

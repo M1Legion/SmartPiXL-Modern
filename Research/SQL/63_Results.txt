@@ -1,0 +1,107 @@
+================================================
+  Country Consensus: 4-Source Comparison
+  2026-02-23 13:47:48
+================================================
+ 
+Step 1: Sampling 1M IPs from IPAPI.IP...
+Sampled 100,000 IPs
+ 
+Step 2: Joining MaxMind CityBlock...
+MaxMind ranges: 1,349,448
+ 
+Step 3: Range-joining all sources...
+Comparison rows: 100,000
+ 
+================================================
+  COUNTRY CODE ACCURACY (vs IPAPI as baseline)
+================================================
+ 
+-- 4a. Overall Match Rates --
+SampleSize|MM_Coverage|DBIP_Coverage|RIR_Coverage|MM_Match|DBIP_Match|RIR_Match
+----------|-----------|-------------|------------|--------|----------|---------
+100000|98301|99933|100000|97084|98651|95621
+ 
+-- 4b. Match Percentages --
+Comparison|Matches|Mismatches|NoData|MatchPct
+----------|-------|----------|------|--------
+MaxMind vs IPAPI|97084|1217|1699|98.76
+DB-IP vs IPAPI|98651|1282|67|98.72
+RIR vs IPAPI|95621|4379|0|95.62
+MaxMind vs DB-IP|96701|1533|1766|98.44
+ 
+-- 5. Country Consensus Voting --
+   Cases where at least one source disagrees with IPAPI
+ 
+-- 5a. MaxMind disagrees with IPAPI: who does DB-IP side with? --
+Verdict|Cnt
+-------|---
+DB-IP agrees with IPAPI (MM wrong)|697
+DB-IP agrees with MaxMind (IPAPI wrong?)|425
+DB-IP disagrees with both (3-way split)|95
+ 
+-- 5b. RIR disagrees with IPAPI: who does MaxMind side with? --
+Verdict|Cnt
+-------|---
+MaxMind agrees with IPAPI (RIR allocation differs)|3100
+MaxMind agrees with RIR (IPAPI wrong?)|943
+MaxMind has no data|199
+MaxMind disagrees with both|137
+ 
+-- 6. Top 20 Country Mismatches (MaxMind vs IPAPI) --
+IPAPI_CC|MM_CC|Cnt
+--------|-----|---
+CA|US|159
+US|NL|70
+IN|US|68
+AU|US|61
+JP|US|60
+US|DE|55
+DE|US|45
+CN|US|42
+GB|US|41
+US|SG|40
+US|JP|40
+JP|SG|37
+US|CL|37
+US|PA|37
+DE|AT|37
+MY|US|34
+HK|SC|34
+IE|US|34
+AU|GB|33
+AE|ZW|32
+ 
+-- 7. Top 20 Country Mismatches (DB-IP vs IPAPI) --
+IPAPI_CC|DBIP_CC|Cnt
+--------|-------|---
+GB|US|500
+CA|US|194
+US|DE|48
+US|HK|40
+US|JP|40
+JP|SG|38
+US|CA|37
+US|TW|30
+US|GB|30
+SE|US|28
+HK|SG|27
+JP|US|26
+SG|HK|25
+AU|US|25
+FR|HK|24
+US|AU|22
+US|KR|15
+CA|DE|15
+TR|BR|12
+MY|BR|11
+ 
+-- 8. Agreement Summary --
+Agreement|Cnt|Pct
+---------|---|---
+All 4 agree|93233|93.23
+MM+DBIP+IPAPI agree (RIR differs or NULL)|3043|3.04
+DBIP+IPAPI agree (MM differs or NULL)|2375|2.38
+MM+IPAPI agree (DBIP differs or NULL)|808|.81
+Nobody agrees with IPAPI|541|.54
+ 
+Country consensus analysis complete.

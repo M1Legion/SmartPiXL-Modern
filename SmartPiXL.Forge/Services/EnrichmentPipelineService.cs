@@ -336,6 +336,8 @@ public sealed class EnrichmentPipelineService : BackgroundService
             if (mmResult.Longitude.HasValue) AppendParam(sb, "_srv_mmLon", mmResult.Longitude.Value.ToString("F6", CultureInfo.InvariantCulture));
             if (mmResult.Asn.HasValue) AppendParam(sb, "_srv_mmASN", mmResult.Asn.Value.ToString(CultureInfo.InvariantCulture));
             if (mmResult.AsnOrg is not null) AppendParam(sb, "_srv_mmASNOrg", Uri.EscapeDataString(mmResult.AsnOrg));
+            if (mmResult.PostalCode is not null) AppendParam(sb, "_srv_mmZip", mmResult.PostalCode);
+            if (mmResult.TimeZone is not null) AppendParam(sb, "_srv_mmTZ", Uri.EscapeDataString(mmResult.TimeZone));
         }
 
         // ── Lane 3: Fire-and-forget background IP enrichment ──────────────

@@ -30,3 +30,6 @@ Thumbs.db
 *.tmp
 *.temp
 .nuget/
+
+# Research data files (large CSVs, RIR delegations, GeoIP databases)
+Research/data/

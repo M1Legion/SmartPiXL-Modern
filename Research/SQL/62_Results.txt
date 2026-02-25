@@ -1,0 +1,80 @@
+========================================
+  IP Intelligence Source Overview
+  2026-02-23 09:59:00
+========================================
+ 
+-- 1. Source Row Counts --
+Source Rows Notes
+------ ---- -----
+IPAPI.IP (paid, ip-api.com) 344007012 Individual IPs with full geo
+Ref.DbipCityLite (DB-IP) 3746685 Free city-level geo ranges
+Geo.CityBlock (MaxMind GeoLite2) 1349448 CIDR ranges, IPv4 only
+Geo.ASN (MaxMind GeoLite2) 507792 CIDR ranges, IPv4 only
+Ref.RirDelegation (5 RIRs) 262711 Authoritative IP allocations
+Ref.BgpToolsAsn (bgp.tools) 117750 ASN classification
+Geo.CityLocation (MaxMind) 59936 Geoname location details
+ 
+-- 2. RIR Delegation by Registry --
+Registry Allocations TotalIPs TotalIPs_Fmt
+-------- ----------- -------- ------------
+arin 80005 1656390912 1,656,390,912
+apnic 57363 889837824 889,837,824
+ripencc 98945 851702272 851,702,272
+lacnic 20496 183076352 183,076,352
+afrinic 5902 121250304 121,250,304
+ 
+-- 3. bgp.tools ASN Classification --
+Class AsnCount AsnCount_Fmt
+----- -------- ------------
+Unknown 106929 106,929
+Eyeball 8666 8,666
+Content 1459 1,459
+Carrier 680 680
+T1 15 15
+VIVIENDA 1 1
+ 
+-- 4. DB-IP City Lite by Continent --
+Continent Ranges TotalIPs TotalIPs_Fmt
+--------- ------ -------- ------------
+NA 1233616 1616828690 1,616,828,690
+AS 684323 952130471 952,130,471
+EU 1308782 795152526 795,152,526
+ZZ 14 592708864 592,708,864
+SA 276130 157888082 157,888,082
+AF 156220 114411551 114,411,551
+OC 87595 65704833 65,704,833
+AN 5 1151 1,151
+ 
+-- 5. Range Granularity Comparison --
+Source IPv4Ranges
+------ ----------
+MaxMind CityBlock 1349448
+DB-IP City Lite 3746685
+MaxMind ASN 507792
+RIR Delegation 262711
+ 
+-- 6. IPAPI Top 20 Countries --
+CountryCode IPs
+----------- ---
+US 257458596
+CA 14148077
+GB 7616276
+IN 6039804
+TW 5353459
+AU 3913689
+MX 3475598
+BR 3471108
+DE 2529210
+JP 1615273
+FR 1515533
+CN 1391052
+HK 1298507
+NL 1267178
+ES 1211363
+IT 1125151
+MY 1030912
+IE 995110
+CO 990145
+VN 985657
+ 
+Source overview complete.
