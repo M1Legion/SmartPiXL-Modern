@@ -183,8 +183,13 @@ builder.Services.AddHostedService<SqlBulkCopyWriterService>();
 
 // ── Ported Worker services ────────────────────────────────────────────────
 
-// EtlBackgroundService: DISABLED — isolating core pipeline first.
+// EtlBackgroundService: DISABLED — replaced by ParsedBulkInsertService.
 // builder.Services.AddHostedService<EtlBackgroundService>();
+
+// ParsedBulkInsertService: .NET backfill for PiXL.Parsed.
+// Reads Raw → parses QS in .NET (~1μs/row vs ~7ms/row in SQL UDFs)
+// → BulkCopy to Parsed → calls ETL proc for Phase 9–13 only.
+builder.Services.AddHostedService<ParsedBulkInsertService>();
 
 // ── Non-essential services DISABLED ───────────────────────────────────────
 // All background sync, maintenance, health, and notification services disabled

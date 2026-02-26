@@ -33,3 +33,7 @@ Thumbs.db
 
 # Research data files (large CSVs, RIR delegations, GeoIP databases)
 Research/data/
+etl_backfill.ps1
+etl_proc.txt
+getqueryparam.txt
+parsed_schema.txt

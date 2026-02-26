@@ -3313,3 +3313,108 @@ The MERGE regressions (BUG-E1, E2, E3) are **tolerable for legacy data** because
 1. **Fix MERGE regressions** — restore migration 42's Device MERGE logic (GROUP BY, MIN/MAX(ReceivedAt), COUNT(*), MATCHED HitCount accumulation). Add HitCount accumulation to IP MERGE.
 2. **Resume ETL** — safe to run on legacy backlog as-is if MERGE fix isn't immediately available.
 3. **After backlog processed** — run `UPDATE PiXL.IP SET HitCount = (SELECT COUNT(*) FROM PiXL.Visit WHERE IpId = PiXL.IP.IpId)` to fix accumulated HitCount drift.
+
+---
+
+## Session 20 — .NET Parse Optimization: 25x ETL Speedup (2026-02-26)
+
+**Date:** 2026-02-26
+**Focus:** Replace the catastrophic ETL scalar UDF bottleneck with .NET span-based parsing in the Forge
+
+### The Problem
+
+ETL proc `usp_ParseNewHits` Phases 1–8D call `dbo.GetQueryParam()` ~160 times per row as a **scalar UDF**. SQL Server evaluates scalar UDFs row-by-row with zero vectorization. Each `GetQueryParam` invocation does CHARINDEX scanning + 13 REPLACE calls for URL decoding.
+
+For a 50K batch: **160 params × 50K rows = 8M function invocations → 337 seconds per batch**.
+
+Observed throughput: **~150 rows/sec = 42 hours to clear the 25M-row backlog.**
+
+Wait type was `SOS_SCHEDULER_YIELD` — pure CPU starvation from scalar UDF overhead.
+
+### The Solution
+
+Move all query string parsing from SQL to .NET. The Forge already had `QueryParamReader` — a span-based zero-allocation QS parser. Reuse it to map all 160 QS params to 230 PiXL.Parsed columns, bypassing the SQL UDF bottleneck entirely.
+
+**Architecture:**
+
+```
+PiXL.Raw → .NET ParsedRecordParser (160 QS params → 230 columns, ~1μs/row)
+         → SqlBulkCopy → PiXL.Parsed
+         → ETL.usp_ProcessDimensions (Phase 9–13 only: Device/IP/Visit upserts)
+         → Advance ETL.Watermark
+```
+
+### Files Created / Modified
+
+| File | Action | Lines | Purpose |
+|------|--------|-------|---------|
+| `SmartPiXL.Forge/Services/ParsedRecordParser.cs` | **NEW** | 740 | All 230 column mappings from QS params to PiXL.Parsed. Helper methods: `Qs()`, `QsStr()`, `QsInt()`, `QsLong()`, `QsBit()`, `QsDec()`. Nested `ParsedDataReader` (DbDataReader for SqlBulkCopy). |
+| `SmartPiXL.Forge/Services/ParsedBulkInsertService.cs` | **NEW** | 351 | Background service: read Raw → .NET parse → BulkCopy → call Phase 9–13 proc → advance watermark. Includes crash recovery (HashSet of existing Parsed IDs). |
+| `SmartPiXL/SQL/62_SkipPreParsedPhases.sql` | **NEW** | — | Migration documenting NOT EXISTS + IF guard changes to usp_ParseNewHits |
+| `ETL.usp_ParseNewHits` (live proc) | **MODIFIED** | — | Phase 1 INSERT: added `NOT EXISTS(PiXL.Parsed)` guard. Phases 2–8D: wrapped in `IF @Inserted > 0` block. |
+| `ETL.usp_ProcessDimensions` (live proc) | **NEW** | — | Phase 9–13 only. Accepts `@FromId`/`@ToId` parameters. Device/IP/Visit upserts. Does NOT manage watermark. |
+| `SmartPiXL.Forge/Program.cs` | **MODIFIED** | — | Registered `ParsedBulkInsertService`, disabled `EtlBackgroundService` |
+
+### Three Deployment Iterations
+
+#### Iteration 1: Self-Healing Range Collision
+
+- **Bug:** Service called `usp_ParseNewHits` after BulkCopy to Parsed. The proc's self-healing logic (`IF MAX(SourceId) > watermark THEN advance`) saw the newly-inserted Parsed rows and jumped the watermark past our pre-parsed range — then applied full SQL UDF parsing to the NEXT 50K unparsed rows.
+- **Symptom:** ETL proc still took 337s despite .NET pre-parsing. The proc was processing DIFFERENT rows than what we parsed.
+- **Fix:** Created separate `usp_ProcessDimensions` proc with explicit `@FromId`/`@ToId` parameters.
+
+#### Iteration 2: Caught-Up False Positive
+
+- **Bug:** Added self-healing mirroring to `GetRangeAsync` (matching the proc's logic). This caused the effective start position to sometimes exceed `MAX(Raw.Id)`, producing a false "Caught up" state.
+- **Symptom:** Service reported "Caught up — no new rows to parse" with 20M rows remaining.
+- **Fix:** Removed self-healing entirely from the service. Use raw watermark only. Let the service manage its own watermark progression.
+
+#### Iteration 3: Working — 25x Speedup
+
+- Service reads raw watermark (no self-healing)
+- Parses in .NET (~900ms for 50K rows)
+- BulkCopies to PiXL.Parsed (~4s)
+- Calls `usp_ProcessDimensions @FromId, @ToId` (~4s)
+- Advances watermark itself
+
+### Performance Results
+
+| Metric | SQL UDF Path | .NET Parse Path | Improvement |
+|--------|-------------|-----------------|-------------|
+| Parse 50K rows | 337s (scalar UDFs) | 0.9s (.NET spans) | **374x** |
+| BulkCopy | n/a (inline INSERT) | 4–5s | — |
+| Phase 9–13 | included in 337s | 4–5s | — |
+| **Total per 50K batch** | **337s** | **~10s** | **33x** |
+| **Throughput** | **150 rows/sec** | **4,599 rows/sec** | **30x** |
+| **ETA for 25M backlog** | **42 hours** | **~1 hour** | **42x** |
+
+### Current Backfill Status (at time of writing)
+
+- **Watermark:** 16,709,907 (started at 14,709,907)
+- **Processed:** 2,049,830 rows in ~7.5 minutes
+- **Rate:** 4,599 rows/sec (improving as data warms caches)
+- **Remaining:** ~18M rows
+- **ETA:** ~1 hour 5 minutes
+- **Service:** Running as `SmartPiXL-Forge` Windows Service
+
+### Known Issue: Orphaned Pre-Parsed Rows
+
+Deployment iterations 1 and 2 created pre-parsed rows in PiXL.Parsed (ranges ~9.36M to ~14.7M, interleaved) that received .NET parsing but never received Phase 9–13 processing (Device/IP/Visit upserts). These rows exist in Parsed but have no corresponding Device, IP, or Visit records.
+
+**Remediation:** After backfill completes, run `ETL.usp_ProcessDimensions` over the affected ranges. Phase 10/11 handle duplicates safely (UPDATE+INSERT pattern from BUG-E1/E2/E3 fixes). Phase 13 has NOT EXISTS guard.
+
+### Conflict Resolutions
+
+| Conflict | Decision | Rationale |
+|----------|----------|-----------|
+| ETL proc self-healing vs .NET watermark management | Service manages watermark directly, proc only does Phase 9–13 | The proc's self-healing was designed for SQL-only execution. With .NET pre-parsing, the proc must operate on the exact range the service parsed, not auto-advance. |
+| `usp_ParseNewHits` vs separate `usp_ProcessDimensions` | Created separate proc | Modifying usp_ParseNewHits to accept @FromId/@ToId would break its standalone functionality. Separate proc is cleaner — each has one job. |
+| Header comment in ParsedBulkInsertService.cs | Left original ETA estimates in comments despite actual being better | Comments document design-time expectations. Actual results documented here in the implementation log. |
+
+### Decision: .NET Owns Parsing Going Forward
+
+The SQL scalar UDF approach (`dbo.GetQueryParam`) is permanently superseded for PiXL.Parsed population. The ETL proc retains its Phase 1–8D code with the NOT EXISTS + IF guard so it can still function as a standalone fallback, but the primary path is:
+
+1. **Backfill (current):** `ParsedBulkInsertService` reads Raw → parses in .NET → BulkCopy → Phase 9–13 proc
+2. **Live traffic (future):** `SqlBulkCopyWriterService` dual-writes to Raw + Parsed at Forge ingest time
+3. **Fallback:** `usp_ParseNewHits` can still be called manually for any rows the .NET path missed (NOT EXISTS guard prevents doubles)

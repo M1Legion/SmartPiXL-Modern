@@ -1,0 +1,37 @@
+-- Migration 62: Skip Phases 1–8D when Forge pre-parses PiXL.Parsed
+-- Deployed: 2026-02-27
+-- Purpose: ParsedBulkInsertService in the Forge writes to PiXL.Parsed
+--          directly using .NET span-based QS parsing (~1μs/row vs ~7ms/row
+--          in SQL scalar UDFs). The ETL proc detects pre-parsed rows and
+--          skips the 300+ GetQueryParam() calls, jumping straight to Phase 9.
+--
+-- Changes:
+--   Phase 1 INSERT: Added NOT EXISTS guard to skip pre-parsed rows
+--   Phases 2–8D:    Wrapped in IF @Inserted > 0 to skip when all rows pre-parsed
+--   Phase 9–13:     Unchanged (always runs — Device/IP/Visit upserts)
+--
+-- Backwards compatible: when no pre-parsed rows exist, @Inserted > 0 and
+-- all phases run exactly as before. Zero risk to existing functionality.
+--
+-- See ParsedRecordParser.cs and ParsedBulkInsertService.cs in SmartPiXL.Forge.
+-- See IMPLEMENTATION-LOG.md for architecture decision.
+
+-- The full proc is deployed via mssql_run_query in the same session.
+-- This file is the source-of-truth migration record.
+
+-- Key diff from migration 61:
+--
+--   Phase 1 WHERE clause changed from:
+--     FROM PiXL.Raw p WHERE p.Id > @LastId AND p.Id <= @MaxId;
+--   To:
+--     FROM PiXL.Raw p
+--     WHERE p.Id > @LastId AND p.Id <= @MaxId
+--       AND NOT EXISTS (SELECT 1 FROM PiXL.Parsed pp WHERE pp.SourceId = p.Id);
+--
+--   After SET @Inserted = @@ROWCOUNT, added:
+--     IF @Inserted > 0
+--     BEGIN
+--       ... Phases 2–8D unchanged ...
+--     END
+--
+-- No other changes to the proc body.

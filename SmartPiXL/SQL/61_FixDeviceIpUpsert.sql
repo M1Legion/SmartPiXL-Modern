@@ -1,4 +1,4 @@
--- Migration 61: Fix Device/IP upserts — MERGE eliminated, INSERT/UPDATE deployed
+-- Migration 61: Fix Device/IP upserts ï¿½ MERGE eliminated, INSERT/UPDATE deployed
 -- Deployed: 2026-02-25
 -- Fixes: BUG-E1 (Device missing MATCHED), BUG-E2 (IP HitCount), BUG-E3 (IP temporal)
 
@@ -398,7 +398,7 @@ BEGIN
         WHERE DeviceHash IS NOT NULL
         GROUP BY DeviceHash;
 
-        -- Update existing devices — clustered seek on UQ_PiXL_Device_Hash
+        -- Update existing devices ï¿½ clustered seek on UQ_PiXL_Device_Hash
         UPDATE d SET
             d.LastSeen  = CASE WHEN b.BatchLastSeen > d.LastSeen
                                THEN b.BatchLastSeen ELSE d.LastSeen END,
@@ -408,7 +408,7 @@ BEGIN
 
         SET @DevicesUpserted = @@ROWCOUNT;
 
-        -- Insert new devices — anti-semi-join on same clustered index
+        -- Insert new devices ï¿½ anti-semi-join on same clustered index
         INSERT INTO PiXL.Device (DeviceHash, FirstSeen, LastSeen, HitCount)
         SELECT b.DeviceHash, b.BatchFirstSeen, b.BatchLastSeen, b.BatchHitCount
         FROM #DeviceBatch b
@@ -440,7 +440,7 @@ BEGIN
         WHERE IPAddress IS NOT NULL
         GROUP BY IPAddress;
 
-        -- Update existing IPs — clustered seek on UQ_PiXL_IP_Address
+        -- Update existing IPs ï¿½ clustered seek on UQ_PiXL_IP_Address
         UPDATE ip SET
             ip.FirstSeen = CASE WHEN b.BatchFirstSeen < ip.FirstSeen
                                 THEN b.BatchFirstSeen ELSE ip.FirstSeen END,
@@ -452,7 +452,7 @@ BEGIN
 
         SET @IPsUpserted = @@ROWCOUNT;
 
-        -- Insert new IPs — anti-semi-join on same clustered index
+        -- Insert new IPs ï¿½ anti-semi-join on same clustered index
         INSERT INTO PiXL.IP (IPAddress, FirstSeen, LastSeen, HitCount)
         SELECT b.IPAddress, b.BatchFirstSeen, b.BatchLastSeen, b.BatchHitCount
         FROM #IpBatch b
