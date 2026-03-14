@@ -613,6 +613,20 @@ body::before {
 
 .pipe-arrow.dead::before { display: none; }
 
+.pipe-lag {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.58rem;
+  color: var(--yellow);
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(255,225,77,0.3);
+}
+.pipe-lag.ok { color: var(--green); text-shadow: 0 0 6px rgba(0,255,136,0.3); }
+.pipe-lag.warn { color: var(--yellow); }
+.pipe-lag.danger { color: var(--red); text-shadow: 0 0 6px rgba(255,45,85,0.3); }
+
 @keyframes arrowParticle {
   0% { left: -4px; opacity: 0; }
   10% { opacity: 1; }
@@ -1834,132 +1848,57 @@ body::before {
        ANALYTICS VIEW
        â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
   <div id="view-analytics" class="view-content">
-    <!-- Hero Cards -->
+    <!-- Hero Cards — Pipeline Metrics -->
     <div class="hero-grid" id="hero-grid">
-      <div class="hero-card" onclick="drillHero('total')"><div class="hero-label">TOTAL HITS</div><div class="hero-value" id="h-total">--</div><div class="hero-sub" id="h-total-sub"></div></div>
-      <div class="hero-card" onclick="drillHero('24h')"><div class="hero-label">LAST 24H</div><div class="hero-value" id="h-24h">--</div><div class="hero-sub" id="h-24h-sub"></div></div>
-      <div class="hero-card" onclick="drillHero('bots')"><div class="hero-label">BOTS DETECTED</div><div class="hero-value" id="h-bots">--</div><div class="hero-sub" id="h-bots-sub"></div></div>
-      <div class="hero-card" onclick="drillHero('botpct')"><div class="hero-label">BOT RATE</div><div class="hero-value" id="h-botpct">--</div><div class="hero-sub" id="h-botpct-sub"></div></div>
-      <div class="hero-card" onclick="drillHero('fp')"><div class="hero-label">UNIQUE FP</div><div class="hero-value" id="h-fp">--</div><div class="hero-sub" id="h-fp-sub"></div></div>
-      <div class="hero-card" onclick="drillHero('evasion')"><div class="hero-label">EVASION</div><div class="hero-value" id="h-evasion">--</div><div class="hero-sub" id="h-evasion-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">RAW HITS</div><div class="hero-value" id="h-raw">--</div><div class="hero-sub" id="h-raw-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">PARSED</div><div class="hero-value" id="h-parsed">--</div><div class="hero-sub" id="h-parsed-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">VISITS</div><div class="hero-value" id="h-visits">--</div><div class="hero-sub" id="h-visits-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">IP MATCHES</div><div class="hero-value" id="h-matches">--</div><div class="hero-sub" id="h-matches-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">MATCH RATE</div><div class="hero-value" id="h-rate">--</div><div class="hero-sub" id="h-rate-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">RESOLVED</div><div class="hero-value good" id="h-resolved">--</div><div class="hero-sub" id="h-resolved-sub"></div></div>
     </div>
 
-    <!-- Pipeline (full) -->
+    <!-- Full Pipeline Visualization -->
     <div class="pipeline" id="a-pipeline" style="margin-bottom:24px;">
-      <div class="pipe-node"><div class="pipe-node-label">RAW HITS</div><div class="pipe-node-value" id="a-pipe-raw">--</div></div>
+      <div class="pipe-node"><div class="pipe-node-label">RAW</div><div class="pipe-node-value" id="a-pipe-raw">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-raw-ts"></div></div>
+      <div class="pipe-arrow"><div class="pipe-lag" id="a-lag-parse"></div></div>
+      <div class="pipe-node"><div class="pipe-node-label">PARSED</div><div class="pipe-node-value" id="a-pipe-parsed">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-parsed-ts"></div></div>
       <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">ETL PARSE</div><div class="pipe-node-value" id="a-pipe-parsed">--</div></div>
+      <div class="pipe-node"><div class="pipe-node-label">VISITS</div><div class="pipe-node-value" id="a-pipe-visits">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-visits-ts"></div></div>
+      <div class="pipe-arrow"><div class="pipe-lag" id="a-lag-match"></div></div>
+      <div class="pipe-node"><div class="pipe-node-label">IP MATCH</div><div class="pipe-node-value" id="a-pipe-match">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-match-ts"></div></div>
       <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">VISITS</div><div class="pipe-node-value" id="a-pipe-visits">--</div></div>
-      <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">MATCH</div><div class="pipe-node-value" id="a-pipe-match">--</div></div>
-      <div class="pipe-arrow"></div>
-      <div class="pipe-node"><div class="pipe-node-label">RESOLVED</div><div class="pipe-node-value" id="a-pipe-resolved" style="color:var(--green);">--</div></div>
+      <div class="pipe-node"><div class="pipe-node-label">RESOLVED</div><div class="pipe-node-value" id="a-pipe-resolved" style="color:var(--green);">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-resolved-ts"></div></div>
     </div>
 
-    <!-- Hourly + Risk -->
+    <!-- Hourly Traffic + ETL Watermarks -->
     <div class="panel-grid">
       <div class="panel">
         <div class="panel-title">HOURLY TRAFFIC</div>
         <div class="chart-container" id="hourly-chart"><div class="loading">LOADING</div></div>
       </div>
       <div class="panel">
-        <div class="panel-title">RISK BREAKDOWN</div>
-        <div class="risk-list" id="risk-list"><div class="loading">LOADING</div></div>
+        <div class="panel-title">ETL WATERMARKS</div>
+        <div id="a-watermarks" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
     </div>
 
-    <!-- Live Feed (full, 30 hits) + Signals -->
-    <div class="panel-grid">
-      <div class="panel">
-        <div class="panel-title">LIVE FEED</div>
-        <div style="overflow-x:auto;">
-          <table class="feed-table">
-            <thead><tr><th>TIME</th><th>IP</th><th>THREAT</th><th>SCORE</th><th>PLATFORM</th><th>BROWSER</th><th>RESOLUTION</th><th>FINGERPRINT</th><th>SIGNALS</th></tr></thead>
-            <tbody id="a-feed-body"><tr><td colspan="9" class="loading">LOADING</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">TOP BOT SIGNALS</div>
-        <div class="signal-list" id="signal-list"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Evasion + Behavior + Fingerprints -->
-    <div class="panel-grid triple">
-      <div class="panel">
-        <div class="panel-title">EVASION COUNTERMEASURES</div>
-        <div class="evasion-grid" id="evasion-grid"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">BEHAVIORAL ANALYSIS</div>
-        <div class="behavior-compare" id="behavior-compare"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">FINGERPRINT CLUSTERS</div>
-        <div class="fp-cluster-list" id="fp-clusters"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Devices + ETL -->
+    <!-- Match Breakdown + Table Counts -->
     <div class="panel-grid half">
       <div class="panel">
-        <div class="panel-title">DEVICE BREAKDOWN</div>
-        <div id="device-breakdown"><div class="loading">LOADING</div></div>
+        <div class="panel-title">MATCH BREAKDOWN</div>
+        <div id="a-match-breakdown" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
       <div class="panel">
-        <div class="panel-title">ETL HEALTH</div>
-        <div id="a-etl-details" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
+        <div class="panel-title">TABLE COUNTS</div>
+        <div id="a-table-counts" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
     </div>
 
-    <!-- Sessions + Dead Internet -->
-    <div class="panel-grid half">
-      <div class="panel">
-        <div class="panel-title">SESSION ANALYSIS</div>
-        <div id="session-summary"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">DEAD INTERNET INDEX</div>
-        <div id="dead-internet"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Customer Quality + Cross-Customer -->
-    <div class="panel-grid half">
-      <div class="panel">
-        <div class="panel-title">CUSTOMER QUALITY</div>
-        <div id="customer-quality"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">CROSS-CUSTOMER INTEL</div>
-        <div id="cross-customer"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Impossible Travel + Device Lifecycle -->
-    <div class="panel-grid half">
-      <div class="panel">
-        <div class="panel-title">IMPOSSIBLE TRAVEL</div>
-        <div id="impossible-travel"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">DEVICE LIFECYCLE</div>
-        <div id="device-lifecycle"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Subnet Clusters + Device Hops -->
-    <div class="panel-grid half">
-      <div class="panel">
-        <div class="panel-title">SUBNET CLUSTERS</div>
-        <div id="subnet-clusters"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">DEVICE HOPS</div>
-        <div id="device-hops"><div class="loading">LOADING</div></div>
-      </div>
+    <!-- Company Match Breakdown — per-company match-type counts + entitlements -->
+    <div class="panel" style="margin-top:24px;">
+      <div class="panel-title">COMPANY MATCH BREAKDOWN <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; IP (included) vs Email (upgrade) vs Geo (upgrade)</span></div>
+      <div id="a-company-matches" style="font-size:0.78rem;max-height:400px;overflow-y:auto;"><div class="loading">LOADING</div></div>
     </div>
   </div>
 </div>
@@ -1999,6 +1938,7 @@ const API = {
   deviceHops:   () => fetchJson('/api/dash/device-hops'),
   subnets:      () => fetchJson('/api/dash/subnet-clusters'),
   pipeline:     () => fetchJson('/api/dash/pipeline'),
+  matchBreakdown: () => fetchJson('/api/dash/match-breakdown'),
   remediations: () => fetchJson('/api/dash/remediations'),
 };
 
@@ -2119,15 +2059,9 @@ function renderCachedData(view) {
     if (infra) { renderErrorLog(infra); renderPipelineTables(infra); renderInfraDetail(infra); }
     if (recent) renderOpsFeed(recent);
   } else if (view === 'analytics') {
-    if (health) { renderAnalyticsHero(health); updateAnalyticsBeacon(health); renderAnalyticsETL(health); }
+    if (health) updateAnalyticsBeacon(health);
+    if (lastData.pipeline) renderAnalyticsPipeline(lastData.pipeline);
     if (lastData.hourly) renderHourlyChart(lastData.hourly);
-    if (lastData.bots) renderRiskList(lastData.bots);
-    if (lastData.signals) renderSignals(lastData.signals);
-    if (lastData.evasion) renderEvasion(lastData.evasion);
-    if (lastData.behavior) renderBehavior(lastData.behavior);
-    if (recent) renderAnalyticsFeed(recent);
-    if (lastData.fingerprints) renderFingerprints(lastData.fingerprints);
-    if (lastData.devices) renderDevices(lastData.devices);
   }
 }
 
@@ -3234,45 +3168,63 @@ function drillHour(idx) {
 }
 
 // â”€â”€â”€ Analytics: Hero â”€â”€â”€
-function renderAnalyticsHero(h) {
-  if (!h) return;
+function renderAnalyticsPipeline(p) {
+  if (!p) return;
   const set = (id, val, sub) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = val;
+    if (el && val !== undefined) el.textContent = val;
     const subEl = document.getElementById(id + '-sub');
-    if (subEl && sub) subEl.textContent = sub;
+    if (subEl && sub !== undefined) subEl.textContent = sub;
   };
-  set('h-total', num(h.totalHits), `${num(h.hits_7d)} last 7d`);
-  set('h-24h', num(h.hits_24h), `${num(h.hits_1h)} last hour`);
-  set('h-bots', num(h.bots_24h), `${num(h.highRiskBots_24h)} high risk`);
+  set('h-raw', num(p.rawRows), `max ID ${num(p.maxRawId)}`);
+  set('h-parsed', num(p.parsedRows), `lag ${num(p.parseLag)}`);
+  set('h-visits', num(p.visitRows), `${num(p.uniqueIpsInVisits)} unique IPs`);
+  set('h-matches', num(p.ipMatchCount || 0), `${num(p.legacyMatchProcessed)} processed`);
 
-  const pct = h.botPct_24h || 0;
-  const pctEl = document.getElementById('h-botpct');
-  pctEl.textContent = pct.toFixed(1) + '%';
-  pctEl.className = 'hero-value' + (pct > 30 ? ' danger' : pct > 10 ? ' warn' : ' good');
-  document.getElementById('h-botpct-sub').textContent = `avg score ${(h.avgBotScore_24h||0).toFixed(1)}`;
+  const rate = p.legacyMatchProcessed > 0 ? (100 * (p.legacyMatchMatched || 0) / p.legacyMatchProcessed).toFixed(1) : '0.0';
+  const rateEl = document.getElementById('h-rate');
+  if (rateEl) { rateEl.textContent = rate + '%'; rateEl.className = 'hero-value' + (parseFloat(rate) > 10 ? ' good' : ' warn'); }
+  set('h-rate', undefined, `${num(p.legacyMatchMatched)} of ${num(p.legacyMatchProcessed)}`);
 
-  set('h-fp', num(h.uniqueFP_24h), `${num(h.uniqueFP_AllTime)} all time`);
+  const resolvedEl = document.getElementById('h-resolved');
+  if (resolvedEl) resolvedEl.textContent = num(p.matchesResolved);
+  set('h-resolved', undefined, `${num(p.matchesPending)} pending`);
 
-  const evEl = document.getElementById('h-evasion');
-  evEl.textContent = num(h.evasionDetected_AllTime);
-  evEl.className = 'hero-value' + (h.evasionDetected_AllTime > 0 ? ' warn' : ' good');
-  document.getElementById('h-evasion-sub').textContent = `${num(h.webDriverHits)} webdriver`;
+  // Pipeline bar
+  document.getElementById('a-pipe-raw').textContent = num(p.rawRows);
+  document.getElementById('a-pipe-parsed').textContent = num(p.parsedRows);
+  document.getElementById('a-pipe-visits').textContent = num(p.visitRows);
+  document.getElementById('a-pipe-match').textContent = num(p.matchRows);
+  const resEl = document.getElementById('a-pipe-resolved');
+  resEl.textContent = num(p.matchesResolved);
+  resEl.style.color = p.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
 
-  document.getElementById('a-pipe-raw').textContent = num(h.etL_TotalProcessed || h.totalHits);
-  document.getElementById('a-pipe-parsed').textContent = num(h.totalHits);
+  // Pipeline timestamps
+  const ts = (id, dt) => { const el = document.getElementById(id); if (el && dt) el.textContent = timeAgo(dt); };
+  ts('a-pipe-raw-ts', p.rawLatest);
+  ts('a-pipe-parsed-ts', p.parsedLatest);
+  ts('a-pipe-visits-ts', p.visitLatest);
+  ts('a-pipe-match-ts', p.legacyMatchLastRunAt);
+  ts('a-pipe-resolved-ts', p.matchLatest);
 
-  // Pipeline nodes (updated from infra if available)
-  const pipe = lastData.infra?.pipeline;
-  if (pipe?.isAvailable) {
-    document.getElementById('a-pipe-visits').textContent = num(pipe.visitRows);
-    document.getElementById('a-pipe-match').textContent = num(pipe.matchRows);
-    document.getElementById('a-pipe-resolved').textContent = num(pipe.matchesResolved);
-    document.getElementById('a-pipe-resolved').style.color = pipe.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
-  }
+  // Pipeline lag indicators
+  const lagEl = (id, lag) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (lag == null || lag === 0) { el.textContent = '0'; el.className = 'pipe-lag ok'; }
+    else if (lag < 10000) { el.textContent = num(lag); el.className = 'pipe-lag ok'; }
+    else if (lag < 1000000) { el.textContent = num(lag); el.className = 'pipe-lag warn'; }
+    else { el.textContent = num(lag); el.className = 'pipe-lag danger'; }
+  };
+  lagEl('a-lag-parse', p.parseLag);
+  lagEl('a-lag-match', p.legacyMatchLag);
+
+  // Watermarks, breakdown, table counts
+  renderWatermarks(p);
+  renderMatchBreakdown(p);
+  renderTableCounts(p);
 }
 
-// â”€â”€â”€ Analytics: Beacon â”€â”€â”€
 function updateAnalyticsBeacon(h) {
   if (!h) return;
   const beacon = document.getElementById('beacon');
@@ -3284,32 +3236,122 @@ function updateAnalyticsBeacon(h) {
     statusEl.style.color = '';
   } else if (secSince < 3600) {
     beacon.className = 'beacon-dot warn';
-    statusEl.textContent = 'IDLE â€” ' + formatDuration(secSince);
+    statusEl.textContent = 'IDLE - ' + formatDuration(secSince);
     statusEl.style.color = 'var(--yellow)';
   } else {
     beacon.className = 'beacon-dot danger';
-    statusEl.textContent = 'STALE â€” ' + formatDuration(secSince);
+    statusEl.textContent = 'STALE - ' + formatDuration(secSince);
     statusEl.style.color = 'var(--red)';
   }
 }
 
-// â”€â”€â”€ Analytics: ETL Details â”€â”€â”€
-function renderAnalyticsETL(h) {
-  const el = document.getElementById('a-etl-details');
-  if (!h) return;
-  const pipe = lastData.infra?.pipeline;
-  el.innerHTML = `
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseTotalProcessed || h.etL_TotalProcessed||0)}</div><div class="evasion-lbl">ROWS PROCESSED</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(pipe?.parseWatermark || h.etL_Watermark||0)}</div><div class="evasion-lbl">WATERMARK ID</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(h.totalHits)}</div><div class="evasion-lbl">PARSED ROWS</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(pipe?.visitRows||0)}</div><div class="evasion-lbl">VISITS</div></div>
-      <div class="evasion-card"><div class="evasion-val" style="color:var(--green)">${num(pipe?.matchesResolved||0)}</div><div class="evasion-lbl">MATCHED</div></div>
-      <div class="evasion-card"><div class="evasion-val">${num(pipe?.deviceRows||0)}</div><div class="evasion-lbl">DEVICES</div></div>
-    </div>
-    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Parse: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (h.etL_LastRunAt ? timeAgo(h.etL_LastRunAt) : '--')} Â· Match: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
-  `;
+function renderWatermarks(p) {
+  const el = document.getElementById('a-watermarks');
+  if (!el || !p) return;
+  const wmRow = (name, wm, total, matched, lastRun, lag) => {
+    const lagColor = lag === 0 ? 'var(--green)' : lag < 10000 ? 'var(--green)' : lag < 1000000 ? 'var(--yellow)' : 'var(--red)';
+    return `<tr>
+      <td style="color:var(--cyan)">${name}</td>
+      <td>${num(wm || 0)}</td>
+      <td>${num(total || 0)}</td>
+      <td>${matched != null ? num(matched) : '--'}</td>
+      <td>${lastRun ? timeAgo(lastRun) : '--'}</td>
+      <td style="color:${lagColor};font-weight:600">${num(lag || 0)}</td>
+    </tr>`;
+  };
+  el.innerHTML = `<table class="feed-table" style="font-size:0.78rem;">
+    <thead><tr><th>PROCESS</th><th>WATERMARK</th><th>PROCESSED</th><th>MATCHED</th><th>LAST RUN</th><th>LAG</th></tr></thead>
+    <tbody>
+      ${wmRow('ParseNewHits', p.parseWatermark, p.parseTotalProcessed, null, p.parseLastRunAt, p.parseLag)}
+      ${wmRow('MatchVisits', p.emailMatchWatermark, p.emailMatchProcessed, p.emailMatchMatched, p.emailMatchLastRunAt, p.emailMatchLag)}
+      ${wmRow('MatchLegacyVisits', p.legacyMatchWatermark, p.legacyMatchProcessed, p.legacyMatchMatched, p.legacyMatchLastRunAt, p.legacyMatchLag)}
+      ${wmRow('MatchGeoVisits', p.geoMatchWatermark, p.geoMatchProcessed, p.geoMatchMatched, p.geoMatchLastRunAt, p.geoMatchLag)}
+    </tbody>
+  </table>`;
 }
+
+function renderMatchBreakdown(p) {
+  const el = document.getElementById('a-match-breakdown');
+  if (!el || !p) return;
+  const ipRate = p.ipMatchCount > 0 ? (100 * (p.ipResolved || 0) / p.ipMatchCount).toFixed(1) : '0.0';
+  const emailRate = p.emailMatchCount > 0 ? (100 * (p.emailResolved || 0) / p.emailMatchCount).toFixed(1) : '0.0';
+  const totalRate = p.matchRows > 0 ? (100 * (p.matchesResolved || 0) / p.matchRows).toFixed(1) : '0.0';
+  el.innerHTML = `
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom:12px;">
+      <div class="evasion-card"><div class="evasion-val">${num(p.ipMatchCount||0)}</div><div class="evasion-lbl">IP MATCHES</div></div>
+      <div class="evasion-card"><div class="evasion-val" style="color:var(--green)">${num(p.ipResolved||0)}</div><div class="evasion-lbl">IP RESOLVED (${ipRate}%)</div></div>
+      <div class="evasion-card"><div class="evasion-val">${num(p.emailMatchCount||0)}</div><div class="evasion-lbl">EMAIL MATCHES</div></div>
+      <div class="evasion-card"><div class="evasion-val" style="color:var(--green)">${num(p.emailResolved||0)}</div><div class="evasion-lbl">EMAIL RESOLVED (${emailRate}%)</div></div>
+    </div>
+    <div style="text-align:center;font-size:0.78rem;color:var(--text-dim);border-top:1px solid var(--panel-border);padding-top:8px;">
+      TOTAL: <span style="color:var(--green)">${num(p.matchesResolved||0)}</span> resolved / <span style="color:var(--text)">${num(p.matchRows||0)}</span> total = <span style="color:var(--cyan)">${totalRate}%</span>
+      &nbsp;&middot;&nbsp; <span style="color:var(--orange)">${num(p.matchesPending||0)}</span> pending
+      &nbsp;&middot;&nbsp; <span style="color:var(--cyan)">${num(p.uniqueIndividuals||0)}</span> unique individuals
+    </div>`;
+}
+
+function renderTableCounts(p) {
+  const el = document.getElementById('a-table-counts');
+  if (!el || !p) return;
+  const rows = [
+    ['PiXL.Raw', p.rawRows, p.rawLatest],
+    ['PiXL.Parsed', p.parsedRows, p.parsedLatest],
+    ['PiXL.Visit', p.visitRows, p.visitLatest],
+    ['PiXL.Match', p.matchRows, p.matchLatest],
+    ['PiXL.Device', p.deviceRows, p.deviceLatest],
+    ['PiXL.IP', p.ipRows, p.ipLatest],
+  ];
+  el.innerHTML = `<table class="feed-table" style="font-size:0.78rem;">
+    <thead><tr><th>TABLE</th><th>ROWS</th><th>LATEST</th></tr></thead>
+    <tbody>${rows.map(([name, count, latest]) =>
+      `<tr><td style="color:var(--cyan)">${name}</td><td>${num(count||0)}</td><td>${latest ? timeAgo(latest) : '--'}</td></tr>`
+    ).join('')}</tbody>
+  </table>`;
+}
+
+function renderCompanyMatches(data) {
+  const el = document.getElementById('a-company-matches');
+  if (!el) return;
+  if (!data || !data.length) { el.innerHTML = '<div class="loading" style="color:var(--text-dim)">NO DATA</div>'; return; }
+
+  const badge = (entitled, label) => entitled
+    ? `<span style="color:var(--green);font-size:0.7rem">&#x2713; ${label}</span>`
+    : `<span style="color:var(--text-dim);font-size:0.7rem">&#x2717; ${label}</span>`;
+
+  const rows = data.map(c => {
+    const legacy = c.isLegacy;
+    const ip = c.ipMatches || 0;
+    const email = c.emailMatches || 0;
+    const geo = c.geoEnriched || 0;
+    const ipRes = c.ipResolved || 0;
+    const emailRes = c.emailResolved || 0;
+    const nameStyle = legacy ? 'color:var(--orange)' : 'color:var(--cyan)';
+    const tag = legacy ? ' <span style="background:var(--orange);color:#000;padding:1px 5px;border-radius:3px;font-size:0.65rem;font-weight:700">LEGACY</span>' : '';
+    return `<tr>
+      <td style="${nameStyle}">${c.companyName || c.companyID}${tag}</td>
+      <td style="text-align:right">${num(ip)}</td>
+      <td style="text-align:right;color:var(--green)">${num(ipRes)}</td>
+      <td style="text-align:right;${email > 0 && !legacy ? 'color:var(--cyan)' : 'color:var(--text-dim)'}">${num(email)}</td>
+      <td style="text-align:right;${emailRes > 0 && !legacy ? 'color:var(--green)' : 'color:var(--text-dim)'}">${num(emailRes)}</td>
+      <td style="text-align:right;${geo > 0 ? 'color:var(--magenta)' : 'color:var(--text-dim)'}">${num(geo)}</td>
+      <td style="text-align:center;font-size:0.72rem">${badge(c.entitledIp, 'IP')} ${badge(c.entitledEmail, 'Email')} ${badge(c.entitledGeo, 'Geo')}</td>
+    </tr>`;
+  });
+
+  el.innerHTML = `<table class="feed-table" style="font-size:0.78rem">
+    <thead><tr>
+      <th>COMPANY</th>
+      <th style="text-align:right">IP MATCHES</th>
+      <th style="text-align:right">IP RESOLVED</th>
+      <th style="text-align:right">EMAIL MATCHES</th>
+      <th style="text-align:right">EMAIL RESOLVED</th>
+      <th style="text-align:right">GEO ENRICHED</th>
+      <th style="text-align:center">ENTITLEMENTS</th>
+    </tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table>`;
+}
+
 
 // â”€â”€â”€ Analytics: Hourly Chart â”€â”€â”€
 function renderHourlyChart(data) {
@@ -3665,41 +3707,13 @@ const OPS_STEPS = [
 // Analytics view: 10 sequential calls â€” each section pops in as data arrives
 const ANALYTICS_STEPS = [
   { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
-    render() { renderAnalyticsHero(lastData.health); updateAnalyticsBeacon(lastData.health); }},
-  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
-    render() { renderAnalyticsHero(lastData.health); renderAnalyticsETL(lastData.health); }},
+    render() { updateAnalyticsBeacon(lastData.health); }},
+  { name: 'PIPELINE', contestant: 'CLU', fn: API.pipeline, key: 'pipeline',
+    render() { renderAnalyticsPipeline(lastData.pipeline); }},
   { name: 'HOURLY', contestant: 'GEM', fn: () => API.hourly(48), key: 'hourly',
     render() { renderHourlyChart(lastData.hourly); }},
-  { name: 'BOTS', contestant: 'RINZLER', fn: API.bots, key: 'bots',
-    render() { renderRiskList(lastData.bots); }},
-  { name: 'SIGNALS', contestant: 'SARK', fn: API.signals, key: 'signals',
-    render() { renderSignals(lastData.signals); }},
-  { name: 'EVASION', contestant: 'CASTOR', fn: API.evasion, key: 'evasion',
-    render() { renderEvasion(lastData.evasion); }},
-  { name: 'BEHAVIOR', contestant: 'YORI', fn: API.behavior, key: 'behavior',
-    render() { renderBehavior(lastData.behavior); }},
-  { name: 'FEED', contestant: 'QUORRA', fn: API.recent, key: 'recent',
-    render() { renderAnalyticsFeed(lastData.recent); }},
-  { name: 'FP', contestant: 'RAM', fn: API.fingerprints, key: 'fingerprints',
-    render() { renderFingerprints(lastData.fingerprints); }},
-  { name: 'DEVICES', contestant: 'FLYNN', fn: API.devices, key: 'devices',
-    render() { renderDevices(lastData.devices); }},
-  { name: 'SESSIONS', contestant: 'DUMONT', fn: API.sessions, key: 'sessions',
-    render() { renderSessions(lastData.sessions); }},
-  { name: 'DEAD-NET', contestant: 'BECK', fn: API.deadInternet, key: 'deadInternet',
-    render() { renderDeadInternet(lastData.deadInternet); }},
-  { name: 'QUALITY', contestant: 'CYRUS', fn: API.custQuality, key: 'custQuality',
-    render() { renderCustomerQuality(lastData.custQuality); }},
-  { name: 'CROSS-CX', contestant: 'PAIGE', fn: API.crossCustomer, key: 'crossCustomer',
-    render() { renderCrossCustomer(lastData.crossCustomer); }},
-  { name: 'TRAVEL', contestant: 'ABLE', fn: API.impossTravel, key: 'impossTravel',
-    render() { renderImpossibleTravel(lastData.impossTravel); }},
-  { name: 'LIFECYCLE', contestant: 'ISO', fn: API.deviceLife, key: 'deviceLife',
-    render() { renderDeviceLifecycle(lastData.deviceLife); }},
-  { name: 'HOPS', contestant: 'DYSON', fn: API.deviceHops, key: 'deviceHops',
-    render() { renderDeviceHops(lastData.deviceHops); }},
-  { name: 'SUBNETS', contestant: 'CROM', fn: API.subnets, key: 'subnets',
-    render() { renderSubnets(lastData.subnets); }},
+  { name: 'MATCHES', contestant: 'QUORRA', fn: API.matchBreakdown, key: 'matchBreakdown',
+    render() { renderCompanyMatches(lastData.matchBreakdown); }},
 ];
 
 async function runPipeline(steps) {

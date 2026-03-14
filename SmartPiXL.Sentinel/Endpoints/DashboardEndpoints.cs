@@ -274,6 +274,16 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
+        // MATCH BREAKDOWN — Per-company match-type counts + entitlements
+        // ====================================================================
+        app.MapGet("/api/dash/match-breakdown", async (HttpContext ctx) =>
+        {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
+            await QueryViewAsync(ctx, settings.ConnectionString,
+                "EXEC usp_Dash_MatchBreakdown");
+        });
+
+        // ====================================================================
         // REMEDIATION ENDPOINTS â€” View, approve, skip remediations
         // ====================================================================
 

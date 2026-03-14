@@ -1894,6 +1894,12 @@ body::before {
         <div id="a-table-counts" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
     </div>
+
+    <!-- Company Match Breakdown — per-company match-type counts + entitlements -->
+    <div class="panel" style="margin-top:24px;">
+      <div class="panel-title">COMPANY MATCH BREAKDOWN <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; IP (included) vs Email (upgrade) vs Geo (upgrade)</span></div>
+      <div id="a-company-matches" style="font-size:0.78rem;max-height:400px;overflow-y:auto;"><div class="loading">LOADING</div></div>
+    </div>
   </div>
 </div>
 
@@ -1932,6 +1938,7 @@ const API = {
   deviceHops:   () => fetchJson('/api/dash/device-hops'),
   subnets:      () => fetchJson('/api/dash/subnet-clusters'),
   pipeline:     () => fetchJson('/api/dash/pipeline'),
+  matchBreakdown: () => fetchJson('/api/dash/match-breakdown'),
   remediations: () => fetchJson('/api/dash/remediations'),
 };
 
@@ -3302,6 +3309,49 @@ function renderTableCounts(p) {
   </table>`;
 }
 
+function renderCompanyMatches(data) {
+  const el = document.getElementById('a-company-matches');
+  if (!el) return;
+  if (!data || !data.length) { el.innerHTML = '<div class="loading" style="color:var(--text-dim)">NO DATA</div>'; return; }
+
+  const badge = (entitled, label) => entitled
+    ? `<span style="color:var(--green);font-size:0.7rem">&#x2713; ${label}</span>`
+    : `<span style="color:var(--text-dim);font-size:0.7rem">&#x2717; ${label}</span>`;
+
+  const rows = data.map(c => {
+    const legacy = c.isLegacy;
+    const ip = c.ipMatches || 0;
+    const email = c.emailMatches || 0;
+    const geo = c.geoEnriched || 0;
+    const ipRes = c.ipResolved || 0;
+    const emailRes = c.emailResolved || 0;
+    const nameStyle = legacy ? 'color:var(--orange)' : 'color:var(--cyan)';
+    const tag = legacy ? ' <span style="background:var(--orange);color:#000;padding:1px 5px;border-radius:3px;font-size:0.65rem;font-weight:700">LEGACY</span>' : '';
+    return `<tr>
+      <td style="${nameStyle}">${c.companyName || c.companyID}${tag}</td>
+      <td style="text-align:right">${num(ip)}</td>
+      <td style="text-align:right;color:var(--green)">${num(ipRes)}</td>
+      <td style="text-align:right;${email > 0 && !legacy ? 'color:var(--cyan)' : 'color:var(--text-dim)'}">${num(email)}</td>
+      <td style="text-align:right;${emailRes > 0 && !legacy ? 'color:var(--green)' : 'color:var(--text-dim)'}">${num(emailRes)}</td>
+      <td style="text-align:right;${geo > 0 ? 'color:var(--magenta)' : 'color:var(--text-dim)'}">${num(geo)}</td>
+      <td style="text-align:center;font-size:0.72rem">${badge(c.entitledIp, 'IP')} ${badge(c.entitledEmail, 'Email')} ${badge(c.entitledGeo, 'Geo')}</td>
+    </tr>`;
+  });
+
+  el.innerHTML = `<table class="feed-table" style="font-size:0.78rem">
+    <thead><tr>
+      <th>COMPANY</th>
+      <th style="text-align:right">IP MATCHES</th>
+      <th style="text-align:right">IP RESOLVED</th>
+      <th style="text-align:right">EMAIL MATCHES</th>
+      <th style="text-align:right">EMAIL RESOLVED</th>
+      <th style="text-align:right">GEO ENRICHED</th>
+      <th style="text-align:center">ENTITLEMENTS</th>
+    </tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table>`;
+}
+
 
 // â”€â”€â”€ Analytics: Hourly Chart â”€â”€â”€
 function renderHourlyChart(data) {
@@ -3662,6 +3712,8 @@ const ANALYTICS_STEPS = [
     render() { renderAnalyticsPipeline(lastData.pipeline); }},
   { name: 'HOURLY', contestant: 'GEM', fn: () => API.hourly(48), key: 'hourly',
     render() { renderHourlyChart(lastData.hourly); }},
+  { name: 'MATCHES', contestant: 'QUORRA', fn: API.matchBreakdown, key: 'matchBreakdown',
+    render() { renderCompanyMatches(lastData.matchBreakdown); }},
 ];
 
 async function runPipeline(steps) {
