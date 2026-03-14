@@ -1,13 +1,16 @@
 -- ============================================================================
 -- Migration 69: Email Match Gating + Match Type Visibility
 --
--- 1. Set MatchEmail = 0 for legacy PiXLs (they fire image pixels, not JS, so 
---    they can't collect email — plus they don't pay for email resolution)
--- 2. Update usp_MatchVisits to gate on PiXL.Settings.MatchEmail and exclude
---    legacy PiXLs from email-based identity resolution
+-- All current PiXLs are legacy (modern SmartPiXL platform not launched yet).
+-- PiXLLegacy IS NOT NULL = Xavier-era legacy (oldest tier, 204 PiXLs).
+-- The rest are current-platform legacy (5,474 PiXLs).
+-- None have email matching today — MatchEmail will be enabled per-PiXL
+-- when the modern platform launches and clients upgrade.
+--
+-- 1. Set MatchEmail = 0 for ALL PiXLs
+-- 2. Update usp_MatchVisits to gate on PiXL.Settings.MatchEmail
 -- 3. Create usp_Dash_MatchBreakdown — per-company match-type counts with
---    entitlement flags so legacy clients see what they pay for vs. what
---    each match type would provide if they upgraded
+--    entitlement flags showing current vs. available uplift
 -- ============================================================================
 
 SET NOCOUNT ON;
@@ -15,17 +18,16 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Phase 1: Disable email matching for all legacy PiXLs
+-- Phase 1: Disable email matching for ALL PiXLs (no modern platform yet)
 -- ════════════════════════════════════════════════════════════════════════════
-DECLARE @LegacyCount INT;
+DECLARE @UpdatedCount INT;
 
 UPDATE PiXL.Settings
 SET MatchEmail = 0
-WHERE PiXLLegacy IS NOT NULL
-  AND MatchEmail = 1;
+WHERE MatchEmail = 1;
 
-SET @LegacyCount = @@ROWCOUNT;
-PRINT '>> Phase 1: Set MatchEmail=0 for ' + CAST(@LegacyCount AS VARCHAR) + ' legacy PiXLs';
+SET @UpdatedCount = @@ROWCOUNT;
+PRINT '>> Phase 1: Set MatchEmail=0 for ' + CAST(@UpdatedCount AS VARCHAR) + ' PiXLs (all legacy — modern platform not launched)';
 GO
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -33,8 +35,7 @@ GO
 --
 -- Changes from original:
 --   a) JOIN to PiXL.Settings — gate on MatchEmail = 1
---   b) Exclude legacy PiXLs (PiXLLegacy IS NOT NULL)
---   c) Both checks ensure legacy clients never get email match rows
+--   b) MatchEmail = 0 for all current PiXLs; only future modern PiXLs get 1
 -- ════════════════════════════════════════════════════════════════════════════
 PRINT '>> Phase 2: Rebuilding ETL.usp_MatchVisits with Settings gating...'
 GO
@@ -89,10 +90,8 @@ BEGIN
       AND v.MatchEmail IS NOT NULL
       AND LEN(v.MatchEmail) > 5
       AND v.MatchEmail LIKE '%_@_%.__%'
-      -- Gate: PiXL must have email matching enabled (default=1 for modern)
-      AND ISNULL(s.MatchEmail, 1) = 1
-      -- Belt & suspenders: exclude legacy PiXLs even if MatchEmail somehow = 1
-      AND s.PiXLLegacy IS NULL;
+      -- Gate: PiXL must have email matching enabled
+      AND ISNULL(s.MatchEmail, 0) = 1;
 
     DECLARE @CandidateCount INT = @@ROWCOUNT;
 
@@ -201,8 +200,8 @@ GO
 -- Phase 3: Match Breakdown Dashboard SP
 --
 -- Returns per-company match-type counts with entitlement flags.
--- Legacy clients see: IP matches (entitled) + email/geo counts (uplift).
--- Modern clients see: all match types (entitled).
+-- All current PiXLs are legacy. IsXavierLegacy distinguishes the oldest tier.
+-- Entitlements read directly from Settings (MatchEmail=0 for all current PiXLs).
 -- ════════════════════════════════════════════════════════════════════════════
 PRINT '>> Phase 3: Creating usp_Dash_MatchBreakdown...'
 GO
@@ -212,14 +211,16 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Per-company match counts by type, with entitlement flags
+    -- All current PiXLs are legacy (modern platform not launched yet).
+    -- PiXLLegacy IS NOT NULL = Xavier-era legacy (oldest tier).
+    -- MatchEmail = 0 for all current PiXLs; will be 1 only for future modern PiXLs.
     SELECT
         c.CompanyID,
         c.CompanyName,
 
-        -- Is this company legacy-only? (any PiXL has PiXLLegacy set)
+        -- Xavier-era legacy flag (oldest tier)
         CAST(CASE WHEN MAX(CASE WHEN s.PiXLLegacy IS NOT NULL THEN 1 ELSE 0 END) = 1
-             THEN 1 ELSE 0 END AS BIT) AS IsLegacy,
+             THEN 1 ELSE 0 END AS BIT) AS IsXavierLegacy,
 
         -- Match counts by type
         SUM(CASE WHEN m.MatchType = 'ip'    THEN 1 ELSE 0 END)   AS IpMatches,
@@ -232,13 +233,9 @@ BEGIN
         -- Geo-enriched count (ip matches resolved via geo proximity)
         SUM(CASE WHEN m.MatchType = 'ip' AND m.ConfidenceScore IS NOT NULL THEN 1 ELSE 0 END) AS GeoEnriched,
 
-        -- Entitlement flags (what this company pays for)
-        -- Legacy companies are NOT entitled to email matching
-        CAST(MAX(CAST(ISNULL(s.MatchIP, 1) AS INT)) AS BIT)    AS EntitledIp,
-        CAST(CASE
-            WHEN MAX(CASE WHEN s.PiXLLegacy IS NOT NULL THEN 1 ELSE 0 END) = 1 THEN 0
-            ELSE MAX(CAST(ISNULL(s.MatchEmail, 1) AS INT))
-        END AS BIT) AS EntitledEmail,
+        -- Entitlement flags from Settings (currently all legacy = IP only)
+        CAST(MAX(CAST(ISNULL(s.MatchIP, 1) AS INT)) AS BIT) AS EntitledIp,
+        CAST(MAX(CAST(ISNULL(s.MatchEmail, 0) AS INT)) AS BIT) AS EntitledEmail,
         CAST(MAX(CAST(ISNULL(s.MatchGeoSupplemental, 0) AS INT)) AS BIT) AS EntitledGeo,
 
         -- Total hits for context
@@ -246,8 +243,7 @@ BEGIN
         COUNT(*)        AS TotalMatchRows
     FROM PiXL.Company c
     JOIN PiXL.Settings s ON s.CompanyId = c.CompanyID
-    LEFT JOIN PiXL.Match m
-        ON m.CompanyID = c.CompanyID
+    LEFT JOIN PiXL.Match m ON m.CompanyID = c.CompanyID
     WHERE c.IsActive = 1
     GROUP BY c.CompanyID, c.CompanyName
     HAVING COUNT(m.MatchId) > 0
