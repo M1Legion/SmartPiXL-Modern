@@ -373,14 +373,15 @@ public sealed class InfraHealthService : IDisposable
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                item.TestRows = reader.IsDBNull(reader.GetOrdinal("TestRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("TestRows")));
+                // Column names must match usp_Dash_PipelineHealth output (updated in migration 65)
+                item.TestRows = reader.IsDBNull(reader.GetOrdinal("RawRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("RawRows")));
                 item.ParsedRows = reader.IsDBNull(reader.GetOrdinal("ParsedRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParsedRows")));
                 item.DeviceRows = reader.IsDBNull(reader.GetOrdinal("DeviceRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("DeviceRows")));
                 item.IpRows = reader.IsDBNull(reader.GetOrdinal("IpRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("IpRows")));
                 item.VisitRows = reader.IsDBNull(reader.GetOrdinal("VisitRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("VisitRows")));
                 item.MatchRows = reader.IsDBNull(reader.GetOrdinal("MatchRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchRows")));
 
-                item.MaxTestId = reader.IsDBNull(reader.GetOrdinal("MaxTestId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxTestId")));
+                item.MaxTestId = reader.IsDBNull(reader.GetOrdinal("MaxRawId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxRawId")));
                 item.MaxVisitId = reader.IsDBNull(reader.GetOrdinal("MaxVisitId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxVisitId")));
                 item.MaxMatchId = reader.IsDBNull(reader.GetOrdinal("MaxMatchId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxMatchId")));
 
@@ -388,19 +389,20 @@ public sealed class InfraHealthService : IDisposable
                 item.ParseTotalProcessed = reader.IsDBNull(reader.GetOrdinal("ParseTotalProcessed")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("ParseTotalProcessed")));
                 item.ParseLastRunAt = reader.IsDBNull(reader.GetOrdinal("ParseLastRunAt")) ? null : reader.GetDateTime(reader.GetOrdinal("ParseLastRunAt"));
 
-                item.MatchWatermark = reader.IsDBNull(reader.GetOrdinal("MatchWatermark")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchWatermark")));
-                item.MatchTotalProcessed = reader.IsDBNull(reader.GetOrdinal("MatchTotalProcessed")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchTotalProcessed")));
-                item.MatchTotalMatched = reader.IsDBNull(reader.GetOrdinal("MatchTotalMatched")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MatchTotalMatched")));
-                item.MatchLastRunAt = reader.IsDBNull(reader.GetOrdinal("MatchLastRunAt")) ? null : reader.GetDateTime(reader.GetOrdinal("MatchLastRunAt"));
+                // Use LegacyMatch watermark as the primary match indicator for infra health
+                item.MatchWatermark = reader.IsDBNull(reader.GetOrdinal("LegacyMatchWatermark")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("LegacyMatchWatermark")));
+                item.MatchTotalProcessed = reader.IsDBNull(reader.GetOrdinal("LegacyMatchProcessed")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("LegacyMatchProcessed")));
+                item.MatchTotalMatched = reader.IsDBNull(reader.GetOrdinal("LegacyMatchMatched")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("LegacyMatchMatched")));
+                item.MatchLastRunAt = reader.IsDBNull(reader.GetOrdinal("LegacyMatchLastRunAt")) ? null : reader.GetDateTime(reader.GetOrdinal("LegacyMatchLastRunAt"));
 
                 item.MatchesResolved = reader.IsDBNull(reader.GetOrdinal("MatchesResolved")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchesResolved")));
                 item.MatchesPending = reader.IsDBNull(reader.GetOrdinal("MatchesPending")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchesPending")));
-                item.VisitsWithEmail = reader.IsDBNull(reader.GetOrdinal("VisitsWithEmail")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("VisitsWithEmail")));
+                item.VisitsWithEmail = reader.IsDBNull(reader.GetOrdinal("UniqueIndividuals")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("UniqueIndividuals")));
 
                 item.ParseLag = reader.IsDBNull(reader.GetOrdinal("ParseLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParseLag")));
-                item.MatchLag = reader.IsDBNull(reader.GetOrdinal("MatchLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchLag")));
+                item.MatchLag = reader.IsDBNull(reader.GetOrdinal("LegacyMatchLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("LegacyMatchLag")));
 
-                item.TestLatest = reader.IsDBNull(reader.GetOrdinal("TestLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("TestLatest"));
+                item.TestLatest = reader.IsDBNull(reader.GetOrdinal("RawLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("RawLatest"));
                 item.ParsedLatest = reader.IsDBNull(reader.GetOrdinal("ParsedLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("ParsedLatest"));
                 item.DeviceLatest = reader.IsDBNull(reader.GetOrdinal("DeviceLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("DeviceLatest"));
                 item.IpLatest = reader.IsDBNull(reader.GetOrdinal("IpLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("IpLatest"));
@@ -555,7 +557,7 @@ public sealed class InfraHealthService : IDisposable
         if (recentErrors.HasRecentErrors) return "degraded";
         if (app.WorkingSetMB > 500) return "degraded";
         if (dataFlow.QueueDepth > 100) return "degraded";
-        if (dataFlow.EtlLag > 100) return "degraded";
+        if (dataFlow.EtlLag > 10000) return "degraded";
 
         return "healthy";
     }

@@ -104,7 +104,7 @@ public static class DashboardEndpoints
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
             await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP (@N) * FROM vw_Dash_HourlyRollup ORDER BY HourBucket DESC",
+                "EXEC usp_Dash_HourlyRollup @Hours = @N",
                 new SqlParameter("@N", hours));
         });
 
