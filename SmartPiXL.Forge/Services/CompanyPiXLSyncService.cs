@@ -104,11 +104,11 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         {
             try
             {
+                await RunSyncAsync(stoppingToken);
+
                 var delay = TimeSpan.FromHours(Math.Max(1, _settings.SyncIntervalHours));
                 _logger.Info($"CompanyPiXLSync: next sync in {delay.TotalHours:F1}h");
                 await Task.Delay(delay, stoppingToken);
-
-                await RunSyncAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {

@@ -249,12 +249,19 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
     /// Graceful shutdown: signals channel completion, cancels the writer loop,
     /// waits up to 5 seconds for the final drain, then disposes the CTS.
     /// Called from Program.cs via the ApplicationStopping lifetime hook.
+    /// Guard against double-disposal: IIS in-process hosting may call this
+    /// via the DI container after ApplicationStopping already triggered it.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return; // Already disposed — nothing to do
+
         _channel.Writer.TryComplete();
-        await _cts.CancelAsync();
-        
+
+        try { await _cts.CancelAsync(); }
+        catch (ObjectDisposedException) { return; }
+
         try
         {
             await _writerTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -263,7 +270,14 @@ public sealed class FileTrackingLogger : ITrackingLogger, IAsyncDisposable
         {
             // Writer didn't finish in time — accept possible data loss
         }
-        
-        _cts.Dispose();
+        catch (ObjectDisposedException)
+        {
+            // CTS disposed between CancelAsync and here — safe to ignore
+        }
+
+        try { _cts.Dispose(); }
+        catch (ObjectDisposedException) { /* already gone */ }
     }
+
+    private int _disposed;
 }

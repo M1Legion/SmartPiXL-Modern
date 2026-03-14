@@ -117,10 +117,10 @@ public sealed class DatabaseWriterService : BackgroundService
     /// </summary>
     internal static readonly string[] ColumnNames =
     [
-        "CompanyID",    // [0] nvarchar — client identifier from URL path
-        "PiXLID",       // [1] nvarchar — campaign/pixel identifier from URL path
+        "CompanyID",    // [0] int — client identifier from URL path (null if non-integer)
+        "PiXLID",       // [1] int — campaign/pixel identifier from URL path (null if non-integer)
         "IPAddress",    // [2] nvarchar — real client IP (after proxy header extraction)
-        "RequestPath",  // [3] nvarchar — full URL path (e.g., /ACME/summer2025_SMART.GIF)
+        "RequestPath",  // [3] nvarchar — full URL path (e.g., /12345/1_SMART.GIF)
         "QueryString",  // [4] nvarchar(max) — all ~90 JS-collected parameters
         "HeadersJson",  // [5] nvarchar(max) — JSON object of captured HTTP headers
         "UserAgent",    // [6] nvarchar(2000) — truncated User-Agent string
@@ -607,8 +607,8 @@ public sealed class DatabaseWriterService : BackgroundService
             var d = batch[_index];
             return ordinal switch
             {
-                0 => (object?)d.CompanyID ?? DBNull.Value,     // CompanyID
-                1 => (object?)d.PiXLID ?? DBNull.Value,        // PiXLID
+                0 => (object?)d.CompanyID ?? DBNull.Value,     // CompanyID (int?)
+                1 => (object?)d.PiXLID ?? DBNull.Value,        // PiXLID (int?)
                 2 => (object?)d.IPAddress ?? DBNull.Value,     // IPAddress
                 3 => (object?)d.RequestPath ?? DBNull.Value,   // RequestPath
                 4 => (object?)d.QueryString ?? DBNull.Value,   // QueryString
@@ -649,11 +649,21 @@ public sealed class DatabaseWriterService : BackgroundService
         /// <summary>Reverse lookup: column name → ordinal position. O(n) scan of 9 elements.</summary>
         public override int GetOrdinal(string name) => Array.IndexOf(ColumnNames, name);
         
-        /// <summary>SQL type name: "datetime2" for ReceivedAt, "nvarchar" for all others.</summary>
-        public override string GetDataTypeName(int ordinal) => ordinal == 8 ? "datetime2" : "nvarchar";
+        /// <summary>SQL type name: "int" for CompanyID/PiXLID, "datetime2" for ReceivedAt, "nvarchar" for all others.</summary>
+        public override string GetDataTypeName(int ordinal) => ordinal switch
+        {
+            0 or 1 => "int",
+            8 => "datetime2",
+            _ => "nvarchar"
+        };
         
-        /// <summary>.NET type: <see cref="DateTime"/> for ReceivedAt, <see cref="string"/> for all others.</summary>
-        public override Type GetFieldType(int ordinal) => ordinal == 8 ? typeof(DateTime) : typeof(string);
+        /// <summary>.NET type: <see cref="int"/> for CompanyID/PiXLID, <see cref="DateTime"/> for ReceivedAt, <see cref="string"/> for all others.</summary>
+        public override Type GetFieldType(int ordinal) => ordinal switch
+        {
+            0 or 1 => typeof(int),
+            8 => typeof(DateTime),
+            _ => typeof(string)
+        };
         
         /// <summary>Indexer by ordinal — delegates to <see cref="GetValue"/>.</summary>
         public override object this[int ordinal] => GetValue(ordinal);
@@ -678,11 +688,19 @@ public sealed class DatabaseWriterService : BackgroundService
             var d = batch[_index];
             return (ordinal switch
             {
-                0 => d.CompanyID, 1 => d.PiXLID, 2 => d.IPAddress,
+                2 => d.IPAddress,
                 3 => d.RequestPath, 4 => d.QueryString, 5 => d.HeadersJson,
                 6 => d.UserAgent, 7 => d.Referer, _ => null
             }) ?? throw new InvalidCastException();
         }
+        
+        /// <summary>Typed int accessor for CompanyID (0) and PiXLID (1).</summary>
+        public override int GetInt32(int ordinal) => ordinal switch
+        {
+            0 => batch[_index].CompanyID ?? throw new InvalidCastException(),
+            1 => batch[_index].PiXLID ?? throw new InvalidCastException(),
+            _ => throw new InvalidCastException()
+        };
         
         /// <summary>Typed DateTime accessor. Only valid for ordinal 8 (ReceivedAt).</summary>
         public override DateTime GetDateTime(int ordinal) =>
@@ -703,7 +721,6 @@ public sealed class DatabaseWriterService : BackgroundService
         public override float GetFloat(int ordinal) => throw new NotSupportedException();
         public override Guid GetGuid(int ordinal) => throw new NotSupportedException();
         public override short GetInt16(int ordinal) => throw new NotSupportedException();
-        public override int GetInt32(int ordinal) => throw new NotSupportedException();
         public override long GetInt64(int ordinal) => throw new NotSupportedException();
         public override IEnumerator GetEnumerator() => throw new NotSupportedException();
     }

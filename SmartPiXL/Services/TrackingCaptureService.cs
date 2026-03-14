@@ -51,7 +51,7 @@ public sealed partial class TrackingCaptureService
     /// <para>
     /// Pattern: <c>^/?{companyId}/{pixlId}</c> where companyId = everything before the first slash,
     /// pixlId = everything after the slash up to the first underscore.
-    /// Example: <c>/ACME/summer2025_SMART.GIF</c> → companyId="ACME", pixlId="summer2025"
+    /// Example: <c>/12345/1_SMART.GIF</c> → companyId=12345, pixlId=1 (non-integer segments → null)
     /// </para>
     /// <para>
     /// Source-generated at compile time → no Regex constructor overhead at runtime,
@@ -130,14 +130,17 @@ public sealed partial class TrackingCaptureService
         
         // Parse CompanyID and PiXLID from the URL path.
         // URL pattern: /{CompanyID}/{PiXLID}_SMART.GIF?...
-        // Example: /ACME/summer2025_SMART.GIF → CompanyID="ACME", PiXLID="summer2025"
-        string? companyId = null;
-        string? pixlId = null;
+        // Example: /12345/1_SMART.GIF → CompanyID=12345, PiXLID=1
+        // Non-integer path segments (legacy ClearDot, scanner probes) → null.
+        int? companyId = null;
+        int? pixlId = null;
         var pathMatch = PathParseRegex().Match(path);
         if (pathMatch.Success)
         {
-            companyId = pathMatch.Groups["companyId"].Value;
-            pixlId = pathMatch.Groups["pixlId"].Value;
+            if (int.TryParse(pathMatch.Groups["companyId"].ValueSpan, out var cid))
+                companyId = cid;
+            if (int.TryParse(pathMatch.Groups["pixlId"].ValueSpan, out var pid))
+                pixlId = pid;
         }
         
         // Build headers JSON manually to avoid Dictionary<string,string> + JsonSerializer allocations.

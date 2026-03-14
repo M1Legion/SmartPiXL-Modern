@@ -6,22 +6,22 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Forge.Services;
 
 // ============================================================================
-// ETL BACKGROUND SERVICE — Runs ETL processing every 60 seconds.
+// ETL BACKGROUND SERVICE — Runs identity resolution every 60 seconds.
 //
 // Calls stored procedures in sequence:
-//   1. ETL.usp_ParseNewHits  — PiXL.Raw → PiXL.Parsed + Device/IP/Visit
-//   2. ETL.usp_MatchVisits   — Identity resolution via AutoConsumer
-//   3. ETL.usp_EnrichParsedGeo — DISABLED (locks IPAPI.IP 344M rows, not yet spec'd)
-//   4. ETL.usp_MatchLegacyVisits — Legacy IP-based matching
+//   1. ETL.usp_MatchVisits        — Email-based identity resolution via AutoConsumer
+//   2. ETL.usp_MatchLegacyVisits  — Legacy IP-based matching via AutoConsumer
+//   3. ETL.usp_MatchGeoVisits     — Supplemental geo proximity resolution
 //
-// Ported from SmartPiXL.Worker-Deprecated/Services/EtlBackgroundService.cs
-// with namespace updated to SmartPiXL.Forge.Services.
+// Phase 1 (usp_ParseNewHits) is handled by ParsedBulkInsertService.
+// Phase 3 (usp_EnrichParsedGeo) is disabled — geo enrichment not needed yet.
 // ============================================================================
 
 /// <summary>
-/// Background service that runs ETL processing every 60 seconds.
-/// Calls stored procedures to parse raw hits, populate dimensions,
-/// resolve identities, and enrich geo data.
+/// Background service that runs identity resolution every 60 seconds.
+/// Calls usp_MatchVisits (email), usp_MatchLegacyVisits (IP), and
+/// usp_MatchGeoVisits (geo proximity) to resolve PiXL.Visit records
+/// against AutoConsumer into PiXL.Match.
 /// </summary>
 public sealed class EtlBackgroundService : BackgroundService
 {
@@ -70,81 +70,69 @@ public sealed class EtlBackgroundService : BackgroundService
     private async Task RunEtlAsync(CancellationToken ct)
     {
         // ══════════════════════════════════════════════════════════════════
-        // TEMPORARILY DISABLED — ETL catch-up consumes all SQL resources.
-        //
-        // With parse lag of 9.8M rows, ETL runs every 60s × 10K rows/run
-        // = 16+ hours to catch up. During that time, usp_ParseNewHits holds
-        // long transactions that block Forge BulkCopy writes to PiXL.Raw
-        // AND Edge geo lookups against IPAPI.IP.
-        //
-        // The live pipeline (Edge → Forge → PiXL.Raw) is the priority.
-        // ETL will be re-enabled after manual catch-up during off-peak hours:
-        //   EXEC ETL.usp_ParseNewHits  -- run manually in batches
-        //
-        // See IMPLEMENTATION-LOG.md for full details.
+        // Phase 1 (usp_ParseNewHits) is handled by ParsedBulkInsertService.
+        // Phase 3 (usp_EnrichParsedGeo) is disabled — geo is not needed yet.
+        // This service only runs the match procs (Phase 2 + Phase 4).
         // ══════════════════════════════════════════════════════════════════
-        _logger.Debug("ETL cycle skipped (temporarily disabled — SQL resources reserved for live pipeline)");
-        await Task.CompletedTask;
-
-        /*  ── All ETL phases disabled during catch-up period ──
-         *  Re-enable after manual catch-up: EXEC ETL.usp_ParseNewHits (repeat until lag < 500)
 
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
 
-        // Phase 1: Parse new hits
-        await using var parseCmd = conn.CreateCommand();
-        parseCmd.CommandText = "ETL.usp_ParseNewHits";
-        parseCmd.CommandType = System.Data.CommandType.StoredProcedure;
-        parseCmd.CommandTimeout = 300;
-
-        await using var reader = await parseCmd.ExecuteReaderAsync(ct);
-        if (await reader.ReadAsync(ct))
+        // Phase 2: Match visits by email
+        await using (var matchCmd = conn.CreateCommand())
         {
-            var rowsParsed = Convert.ToInt64(reader.GetValue(0));
-            var fromId = Convert.ToInt64(reader.GetValue(1));
-            var toId = Convert.ToInt64(reader.GetValue(2));
+            matchCmd.CommandText = "ETL.usp_MatchVisits";
+            matchCmd.CommandType = System.Data.CommandType.StoredProcedure;
+            matchCmd.Parameters.AddWithValue("@BatchSize", 1000);
+            matchCmd.CommandTimeout = 300;
 
-            if (rowsParsed > 0)
-                _logger.Info($"ETL parsed {rowsParsed} rows (Id {fromId}–{toId})");
+            await using var matchReader = await matchCmd.ExecuteReaderAsync(ct);
+            if (await matchReader.ReadAsync(ct))
+            {
+                var rowsProcessed = Convert.ToInt64(matchReader.GetValue(0));
+                var rowsMatched = Convert.ToInt64(matchReader.GetValue(1));
+
+                if (rowsProcessed > 0)
+                    _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched by email");
+            }
         }
-        await reader.CloseAsync();
 
-        // Phase 2: Match visits
-        await using var matchCmd = conn.CreateCommand();
-        matchCmd.CommandText = "ETL.usp_MatchVisits";
-        matchCmd.CommandType = System.Data.CommandType.StoredProcedure;
-        matchCmd.Parameters.AddWithValue("@BatchSize", 1000);
-        matchCmd.CommandTimeout = 300;
-
-        await using var matchReader = await matchCmd.ExecuteReaderAsync(ct);
-        if (await matchReader.ReadAsync(ct))
+        // Phase 4: Legacy IP-based match
+        await using (var legacyCmd = conn.CreateCommand())
         {
-            var rowsProcessed = Convert.ToInt64(matchReader.GetValue(0));
-            var rowsMatched = Convert.ToInt64(matchReader.GetValue(1));
+            legacyCmd.CommandText = "ETL.usp_MatchLegacyVisits";
+            legacyCmd.CommandType = System.Data.CommandType.StoredProcedure;
+            legacyCmd.Parameters.AddWithValue("@BatchSize", 5000);
+            legacyCmd.CommandTimeout = 300;
 
-            if (rowsProcessed > 0)
-                _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched");
+            await using var legacyReader = await legacyCmd.ExecuteReaderAsync(ct);
+            if (await legacyReader.ReadAsync(ct))
+            {
+                var rowsProcessed = Convert.ToInt64(legacyReader.GetValue(0));
+                var rowsMatched = Convert.ToInt64(legacyReader.GetValue(1));
+
+                if (rowsProcessed > 0)
+                    _logger.Info($"ETL legacy match: {rowsProcessed} processed, {rowsMatched} matched by IP");
+            }
         }
-        await matchReader.CloseAsync();
 
-        // Phase 3: DISABLED
-        // Phase 4: Legacy match
-        await using var legacyCmd = conn.CreateCommand();
-        legacyCmd.CommandText = "ETL.usp_MatchLegacyVisits";
-        legacyCmd.CommandType = System.Data.CommandType.StoredProcedure;
-        legacyCmd.Parameters.AddWithValue("@BatchSize", 5000);
-        legacyCmd.CommandTimeout = 300;
-
-        await using var legacyReader = await legacyCmd.ExecuteReaderAsync(ct);
-        if (await legacyReader.ReadAsync(ct))
+        // Phase 5: Supplemental geo proximity match
+        await using (var geoCmd = conn.CreateCommand())
         {
-            var rowsProcessed = Convert.ToInt64(legacyReader.GetValue(0));
-            var rowsMatched = Convert.ToInt64(legacyReader.GetValue(1));
+            geoCmd.CommandText = "ETL.usp_MatchGeoVisits";
+            geoCmd.CommandType = System.Data.CommandType.StoredProcedure;
+            geoCmd.Parameters.AddWithValue("@BatchSize", 2000);
+            geoCmd.CommandTimeout = 300;
 
-            if (rowsProcessed > 0)
-                _logger.Info($"ETL legacy match: {rowsProcessed} processed, {rowsMatched} matched by IP");
+            await using var geoReader = await geoCmd.ExecuteReaderAsync(ct);
+            if (await geoReader.ReadAsync(ct))
+            {
+                var rowsProcessed = Convert.ToInt64(geoReader.GetValue(0));
+                var rowsMatched = Convert.ToInt64(geoReader.GetValue(1));
+
+                if (rowsProcessed > 0)
+                    _logger.Info($"ETL geo match: {rowsProcessed} processed, {rowsMatched} matched by geo proximity");
+            }
         }
-        */
     }
 }

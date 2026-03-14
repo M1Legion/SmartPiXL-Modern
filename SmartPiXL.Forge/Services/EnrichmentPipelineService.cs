@@ -408,7 +408,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         // ── 8. Cross-Customer Intelligence ────────────────────────────────
         if (_crossCustomerIntel is not null)
         {
-            var crossResult = _crossCustomerIntel.RecordHit(record.IPAddress, deviceHash, record.CompanyID);
+            var crossResult = _crossCustomerIntel.RecordHit(record.IPAddress, deviceHash, record.CompanyID?.ToString());
             AppendParam(sb, "_srv_crossCustHits", crossResult.DistinctCompanies.ToString(CultureInfo.InvariantCulture));
             AppendParam(sb, "_srv_crossCustWindow", crossResult.WindowMinutes.ToString(CultureInfo.InvariantCulture));
             if (crossResult.IsAlert)
@@ -554,7 +554,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
             var mouseMovesForDead = QueryParamReader.GetInt(qs, "mouseMoves");
             // Use dnsResult.IsCloud directly — avoids re-scanning QS for _srv_rdnsCloud
             var deadIdx = _deadInternet.RecordHit(
-                record.CompanyID,
+                record.CompanyID?.ToString(),
                 isBotHit: isCrawler,
                 hasMouseMoves: mouseMovesForDead > 0,
                 isDatacenter: dnsResult.IsCloud,

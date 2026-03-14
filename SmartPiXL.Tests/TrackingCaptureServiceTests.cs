@@ -19,12 +19,12 @@ public sealed class TrackingCaptureServiceTests
     [Fact]
     public void CaptureFromRequest_should_extractCompanyAndPiXLID_when_validPath()
     {
-        var context = CreateHttpContext("/12345/TestCamp_SMART.GIF", "sw=1920&sh=1080");
+        var context = CreateHttpContext("/12345/7_SMART.GIF", "sw=1920&sh=1080");
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.CompanyID.Should().Be("12345");
-        result.PiXLID.Should().Be("TestCamp");
+        result.CompanyID.Should().Be(12345);
+        result.PiXLID.Should().Be(7);
     }
 
     [Fact]
@@ -34,8 +34,8 @@ public sealed class TrackingCaptureServiceTests
 
         var result = _service.CaptureFromRequest(context.Request);
 
-        result.CompanyID.Should().Be("99");
-        result.PiXLID.Should().Be("1");
+        result.CompanyID.Should().Be(99);
+        result.PiXLID.Should().Be(1);
     }
 
     [Fact]

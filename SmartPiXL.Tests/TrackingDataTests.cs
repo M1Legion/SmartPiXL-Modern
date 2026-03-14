@@ -30,10 +30,10 @@ public sealed class TrackingDataTests
         var data = new TrackingData
         {
             ReceivedAt = now,
-            CompanyID = "TestCo",
-            PiXLID = "Camp1",
+            CompanyID = 100,
+            PiXLID = 1,
             IPAddress = "8.8.8.8",
-            RequestPath = "/TestCo/Camp1_SMART.GIF",
+            RequestPath = "/100/1_SMART.GIF",
             QueryString = "sw=1920&sh=1080",
             HeadersJson = "{\"User-Agent\":\"Test\"}",
             UserAgent = "Test",
@@ -41,10 +41,10 @@ public sealed class TrackingDataTests
         };
 
         data.ReceivedAt.Should().Be(now);
-        data.CompanyID.Should().Be("TestCo");
-        data.PiXLID.Should().Be("Camp1");
+        data.CompanyID.Should().Be(100);
+        data.PiXLID.Should().Be(1);
         data.IPAddress.Should().Be("8.8.8.8");
-        data.RequestPath.Should().Be("/TestCo/Camp1_SMART.GIF");
+        data.RequestPath.Should().Be("/100/1_SMART.GIF");
         data.QueryString.Should().Be("sw=1920&sh=1080");
     }
 
@@ -52,8 +52,8 @@ public sealed class TrackingDataTests
     public void RecordEquality_should_beEqual_when_sameValues()
     {
         var now = DateTime.UtcNow;
-        var data1 = new TrackingData { ReceivedAt = now, CompanyID = "A", PiXLID = "1" };
-        var data2 = new TrackingData { ReceivedAt = now, CompanyID = "A", PiXLID = "1" };
+        var data1 = new TrackingData { ReceivedAt = now, CompanyID = 1, PiXLID = 1 };
+        var data2 = new TrackingData { ReceivedAt = now, CompanyID = 1, PiXLID = 1 };
 
         data1.Should().Be(data2, "Records with same values should be equal");
     }
@@ -61,8 +61,8 @@ public sealed class TrackingDataTests
     [Fact]
     public void RecordEquality_should_notBeEqual_when_differentValues()
     {
-        var data1 = new TrackingData { CompanyID = "A" };
-        var data2 = new TrackingData { CompanyID = "B" };
+        var data1 = new TrackingData { CompanyID = 1 };
+        var data2 = new TrackingData { CompanyID = 2 };
 
         data1.Should().NotBe(data2);
     }
@@ -72,16 +72,16 @@ public sealed class TrackingDataTests
     {
         var original = new TrackingData
         {
-            CompanyID = "A",
-            PiXLID = "1",
+            CompanyID = 1,
+            PiXLID = 1,
             IPAddress = "8.8.8.8"
         };
 
-        var modified = original with { CompanyID = "B" };
+        var modified = original with { CompanyID = 2 };
 
-        modified.CompanyID.Should().Be("B");
-        modified.PiXLID.Should().Be("1", "Unmodified fields should carry over");
+        modified.CompanyID.Should().Be(2);
+        modified.PiXLID.Should().Be(1, "Unmodified fields should carry over");
         modified.IPAddress.Should().Be("8.8.8.8");
-        original.CompanyID.Should().Be("A", "Original should be unchanged");
+        original.CompanyID.Should().Be(1, "Original should be unchanged");
     }
 }

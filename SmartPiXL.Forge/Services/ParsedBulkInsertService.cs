@@ -184,8 +184,8 @@ public sealed class ParsedBulkInsertService : BackgroundService
 
             parsed.Add(ParsedRecordParser.Parse(
                 id,
-                reader.IsDBNull(1) ? null : reader.GetString(1),   // CompanyID
-                reader.IsDBNull(2) ? null : reader.GetString(2),   // PiXLID
+                reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1),   // CompanyID
+                reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2),   // PiXLID
                 reader.IsDBNull(3) ? null : reader.GetString(3),   // IPAddress
                 reader.GetDateTime(4),                               // ReceivedAt
                 reader.IsDBNull(5) ? null : reader.GetString(5),   // RequestPath

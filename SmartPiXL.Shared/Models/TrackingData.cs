@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SmartPiXL.Models;
 
 // ============================================================================
@@ -36,16 +38,26 @@ public sealed record TrackingData
     public DateTime ReceivedAt { get; init; }
     
     /// <summary>
-    /// Client identifier from the URL path, e.g., "12345" from <c>/12345/1_SMART.GIF</c>.
-    /// Parsed by regex from the first path segment. Null if path doesn't match.
+    /// Client identifier from the URL path, e.g., 12345 from <c>/12345/1_SMART.GIF</c>.
+    /// Parsed by regex from the first path segment, then int.TryParse'd.
+    /// Null if path doesn't match or the segment is not a valid integer.
+    /// Non-integer values (e.g., "EPUSH", "DC_MG-Digital") from legacy ClearDot
+    /// or scanner probes are stored as NULL for easy suspicious-record aggregation.
     /// </summary>
-    public string? CompanyID { get; init; }
+    /// <remarks>
+    /// JsonNumberHandling allows deserialization of old JSONL failover files
+    /// that serialized these as strings ("12345") before the int migration.
+    /// </remarks>
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? CompanyID { get; init; }
     
     /// <summary>
-    /// Campaign/pixel identifier from the URL path, e.g., "1" from <c>/12345/1_SMART.GIF</c>.
-    /// Parsed from the second path segment (before the <c>_SMART.GIF</c> suffix).
+    /// Campaign/pixel identifier from the URL path, e.g., 1 from <c>/12345/1_SMART.GIF</c>.
+    /// Parsed from the second path segment (before the <c>_SMART.GIF</c> suffix),
+    /// then int.TryParse'd. Null if not a valid integer.
     /// </summary>
-    public string? PiXLID { get; init; }
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? PiXLID { get; init; }
     
     /// <summary>
     /// Real client IP address from the TCP socket (<c>Connection.RemoteIpAddress</c>).

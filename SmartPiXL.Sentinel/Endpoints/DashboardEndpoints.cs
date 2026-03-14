@@ -91,8 +91,8 @@ public static class DashboardEndpoints
             }
             await SafeExecuteAsync(ctx, async () =>
             {
-                var data = await QuerySingleRowAsync(settings.ConnectionString,
-                    "SELECT * FROM vw_Dash_SystemHealth");
+                var data = await ExecuteSpSingleRowAsync(settings.ConnectionString,
+                    "usp_Dash_SystemHealth");
                 _healthCache = data;
                 _healthExpiry = now + CacheDuration;
                 await WriteJsonAsync(ctx, data);
@@ -202,8 +202,8 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/pipeline", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_PipelineHealth");
+            await ExecuteSpSingleRowAsync(ctx, settings.ConnectionString,
+                "usp_Dash_PipelineHealth");
         });
 
         // ====================================================================
@@ -433,7 +433,7 @@ public static class DashboardEndpoints
         await conn.OpenAsync();
 
         await using var cmd = new SqlCommand(sql, conn);
-        cmd.CommandTimeout = 30;
+        cmd.CommandTimeout = 60;
 
         if (param is not null)
             cmd.Parameters.Add(param);
@@ -459,6 +459,57 @@ public static class DashboardEndpoints
         return results.FirstOrDefault() ?? new Dictionary<string, object?>();
     }
 
+    /// <summary>
+    /// Execute a stored procedure and return the first result row as a dictionary.
+    /// Stored procedures with individual variable assignments avoid the 20+ scalar
+    /// subquery optimizer pathology that makes equivalent views 100-1000x slower.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>> ExecuteSpSingleRowAsync(
+        string connectionString, string spName)
+    {
+        var row = new Dictionary<string, object?>();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        await using var cmd = new SqlCommand(spName, conn);
+        cmd.CommandType = System.Data.CommandType.StoredProcedure;
+        cmd.CommandTimeout = 30;
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                var value = reader.GetValue(i);
+                row[reader.GetName(i)] = value == DBNull.Value ? null : value;
+            }
+        }
+        return row;
+    }
+
+    /// <summary>
+    /// Execute a stored procedure, serialize result to JSON, and write response.
+    /// </summary>
+    private static async Task ExecuteSpSingleRowAsync(
+        HttpContext ctx, string connectionString, string spName)
+    {
+        try
+        {
+            var data = await ExecuteSpSingleRowAsync(connectionString, spName);
+            await WriteJsonAsync(ctx, data);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Error($"[Dashboard] SP failed ({spName}): {ex.Message}");
+            if (!ctx.Response.HasStarted)
+            {
+                ctx.Response.StatusCode = 503;
+                await WriteJsonAsync(ctx, new { error = "Query failed", detail = ex.Message });
+            }
+        }
+    }
+
     // ========================================================================
     // SAFE QUERY WRAPPERS â€” Execute SQL view queries with error handling.
     //
@@ -480,7 +531,7 @@ public static class DashboardEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.Error($"[Dashboard] Query failed: {ex.Message}");
+            _logger.Error($"[Dashboard] Query failed ({sql}): {ex.Message}");
             if (!ctx.Response.HasStarted)
             {
                 ctx.Response.StatusCode = 503;
@@ -502,7 +553,7 @@ public static class DashboardEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.Error($"[Dashboard] Query failed: {ex.Message}");
+            _logger.Error($"[Dashboard] Query failed ({sql}): {ex.Message}");
             if (!ctx.Response.HasStarted)
             {
                 ctx.Response.StatusCode = 503;
@@ -524,7 +575,7 @@ public static class DashboardEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.Error($"[Dashboard] Request failed: {ex.Message}");
+            _logger.Error($"[Dashboard] Request failed ({ctx.Request.Path}): {ex.Message}");
             if (!ctx.Response.HasStarted)
             {
                 ctx.Response.StatusCode = 503;

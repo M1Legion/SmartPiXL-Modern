@@ -71,9 +71,9 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
     // ── Batch fill window ─────────────────────────────────────────────
     // After the first item arrives, wait up to this duration for more items.
-    // At 70 rec/s, 150ms collects ~10 records per batch instead of ~1,
-    // reducing per-record overhead from connection/TDS setup by ~10x.
-    private static readonly TimeSpan BatchFillWindow = TimeSpan.FromMilliseconds(150);
+    // At high throughput, 50ms collects hundreds of records per batch,
+    // reducing per-record overhead from connection/TDS setup.
+    private static readonly TimeSpan BatchFillWindow = TimeSpan.FromMilliseconds(50);
 
     // ── Retry + dead-letter ────────────────────────────────────────────
     private const int MaxRetries = 3;
@@ -107,15 +107,15 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     /// </summary>
     internal static readonly string[] ColumnNames =
     [
-        "CompanyID",    // [0] nvarchar
-        "PiXLID",       // [1] nvarchar
-        "IPAddress",    // [2] nvarchar
-        "RequestPath",  // [3] nvarchar
-        "QueryString",  // [4] nvarchar(max)
-        "HeadersJson",  // [5] nvarchar(max)
-        "UserAgent",    // [6] nvarchar(2000)
-        "Referer",      // [7] nvarchar(2000)
-        "ReceivedAt"    // [8] datetime2
+        "CompanyID",    // [0] int — client identifier from URL path (null if non-integer)
+        "PiXLID",       // [1] int — campaign/pixel identifier from URL path (null if non-integer)
+        "IPAddress",    // [2] nvarchar — real client IP (after proxy header extraction)
+        "RequestPath",  // [3] nvarchar — full URL path (e.g., /12345/1_SMART.GIF)
+        "QueryString",  // [4] nvarchar(max) — all ~90 JS-collected parameters
+        "HeadersJson",  // [5] nvarchar(max) — JSON object of captured HTTP headers
+        "UserAgent",    // [6] nvarchar(2000) — truncated User-Agent string
+        "Referer",      // [7] nvarchar(2000) — truncated Referer URL
+        "ReceivedAt"    // [8] datetime2 — UTC timestamp when the hit arrived
     ];
 
     public SqlBulkCopyWriterService(
@@ -643,8 +643,18 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
         public override string GetName(int ordinal) => ColumnNames[ordinal];
         public override int GetOrdinal(string name) => Array.IndexOf(ColumnNames, name);
-        public override string GetDataTypeName(int ordinal) => ordinal == 8 ? "datetime2" : "nvarchar";
-        public override Type GetFieldType(int ordinal) => ordinal == 8 ? typeof(DateTime) : typeof(string);
+        public override string GetDataTypeName(int ordinal) => ordinal switch
+        {
+            0 or 1 => "int",
+            8 => "datetime2",
+            _ => "nvarchar"
+        };
+        public override Type GetFieldType(int ordinal) => ordinal switch
+        {
+            0 or 1 => typeof(int),
+            8 => typeof(DateTime),
+            _ => typeof(string)
+        };
         public override object this[int ordinal] => GetValue(ordinal);
         public override object this[string name] => GetValue(GetOrdinal(name));
 
@@ -660,7 +670,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             var d = batch[_index];
             return (ordinal switch
             {
-                0 => d.CompanyID, 1 => d.PiXLID, 2 => d.IPAddress,
+                2 => d.IPAddress,
                 3 => d.RequestPath, 4 => d.QueryString, 5 => d.HeadersJson,
                 6 => d.UserAgent, 7 => d.Referer, _ => null
             }) ?? throw new InvalidCastException();
@@ -680,7 +690,12 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         public override float GetFloat(int ordinal) => throw new NotSupportedException();
         public override Guid GetGuid(int ordinal) => throw new NotSupportedException();
         public override short GetInt16(int ordinal) => throw new NotSupportedException();
-        public override int GetInt32(int ordinal) => throw new NotSupportedException();
+        public override int GetInt32(int ordinal) => ordinal switch
+        {
+            0 => batch[_index].CompanyID ?? throw new InvalidCastException(),
+            1 => batch[_index].PiXLID ?? throw new InvalidCastException(),
+            _ => throw new InvalidCastException()
+        };
         public override long GetInt64(int ordinal) => throw new NotSupportedException();
         public override IEnumerator GetEnumerator() => throw new NotSupportedException();
     }

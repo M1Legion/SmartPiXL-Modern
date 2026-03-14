@@ -56,7 +56,7 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     {
         for (int i = 0; i < 50; i++)
         {
-            _service.TryQueue(CreateSampleData(companyId: i.ToString())).Should().BeTrue();
+            _service.TryQueue(CreateSampleData(companyId: i)).Should().BeTrue();
         }
 
         _service.QueueDepth.Should().Be(50);
@@ -99,10 +99,10 @@ public sealed class DatabaseWriterServiceTests : IDisposable
         var data = new TrackingData
         {
             ReceivedAt = DateTime.UtcNow,
-            CompanyID = "TestCompany",
-            PiXLID = "TestPiXL",
+            CompanyID = 100,
+            PiXLID = 1,
             IPAddress = "8.8.8.8",
-            RequestPath = "/TestCompany/TestPiXL_SMART.GIF",
+            RequestPath = "/100/1_SMART.GIF",
             QueryString = "sw=1920&sh=1080&synthetic=1",
             HeadersJson = "{\"User-Agent\":\"Test\"}",
             UserAgent = "TestAgent",
@@ -136,11 +136,11 @@ public sealed class DatabaseWriterServiceTests : IDisposable
     // HELPER
     // ========================================================================
 
-    private static TrackingData CreateSampleData(string companyId = "TestCo") => new()
+    private static TrackingData CreateSampleData(int companyId = 100) => new()
     {
         ReceivedAt = DateTime.UtcNow,
         CompanyID = companyId,
-        PiXLID = "1",
+        PiXLID = 1,
         IPAddress = "8.8.8.8",
         RequestPath = $"/{companyId}/1_SMART.GIF",
         QueryString = "sw=1920&sh=1080",

@@ -178,13 +178,14 @@ builder.Services.AddHostedService<EnrichmentPipelineService>();
 // SqlBulkCopyWriterService: Drains SqlWriter channel → SqlBulkCopy → PiXL.Raw.
 builder.Services.AddHostedService<SqlBulkCopyWriterService>();
 
-// FailoverCatchupService: DISABLED — isolating core pipeline first.
-// builder.Services.AddHostedService<FailoverCatchupService>();
+// FailoverCatchupService: Replays Edge JSONL failover files through the enrichment pipeline.
+builder.Services.AddHostedService<FailoverCatchupService>();
 
 // ── Ported Worker services ────────────────────────────────────────────────
 
-// EtlBackgroundService: DISABLED — replaced by ParsedBulkInsertService.
-// builder.Services.AddHostedService<EtlBackgroundService>();
+// EtlBackgroundService: Runs identity resolution (usp_MatchVisits + usp_MatchLegacyVisits)
+// every 60 seconds. Parsing is handled by ParsedBulkInsertService.
+builder.Services.AddHostedService<EtlBackgroundService>();
 
 // ParsedBulkInsertService: .NET backfill for PiXL.Parsed.
 // Reads Raw → parses QS in .NET (~1μs/row vs ~7ms/row in SQL UDFs)
@@ -195,20 +196,20 @@ builder.Services.AddHostedService<ParsedBulkInsertService>();
 // All background sync, maintenance, health, and notification services disabled
 // to isolate the core Pipe → SQL pipeline. Re-enable after baseline verified.
 //
-// builder.Services.AddSingleton<IpApiSyncService>();
-// builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
+builder.Services.AddSingleton<IpApiSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
 //
 // builder.Services.AddSingleton<EmailNotificationService>();
 //
-// builder.Services.AddSingleton<CompanyPiXLSyncService>();
-// builder.Services.AddHostedService(sp =>
-// {
-//     var svc = sp.GetRequiredService<CompanyPiXLSyncService>();
-//     svc.EmailService = sp.GetService<EmailNotificationService>();
-//     return svc;
-// });
-//
-// builder.Services.AddSingleton<InfraHealthService>();
+builder.Services.AddSingleton<CompanyPiXLSyncService>();
+builder.Services.AddHostedService(sp =>
+{
+    var svc = sp.GetRequiredService<CompanyPiXLSyncService>();
+    svc.EmailService = sp.GetService<EmailNotificationService>();
+    return svc;
+});
+
+builder.Services.AddSingleton<InfraHealthService>();
 //
 // builder.Services.AddSingleton<SelfHealingService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<SelfHealingService>());

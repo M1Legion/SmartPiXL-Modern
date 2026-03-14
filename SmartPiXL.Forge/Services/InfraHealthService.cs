@@ -373,7 +373,8 @@ public sealed class InfraHealthService : IDisposable
             await conn.OpenAsync();
 
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM vw_Dash_PipelineHealth";
+            cmd.CommandText = "usp_Dash_PipelineHealth";
+            cmd.CommandType = System.Data.CommandType.StoredProcedure;
             cmd.CommandTimeout = 10;
 
             await using var reader = await cmd.ExecuteReaderAsync();

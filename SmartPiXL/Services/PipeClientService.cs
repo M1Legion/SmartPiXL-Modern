@@ -16,9 +16,21 @@ namespace SmartPiXL.Services;
 // ARCHITECTURE:
 //   TrackingEndpoints.CaptureAndEnqueue
 //       → PipeClientService.TryEnqueue (lock-free Channel<T>.Writer.TryWrite)
-//       → Background loop reads from channel
-//       → Serialize to JSON line + write to NamedPipeClientStream
-//       → Flush after each record
+//       → Background batch loop reads from channel
+//       → Serialize batch to JSON lines + SINGLE flush to pipe
+//
+// BATCHING:
+//   Previous design flushed the pipe after EVERY record (~5-15ms per kernel
+//   flush). On a 144-core Xeon, single-record flush was the sole bottleneck
+//   at ~70 rec/s. Batch drain + single flush eliminates per-record kernel
+//   transitions:
+//
+//     Old: read → serialize → write → FLUSH (×N)  = ~70/s
+//     New: drain N → serialize N → write N → FLUSH (×1) = thousands/s
+//
+//   A 25ms fill window collects arriving records before flushing. At 1,000/s
+//   incoming, that's ~25 records per batch. At 10,000/s, ~250 per batch.
+//   Max batch size is 512 to bound memory and latency.
 //
 // FAILOVER:
 //   When the pipe is unavailable (Forge not running, pipe broken), records
@@ -30,23 +42,16 @@ namespace SmartPiXL.Services;
 //   Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s cap.
 //   During backoff, records go directly to JSONL failover — no blocking.
 //   On successful reconnect, the backoff resets to 0.
-//
-// DESIGN NOTE:
-//   The workplan specifies `ValueTask EnqueueAsync(TrackingData)` but we use
-//   `bool TryEnqueue(TrackingData)` (Channel<T>.Writer.TryWrite) instead.
-//   This matches DatabaseWriterService.TryQueue and the C# coding standards'
-//   Channel<T> pattern, keeps the hot path lock-free, and moves serialization
-//   + I/O to the background loop. See IMPLEMENTATION-LOG.md Session 5.
 // ============================================================================
 
 /// <summary>
 /// Named pipe client that sends enriched <see cref="TrackingData"/> records to the Forge.
 /// <para>
 /// Uses a bounded <see cref="Channel{T}"/> internally so <see cref="TryEnqueue"/>
-/// is a lock-free CAS operation safe for the hot path. A single background loop
-/// reads from the channel, serializes records to JSON lines, and writes them to
-/// the named pipe. Falls back to <see cref="JsonlFailoverService"/> when the
-/// pipe is unavailable.
+/// is a lock-free CAS operation safe for the hot path. A background loop batch-drains
+/// the channel, serializes records to JSON lines, and flushes once per batch to the
+/// named pipe. Falls back to <see cref="JsonlFailoverService"/> when the pipe is
+/// unavailable.
 /// </para>
 /// </summary>
 public sealed class PipeClientService : BackgroundService
@@ -73,6 +78,18 @@ public sealed class PipeClientService : BackgroundService
 
     private static readonly TimeSpan s_maxBackoff = TimeSpan.FromSeconds(30);
     private const int ConnectTimeoutMs = 3000;
+
+    /// <summary>Max records per pipe batch. Bounds memory and latency.</summary>
+    private const int MaxBatchSize = 512;
+
+    /// <summary>
+    /// After the first record arrives, wait up to this duration for more
+    /// records before flushing. 25ms at 1,000/s incoming = ~25 records/batch.
+    /// </summary>
+    private static readonly TimeSpan BatchFillWindow = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>StreamWriter buffer — 64KB avoids mid-batch auto-flush.</summary>
+    private const int StreamWriterBufferSize = 65_536;
 
     public PipeClientService(
         IOptions<TrackingSettings> settings,
@@ -109,18 +126,62 @@ public sealed class PipeClientService : BackgroundService
     {
         await Task.Yield();
 
-        _logger.Info($"PipeClientService started — pipe: {_pipeName}");
+        _logger.Info($"PipeClientService started — pipe: {_pipeName}, batch max: {MaxBatchSize}, fill window: {BatchFillWindow.TotalMilliseconds}ms");
 
-        try
+        var batch = new List<TrackingData>(MaxBatchSize);
+        var reader = _channel.Reader;
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await foreach (var record in _channel.Reader.ReadAllAsync(stoppingToken))
+            batch.Clear();
+
+            try
             {
-                await WriteRecordAsync(record, stoppingToken);
+                // Wait for at least one record
+                if (!await reader.WaitToReadAsync(stoppingToken))
+                    break;
+
+                // Greedy drain: grab everything immediately available
+                while (batch.Count < MaxBatchSize && reader.TryRead(out var item))
+                    batch.Add(item);
+
+                // Fill window: wait briefly for more records to arrive.
+                // At high throughput, this collects dozens/hundreds of records
+                // before a single flush — massive reduction in kernel transitions.
+                if (batch.Count < MaxBatchSize)
+                {
+                    using var fillCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    fillCts.CancelAfter(BatchFillWindow);
+
+                    try
+                    {
+                        while (batch.Count < MaxBatchSize
+                            && await reader.WaitToReadAsync(fillCts.Token))
+                        {
+                            while (batch.Count < MaxBatchSize && reader.TryRead(out var extra))
+                                batch.Add(extra);
+                        }
+                    }
+                    catch (OperationCanceledException) when (fillCts.IsCancellationRequested)
+                    {
+                        // Fill window expired — write what we have
+                    }
+                }
+
+                if (batch.Count > 0)
+                    await WriteBatchAsync(batch, stoppingToken);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"PipeClient: unexpected error in batch loop — {ex.Message}");
+                // Failover the entire batch so records aren't lost
+                foreach (var record in batch)
+                    _failoverService.TryEnqueue(record);
+            }
         }
 
         // Drain remaining items on shutdown — try pipe first, failover for the rest
@@ -131,41 +192,48 @@ public sealed class PipeClientService : BackgroundService
     }
 
     /// <summary>
-    /// Writes a single record to the pipe. If the pipe is unavailable,
-    /// the record is delegated to <see cref="JsonlFailoverService"/>.
+    /// Writes a batch of records to the pipe with a SINGLE flush.
+    /// All JSON lines are written to the StreamWriter buffer synchronously,
+    /// then one <see cref="StreamWriter.FlushAsync"/> call pushes everything
+    /// to the pipe kernel buffer. Replaces per-record flush (the old bottleneck).
     /// </summary>
-    private async Task WriteRecordAsync(TrackingData record, CancellationToken ct)
+    private async Task WriteBatchAsync(List<TrackingData> batch, CancellationToken ct)
     {
         // Ensure pipe is connected (or reconnect if backoff expired)
         if (!await EnsureConnectedAsync(ct))
         {
-            // Pipe unavailable — failover to JSONL
-            if (!_failoverService.TryEnqueue(record))
+            // Pipe unavailable — failover entire batch to JSONL
+            foreach (var record in batch)
             {
-                _logger.Warning("PipeClient: both pipe and JSONL failover unavailable — record dropped");
+                if (!_failoverService.TryEnqueue(record))
+                    _logger.Warning("PipeClient: both pipe and JSONL failover unavailable — record dropped");
             }
             return;
         }
 
         try
         {
-            var json = JsonSerializer.Serialize(record);
-            await _writer!.WriteLineAsync(json);
-            await _writer.FlushAsync(ct);
+            // Write all records to StreamWriter buffer (sync — no kernel transitions)
+            for (var i = 0; i < batch.Count; i++)
+            {
+                var json = JsonSerializer.Serialize(batch[i]);
+                _writer!.WriteLine(json);
+            }
+
+            // SINGLE flush for the entire batch — one kernel transition
+            await _writer!.FlushAsync(ct);
             _reconnectAttempts = 0;
         }
         catch (IOException ex)
         {
-            _logger.Warning($"PipeClient: write failed — {ex.Message}");
+            _logger.Warning($"PipeClient: batch write failed ({batch.Count} records) — {ex.Message}");
             DisposePipe();
             _reconnectAttempts++;
             SetNextReconnectTime();
 
-            // Failover this record to JSONL
-            if (!_failoverService.TryEnqueue(record))
-            {
-                _logger.Warning("PipeClient: JSONL failover also unavailable — record dropped");
-            }
+            // Failover entire batch to JSONL
+            foreach (var record in batch)
+                _failoverService.TryEnqueue(record);
         }
     }
 
@@ -194,7 +262,7 @@ public sealed class PipeClientService : BackgroundService
                 PipeOptions.Asynchronous);
 
             await _pipe.ConnectAsync(ConnectTimeoutMs, ct);
-            _writer = new StreamWriter(_pipe, Encoding.UTF8, leaveOpen: true)
+            _writer = new StreamWriter(_pipe, Encoding.UTF8, StreamWriterBufferSize, leaveOpen: true)
             {
                 AutoFlush = false
             };
@@ -247,29 +315,42 @@ public sealed class PipeClientService : BackgroundService
 
     /// <summary>
     /// Drains remaining records from the channel on shutdown.
-    /// Tries the pipe first; if unavailable, uses JSONL failover.
+    /// Tries the pipe first (batch flush); if unavailable, uses JSONL failover.
     /// </summary>
     private async Task DrainAsync()
     {
+        var batch = new List<TrackingData>(MaxBatchSize);
+
         while (_channel.Reader.TryRead(out var record))
+            batch.Add(record);
+
+        if (batch.Count == 0)
+            return;
+
+        if (_pipe?.IsConnected == true)
         {
-            if (_pipe?.IsConnected == true)
+            try
             {
-                try
+                for (var i = 0; i < batch.Count; i++)
                 {
-                    var json = JsonSerializer.Serialize(record);
-                    await _writer!.WriteLineAsync(json);
-                    await _writer.FlushAsync();
+                    var json = JsonSerializer.Serialize(batch[i]);
+                    _writer!.WriteLine(json);
                 }
-                catch
-                {
+                await _writer!.FlushAsync();
+                _logger.Info($"PipeClient: drained {batch.Count} records to pipe on shutdown");
+            }
+            catch
+            {
+                // Pipe failed during drain — failover everything
+                foreach (var record in batch)
                     _failoverService.TryEnqueue(record);
-                }
             }
-            else
-            {
+        }
+        else
+        {
+            foreach (var record in batch)
                 _failoverService.TryEnqueue(record);
-            }
+            _logger.Info($"PipeClient: drained {batch.Count} records to JSONL failover on shutdown");
         }
     }
 
