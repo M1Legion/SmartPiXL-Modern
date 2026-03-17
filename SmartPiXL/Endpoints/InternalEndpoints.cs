@@ -34,8 +34,7 @@ public static class InternalEndpoints
     public static void MapInternalEndpoints(this WebApplication app)
     {
         // ── Health snapshot ─────────────────────────────────────────
-        // Edge no longer owns DatabaseWriterService (moved to Forge).
-        // Health now reports PipeClientService connectivity + queue depth.
+        // Health reports PipeClientService connectivity + queue depth.
         app.MapGet("/internal/health", (HttpContext ctx, PipeClientService pipeClient) =>
         {
             if (!IsLoopback(ctx))

@@ -19,7 +19,6 @@ using SmartPiXL.Services;
 //   DatacenterIpService      → AWS/GCP IP range lookup
 //   GeoCacheService          → Non-blocking IP geolocation cache
 //   IpClassificationService  → Static classification helper
-//   DatabaseWriterService    → Channel<T> queue → SqlBulkCopy to PiXL.Raw
 //
 // ENDPOINTS:
 //   TrackingEndpoints: /{**path} (pixel), /js/{co}/{px}.js, /health, /demo
@@ -91,7 +90,6 @@ builder.Services.AddSingleton<ITrackingLogger>(sp => sp.GetRequiredService<FileT
 // PiXLID, client IP (from proxy header chain), headers JSON, User-Agent, Referer.
 builder.Services.AddSingleton<TrackingCaptureService>();
 
-// NOTE: DatabaseWriterService is no longer registered in the Edge.
 // The Edge NEVER writes to SQL directly. All records flow:
 //   Edge → PipeClientService → Forge (named pipe) → SQL
 //   Edge → PipeClientService → JsonlFailoverService (pipe down) → disk
