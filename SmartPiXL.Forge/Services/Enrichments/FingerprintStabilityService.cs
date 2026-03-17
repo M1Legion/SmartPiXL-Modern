@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace SmartPiXL.Services;
+namespace SmartPiXL.Forge.Services.Enrichments;
 
 // ============================================================================
 // FINGERPRINT STABILITY SERVICE — Server-side anti-detect browser + volume detection.

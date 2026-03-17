@@ -1,7 +1,7 @@
 using System.Net;
 using System.Runtime.CompilerServices;
 
-namespace SmartPiXL.Services;
+namespace SmartPiXL.Forge.Services.Enrichments;
 
 // ============================================================================
 // CIDR TRIE — Binary prefix tree for O(32) IPv4 / O(128) IPv6 CIDR lookups.

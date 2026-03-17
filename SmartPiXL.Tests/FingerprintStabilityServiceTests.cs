@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
-using SmartPiXL.Services;
+using SmartPiXL.Forge.Services.Enrichments;
 
 namespace SmartPiXL.Tests;
 

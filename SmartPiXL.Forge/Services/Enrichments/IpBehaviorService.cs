@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 
-namespace SmartPiXL.Services;
+namespace SmartPiXL.Forge.Services.Enrichments;
 
 // ============================================================================
 // IP BEHAVIOR SERVICE — Server-side cross-request traffic analysis.

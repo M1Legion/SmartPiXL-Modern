@@ -1,8 +1,9 @@
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using SmartPiXL.Services;
 
-namespace SmartPiXL.Services;
+namespace SmartPiXL.Forge.Services.Enrichments;
 
 // ============================================================================
 // DATACENTER IP SERVICE — Cloud provider IP range detection.

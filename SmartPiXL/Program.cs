@@ -10,15 +10,12 @@ using SmartPiXL.Services;
 // SMARTPIXL EDGE — Program.cs (IIS Pixel Capture Composition Root)
 // ============================================================================
 // This is the IIS-hosted "Edge" process — minimal, hot-path only.
-// It handles pixel capture, fingerprint enrichment, and SQL bulk writing.
+// It handles pixel capture and forwards data to the Forge via named pipe.
 //
 // SERVICES (hot path):
 //   TrackingCaptureService    → Parse HTTP request into TrackingData
-//   FingerprintStabilityService → Per-IP fingerprint variation tracking
-//   IpBehaviorService        → Subnet velocity + rapid-fire detection
-//   DatacenterIpService      → AWS/GCP IP range lookup
-//   GeoCacheService          → Non-blocking IP geolocation cache
-//   IpClassificationService  → Static classification helper
+//   PipeClientService         → Named pipe forwarding to Forge
+//   JsonlFailoverService      → JSONL failover when pipe is unavailable
 //
 // ENDPOINTS:
 //   TrackingEndpoints: /{**path} (pixel), /js/{co}/{px}.js, /health, /demo
@@ -106,31 +103,6 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<JsonlFailoverServi
 // handles serialization + pipe write. Falls back to JsonlFailoverService on pipe failure.
 builder.Services.AddSingleton<PipeClientService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PipeClientService>());
-
-// MemoryCache: Shared in-process cache used by FingerprintStabilityService and
-// IpBehaviorService for per-IP sliding window tracking.
-builder.Services.AddMemoryCache();
-
-// FingerprintStabilityService: Tracks fingerprint variation per IP over 24h.
-// Detects anti-detect browsers (3+ unique fingerprints from same IP).
-builder.Services.AddSingleton<FingerprintStabilityService>();
-
-// IpBehaviorService: Server-side subnet /24 velocity and rapid-fire timing.
-// Detects coordinated bot infrastructure and automation timing patterns.
-builder.Services.AddSingleton<IpBehaviorService>();
-
-// DatacenterIpService: Downloads AWS + GCP IP ranges on startup, refreshes weekly.
-// Lock-free volatile reference swap for zero-contention reads on the hot path.
-builder.Services.AddHttpClient("DatacenterIp");
-builder.Services.AddSingleton<DatacenterIpService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
-
-// GeoCacheService: Non-blocking in-memory IP geolocation lookups backed by IPAPI.IP.
-// Used on the hot path for timezone mismatch signals and _srv_geo* enrichment params.
-// On cache miss, writes to a bounded Channel<string>; background reader task performs
-// SQL lookups and populates the two-tier cache for the next hit.
-builder.Services.AddSingleton<GeoCacheService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<GeoCacheService>());
 
 // CORS: Wide-open for tracking pixel — any origin can embed our script/GIF.
 builder.Services.AddCors();
@@ -283,21 +255,6 @@ app.Services.GetRequiredService<IHostApplicationLifetime>()
 logger.Info("SmartPiXL Edge starting...");
 logger.Info("HTTP:  http://localhost:7000");
 logger.Info("HTTPS: https://localhost:7001");
-
-// Pre-warm the geo cache with top-hit IPs from PiXL.IP × IPAPI.IP.
-// Runs on a background task so it doesn't block app startup.
-_ = Task.Run(async () =>
-{
-    try
-    {
-        var geoCache = app.Services.GetRequiredService<GeoCacheService>();
-        await geoCache.PrewarmAsync(2000);
-    }
-    catch (Exception ex)
-    {
-        logger.Warning($"Geo cache prewarm failed: {ex.Message}");
-    }
-});
 
 logger.Info("SmartPiXL Edge running — Ctrl+C to stop");
 

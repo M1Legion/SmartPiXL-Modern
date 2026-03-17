@@ -82,11 +82,16 @@ public sealed partial class TrackingCaptureService
     [
         // Standard browser headers — present in virtually all requests
         "User-Agent", "Referer", "Accept-Language", "DNT",
+        "Accept", "Accept-Encoding", "Connection",
         
         // Reverse proxy IP identification — IIS-set headers only.
         // CF-Connecting-IP, True-Client-IP, X-Real-IP NOT captured: no CDN in front,
         // so any client can inject those headers to spoof their identity.
         "X-Forwarded-For",
+        
+        // Request context — reveals navigation intent and cross-origin behavior
+        "Origin",                      // Set on CORS/POST requests (sendBeacon validation)
+        "X-Requested-With",            // "XMLHttpRequest" for AJAX; some frameworks set custom values
         
         // Client Hints (User-Agent) — Chrome 89+, Edge 89+, Opera 75+
         // These replace the User-Agent string with structured, lower-entropy data
@@ -97,6 +102,10 @@ public sealed partial class TrackingCaptureService
         "Sec-CH-UA-Platform-Version",  // OS version: "15.0.0" (requires Permissions-Policy)
         "Sec-CH-UA-Arch",              // CPU arch: "x86", "arm" (requires Permissions-Policy)
         "Sec-CH-UA-Bitness",           // "64" or "32" (requires Permissions-Policy)
+        "Sec-CH-UA-Full-Version-List", // Granular version list — more entropy than Sec-CH-UA
+        "Sec-CH-UA-WoW64",            // x86 app on x64 Windows — niche but adds entropy
+        "Sec-CH-Prefers-Color-Scheme", // Dark/light mode preference — fingerprint signal
+        "Sec-CH-Prefers-Reduced-Motion", // Accessibility preference — fingerprint signal
         
         // Fetch Metadata — reveals how the request was initiated
         "Sec-Fetch-Site",              // "cross-site", "same-origin", "none"
@@ -109,7 +118,10 @@ public sealed partial class TrackingCaptureService
         "X-JA3-Fingerprint",           // Custom nginx/haproxy module JA3 hash
         "X-JA4-Fingerprint",           // JA4+ fingerprint (newer, more granular standard)
         "X-TLS-Version",               // TLS protocol version (1.2, 1.3)
-        "X-TLS-Cipher"                 // Negotiated cipher suite name
+        "X-TLS-Cipher",                // Negotiated cipher suite name
+        
+        // Chrome priority hints — real browsers send "u=2, i" etc
+        "Priority"                     // Fetch priority hint (Chrome 124+)
     ];
     
     /// <summary>

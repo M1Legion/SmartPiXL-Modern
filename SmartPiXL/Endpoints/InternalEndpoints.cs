@@ -8,12 +8,11 @@ namespace SmartPiXL.Endpoints;
 //
 // The SmartPiXL Forge and Sentinel processes run as separate Windows Services.
 // They need to query and control state inside the IIS Edge process (pipe
-// connectivity, queue depth, geo cache). These endpoints provide that bridge.
+// connectivity, queue depth). These endpoints provide that bridge.
 //
 // ENDPOINTS:
 //   GET  /internal/health        → EdgeHealthStatus JSON (circuit, queue, uptime)
 //   POST /internal/circuit-reset → { success: bool } — resets circuit breaker
-//   POST /internal/geo-cache/clear → 204 — invalidates geo hot cache after sync
 //
 // SECURITY:
 //   RequireLoopback filter (same as DashboardEndpoints) — only 127.0.0.1/::1.
@@ -22,7 +21,7 @@ namespace SmartPiXL.Endpoints;
 
 /// <summary>
 /// Internal HTTP endpoints called by the SmartPiXL Worker process to query
-/// and control Edge-owned state (circuit breaker, write queue, geo cache).
+/// and control Edge-owned state (circuit breaker, pipe queue depth).
 /// </summary>
 public static class InternalEndpoints
 {
@@ -66,19 +65,6 @@ public static class InternalEndpoints
             }
 
             return Results.Json(new { success = true });
-        });
-
-        // ── Geo cache invalidation ─────────────────────────────────
-        app.MapPost("/internal/geo-cache/clear", (HttpContext ctx, GeoCacheService geoCache) =>
-        {
-            if (!IsLoopback(ctx))
-            {
-                ctx.Response.StatusCode = 404;
-                return Results.Empty;
-            }
-
-            geoCache.ClearHotCache();
-            return Results.StatusCode(204);
         });
     }
 

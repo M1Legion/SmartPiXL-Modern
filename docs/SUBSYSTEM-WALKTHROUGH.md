@@ -141,21 +141,52 @@ Edge's appsettings.json has settings for SMTP, purge schedules, index maintenanc
 
 4. **Config bloat:** Should TrackingSettings be split so Edge only sees Edge-relevant settings?
 
-### Owner Decisions
+### Owner Decisions (2026-03-17)
 
-| File | Decision | Notes |
-|------|----------|-------|
-| Program.cs | — | |
-| appsettings.json | — | |
-| TrackingEndpoints.cs | — | |
-| InternalEndpoints.cs | — | |
-| TrackingCaptureService.cs | — | |
-| PipeClientService.cs | — | |
-| JsonlFailoverService.cs | — | |
-| DatabaseWriterService.cs | — | **722 lines, not registered, dead code** |
-| DatacenterIpService.cs | — | |
-| CidrTrie.cs | — | |
-| IpClassificationService.cs | — | |
-| IpBehaviorService.cs | — | |
-| FingerprintStabilityService.cs | — | |
-| GeoCacheService.cs | — | |
+**Owner philosophy:** Edge should be as lightweight as possible. Capture and forward. No SQL. No enrichment. "Do its work so fast that no one has a clue it's there."
+
+**Key insight:** All 6 enrichment services are correct in spirit and built to spec, but they belong in the Forge, not the Edge. "The Forge is called the forge because that's where we're taking raw data and forging it with enrichments."
+
+| File | Decision | Status |
+|------|----------|--------|
+| Program.cs | **Simplify** — strip enrichment DI registrations | ✅ Done |
+| appsettings.json | **Simplify** | Deferred (Edge settings split) |
+| TrackingEndpoints.cs | **Simplify** — remove all enrichment from CaptureAndEnqueue | ✅ Done |
+| InternalEndpoints.cs | **Keep** — removed geo-cache/clear endpoint | ✅ Done |
+| TrackingCaptureService.cs | **Keep** — added 10 new headers to capture | ✅ Done |
+| PipeClientService.cs | **Keep** | No change needed |
+| JsonlFailoverService.cs | **Keep** | No change needed |
+| DatabaseWriterService.cs | **DELETED** | ✅ Removed 2026-03-17 |
+| DatacenterIpService.cs | **Moved to Forge** (Services/Enrichments/) | ✅ Done |
+| CidrTrie.cs | **Moved to Forge** (Services/Enrichments/) | ✅ Done |
+| IpClassificationService.cs | **Moved to Shared** (Services/) | ✅ Done |
+| IpBehaviorService.cs | **Moved to Forge** (Services/Enrichments/) | ✅ Done |
+| FingerprintStabilityService.cs | **Moved to Forge** (Services/Enrichments/) | ✅ Done |
+| GeoCacheService.cs | **DELETED from Edge** | ✅ Done |
+| DatabaseWriterServiceTests.cs | **DELETED** (orphaned test) | ✅ Done |
+
+#### Owner comments (verbatim, for future reference)
+- **Edge philosophy:** "as lightweight as possible. Do its work so fast that no one has a clue it's there."
+- **Enrichment placement:** "THIS IS ALL FORGE WORK. The Forge is called the forge because that's where we're taking raw data and forging it with enrichments before loading it into SQL."
+- **IpBehaviorService:** "I do like the idea that we can pre-compute some likely behavioral statistics" and "having this data in the forge allows for much bigger time windows." Concerns about SQL-backed approach vs in-memory: "if it's entirely sql-based, that's just sql at that point." Also: "what happens if the service goes down?"
+- **FingerprintStabilityService:** "I also know this service is also built to be so fast that we lose nothing by keeping it."
+- **GeoCacheService:** "I do not want this happening at all." Concept could work in Forge against MaxMind (not IPAPI.IP) for real-time traffic invalidation: "if the geocacheservice can help provide useful real-time uplift pre-insert, then the forge should do this work, but do it against maxmind, not IPAPI.IP."
+- **IpClassificationService:** Owner "finds it beautiful" — zero cost to keep, useful as Forge pre-filter for MaxMind lookups.
+- **Headers:** "My general style is to get everything I can and once I see how it looks with real data, I can assess entropy with real numbers rather than assumptions."
+- **Code quality:** "The really nice thing about how I like my .NET code is that we can keep any of it and it's all incredibly performant so the cost to keep is basically zero. I'm just neurotic about having code that I don't need."
+
+#### Implementation notes (2026-03-17)
+- 10 new headers added: Accept, Accept-Encoding, Connection, Origin, X-Requested-With, Sec-CH-UA-Full-Version-List, Sec-CH-UA-WoW64, Sec-CH-Prefers-Color-Scheme, Sec-CH-Prefers-Reduced-Motion, Priority
+- Total HeaderKeysToCapture: 28 (was 18)
+- CaptureAndEnqueue rewritten to capture-only: parse → hit type → forward to pipe
+- Moved services not yet wired into Forge DI — that's Forge subsystem work
+- Added `Microsoft.Extensions.Caching.Memory` package to Forge csproj for moved services
+- Added `using SmartPiXL.Services` to DatacenterIpService for ITrackingLogger access
+- Updated FingerprintStabilityServiceTests using to point to Forge namespace
+
+#### Open items from walkthrough
+- Review PathParseRegex — is it the best approach for URL parsing?
+- PiXLScript.cs — not covered in Edge walkthrough (separate subsystem #2)
+- Wire moved enrichment services into Forge's EnrichmentPipelineService
+- Forge-side geo: evaluate MaxMind-based real-time traffic invalidation (Bangladesh IP → Minnesota dealer example)
+- AB test MaxMind vs IPAPI accuracy before decommissioning IPAPI
