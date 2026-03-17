@@ -16,7 +16,8 @@ namespace SmartPiXL.Endpoints;
 //   /debug/headers                                         →  Diagnostic JSON dump (localhost only)
 //   /health                                                →  Health check for load balancers
 //   /{companyId}/{pixlId}_{domain}_SMART.js  (catch-all)   →  Modern PiXL script endpoint
-//   /{companyId}/{pixlId}_{domain}_SMART.GIF (catch-all)   →  Legacy tracking GIF endpoint
+//   /{companyId}/{pixlId}_{domain}_SMART.DATA (POST)       →  Beacon data endpoint (sendBeacon)
+//   /{companyId}/{pixlId}_{domain}_SMART.GIF (catch-all)   →  Legacy/fallback tracking GIF endpoint
 //   /{**path} (catch-all fallback)                         →  Bot trap — returns GIF, flags record
 //
 // URL DESIGN (owner-specified):
@@ -57,10 +58,10 @@ public static partial class TrackingEndpoints
     [GeneratedRegex(@"^[a-zA-Z0-9\-_]{1,64}$")]
     private static partial Regex SafeRouteParam();
     
-    // Full PiXL URL pattern: /{companyId}/{pixlId}_{domain}_SMART.(GIF|js)
+    // Full PiXL URL pattern: /{companyId}/{pixlId}_{domain}_SMART.(GIF|js|DATA)
     // Example: /12800/00029_thetriviaquest.com_SMART.GIF
     // Groups: companyId, pixlId, domain (domain includes TLD)
-    [GeneratedRegex(@"^/?(?<companyId>[^/]+)/(?<pixlId>[^_]+)_(?<domain>.+)_SMART\.(GIF|js)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^/?(?<companyId>[^/]+)/(?<pixlId>[^_]+)_(?<domain>.+)_SMART\.(GIF|js|DATA)$", RegexOptions.IgnoreCase)]
     private static partial Regex PiXLUrlPattern();
     
     // Legacy ClearDot URL pattern: /{companyId}/{clientName}_{zipCode}_ClearDot.gif
@@ -74,6 +75,10 @@ public static partial class TrackingEndpoints
     private const string GifContentType = "image/gif";
     private const string JsContentType = "application/javascript";
     private const string HtmlContentType = "text/html; charset=utf-8";
+    
+    // CORS: sendBeacon from a cross-origin page needs the server to allow it.
+    // This is the permissive origin used for beacon POST responses.
+    private const string CorsAllowAll = "*";
     
     // Cached static file paths - resolved once at startup
     private static string? _wwwrootPath;
@@ -201,17 +206,21 @@ public static partial class TrackingEndpoints
                     
                     if (SafeRouteParam().IsMatch(companyId) && SafeRouteParam().IsMatch(pixlId))
                     {
+                        // Fallback URL embedded in JS — only used when document.currentScript
+                        // is unavailable (very rare). The JS self-derives its callback URL
+                        // from its own <script src> at runtime, making BaseUrl non-critical.
                         var baseUrl = config["Tracking:BaseUrl"];
                         if (string.IsNullOrEmpty(baseUrl))
                             baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
                         
-                        // Modern script sends data back to the GIF URL (same pattern, .GIF extension)
                         var pixlUrl = $"{baseUrl}/{companyId}/{pixlId}_{domain}_SMART.GIF";
                         var javascript = PiXLScript.GetScript(pixlUrl);
                         
                         ctx.Response.ContentType = JsContentType;
                         ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
                         ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                        // CORS: script is loaded cross-origin from customer sites
+                        ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
                         return Results.Text(javascript, JsContentType);
                     }
                 }
@@ -263,6 +272,67 @@ public static partial class TrackingEndpoints
             ctx.Response.Headers.Pragma = "no-cache";
             ctx.Response.Headers["Expires"] = "0";
             return Results.Bytes(TransparentGif, GifContentType);
+        });
+        
+        // ============================================================================
+        // BEACON DATA ENDPOINT — POST *_SMART.DATA (sendBeacon from modern PiXL script)
+        //
+        // Receives fingerprint data as application/x-www-form-urlencoded POST body
+        // from navigator.sendBeacon(). Same data as the GIF query string, but:
+        //   - Survives page close/navigation (guaranteed delivery)
+        //   - No URL length limit (POST body vs query string)
+        //   - Returns 204 No Content (no GIF needed)
+        //
+        // CORS: sendBeacon from cross-origin customer sites requires permissive headers.
+        // ============================================================================
+        app.MapPost("/{**path}", async (HttpContext ctx) =>
+        {
+            var path = ctx.Request.Path.ToString();
+            
+            if (!path.EndsWith("_SMART.DATA", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Response.StatusCode = 404;
+                return;
+            }
+            
+            var urlMatch = PiXLUrlPattern().Match(path);
+            if (!urlMatch.Success)
+            {
+                ctx.Response.StatusCode = 400;
+                return;
+            }
+            
+            // Read the form-urlencoded body and set it as the query string
+            // so CaptureAndEnqueue + all enrichment services work unchanged.
+            string body;
+            using (var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8, leaveOpen: true))
+            {
+                body = await reader.ReadToEndAsync();
+            }
+            
+            // Rewrite the request's query string from the POST body so the existing
+            // capture pipeline (which reads ctx.Request.Query) works without changes.
+            if (body.Length > 0)
+            {
+                ctx.Request.QueryString = new QueryString("?" + body);
+            }
+            
+            CaptureAndEnqueue(ctx, captureService, fpService, ipBehaviorService,
+                dcService, geoService, pipeClient, logger, isValidPiXLUrl: true);
+            
+            ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.StatusCode = 204;
+        });
+        
+        // CORS preflight for sendBeacon POST requests from cross-origin customer sites
+        app.MapMethods("/{**path}", ["OPTIONS"], (HttpContext ctx) =>
+        {
+            ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
+            ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+            ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+            ctx.Response.Headers["Access-Control-Max-Age"] = "86400";
+            return Results.StatusCode(204);
         });
         
         return;

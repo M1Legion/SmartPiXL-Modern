@@ -1116,7 +1116,28 @@ public static class PiXLScript
                     params.push(key + '=' + encodeURIComponent(data[key]));
                 }
             }
-            new Image().src = '{{PIXL_URL}}?' + params.join('&');
+            // Derive callback URL from our own script src — eliminates server BaseUrl dependency.
+            // If loaded from smartpixl.com → calls back to smartpixl.com. Same for any domain.
+            var pixlUrl = '{{PIXL_URL}}';
+            try {
+                var cs = document.currentScript;
+                if (cs && cs.src) {
+                    pixlUrl = cs.src.replace(/_SMART\.js(\?.*)?$/i, '_SMART.GIF');
+                }
+            } catch(e) { /* fallback to server-injected URL */ }
+            // Primary: sendBeacon (survives page close/navigation)
+            // Fallback: Image request (broad compatibility)
+            var body = params.join('&');
+            var beaconUrl = pixlUrl.replace(/_SMART\.GIF$/i, '_SMART.DATA');
+            var sent = false;
+            if (navigator.sendBeacon) {
+                try {
+                    sent = navigator.sendBeacon(beaconUrl, new Blob([body], {type: 'application/x-www-form-urlencoded'}));
+                } catch(e) { sent = false; }
+            }
+            if (!sent) {
+                new Image().src = pixlUrl + '?' + body;
+            }
         };
         
         var asyncPromises = [];
@@ -1141,7 +1162,19 @@ public static class PiXLScript
         }
         
     } catch (e) {
-        new Image().src = '{{PIXL_URL}}?error=1&msg=' + encodeURIComponent(e.message);
+        // Error reporting: try beacon first, fall back to Image
+        var errBody = 'error=1&msg=' + encodeURIComponent(e.message);
+        var errUrl = '{{PIXL_URL}}';
+        try {
+            var ecs = document.currentScript;
+            if (ecs && ecs.src) errUrl = ecs.src.replace(/_SMART\.js(\?.*)?$/i, '_SMART.GIF');
+        } catch(e2) {}
+        var errBeaconUrl = errUrl.replace(/_SMART\.GIF$/i, '_SMART.DATA');
+        if (navigator.sendBeacon) {
+            try { navigator.sendBeacon(errBeaconUrl, new Blob([errBody], {type: 'application/x-www-form-urlencoded'})); } catch(e2) {}
+        } else {
+            new Image().src = errUrl + '?' + errBody;
+        }
     }
 })();
 ";

@@ -111,23 +111,36 @@ public sealed class PiXLScriptTests
     }
 
     // ========================================================================
-    // GIF REQUEST - Must fire the pixel
+    // DATA DELIVERY - sendBeacon primary + Image fallback
     // ========================================================================
 
     [Fact]
-    public void Template_should_createImageRequest()
+    public void Template_should_containSendBeacon()
     {
-        // The script should create an Image and set src to fire the pixel
-        PiXLScript.Template.Should().Contain("new Image()",
-            "Must create Image element to fire pixel request");
+        PiXLScript.Template.Should().Contain("navigator.sendBeacon",
+            "Modern PiXL uses sendBeacon for reliable delivery during page close");
     }
 
     [Fact]
-    public void Template_should_sendDataAsQueryString()
+    public void Template_should_containImageFallback()
     {
-        // Data should be sent as query string params on the GIF URL
-        PiXLScript.Template.Should().Contain(".src =",
-            "Must set Image src to fire the tracking request");
+        // Image fallback for browsers without sendBeacon support
+        PiXLScript.Template.Should().Contain("new Image()",
+            "Must have Image fallback when sendBeacon is unavailable");
+    }
+
+    [Fact]
+    public void Template_should_selfReferenceScriptSrc()
+    {
+        PiXLScript.Template.Should().Contain("document.currentScript",
+            "Script must derive callback URL from its own src to avoid BaseUrl dependency");
+    }
+
+    [Fact]
+    public void Template_should_deriveDataEndpoint()
+    {
+        PiXLScript.Template.Should().Contain("_SMART.DATA",
+            "sendBeacon posts to _SMART.DATA endpoint");
     }
 
     // ========================================================================
