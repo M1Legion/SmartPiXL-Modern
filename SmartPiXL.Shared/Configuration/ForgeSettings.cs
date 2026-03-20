@@ -34,7 +34,7 @@ public sealed class ForgeSettings
     /// The Forge's <c>FailoverCatchupService</c> scans this directory every 60 seconds.
     /// Relative paths resolve from <c>AppContext.BaseDirectory</c>.
     /// </summary>
-    public string FailoverDirectory { get; set; } = "Failover";
+    public string FailoverDirectory { get; set; } = @"C:\inetpub\Smartpixl.info\Failover";
 
     /// <summary>
     /// Maximum number of <c>TrackingData</c> items the pipe-to-enrichment
@@ -46,7 +46,7 @@ public sealed class ForgeSettings
     /// Maximum number of enriched <c>TrackingData</c> items the
     /// enrichment-to-SQL-writer <c>Channel&lt;T&gt;</c> can hold.
     /// </summary>
-    public int SqlWriterChannelCapacity { get; set; } = 10_000;
+    public int SqlWriterChannelCapacity { get; set; } = 50_000;
 
     /// <summary>
     /// Number of concurrent <c>NamedPipeServerStream</c> instances.
@@ -56,12 +56,39 @@ public sealed class ForgeSettings
     public int MaxConcurrentPipeInstances { get; set; } = 4;
 
     /// <summary>
-    /// Number of concurrent enrichment workers. Each worker reads from the
-    /// enrichment channel and processes one record at a time through the
-    /// full Tier 1-3 enrichment chain. Overlaps I/O waits (DNS, IPAPI)
-    /// across records. Default 8.
+    /// Maximum number of concurrent enrichment workers. Adaptive scaling starts
+    /// at <see cref="MinEnrichmentWorkers"/> and scales up to this value based
+    /// on enrichment channel depth. Capped at the NUMA node's logical processor
+    /// count when <see cref="NumaNode"/> is configured. Default 32.
     /// </summary>
-    public int EnrichmentWorkerCount { get; set; } = 8;
+    public int EnrichmentWorkerCount { get; set; } = 32;
+
+    /// <summary>
+    /// Minimum number of enrichment workers that are always active. Adaptive
+    /// scaling never drops below this value. Default 8.
+    /// </summary>
+    public int MinEnrichmentWorkers { get; set; } = 8;
+
+    /// <summary>
+    /// NUMA node index to pin the Forge process to. On a 4-socket system,
+    /// valid values are 0-3. When set, all Forge threads run on the specified
+    /// NUMA node's processors. Default 3 (bottom-right socket).
+    /// </summary>
+    public int NumaNode { get; set; } = 3;
+
+    /// <summary>
+    /// Number of background I/O workers for DNS and WHOIS cache warming
+    /// (Lane 3). These workers are I/O-bound, not CPU-bound. Pinned to the
+    /// same NUMA node as the rest of the Forge process. Default 8.
+    /// </summary>
+    public int BackgroundIpWorkerCount { get; set; } = 8;
+
+    /// <summary>
+    /// Timeout in milliseconds for writing a deserialized record to the
+    /// enrichment channel. If the channel is full for this long, the record
+    /// is dropped (Edge JSONL failover handles persistence). Default 5000 (5s).
+    /// </summary>
+    public int PipeChannelWriteTimeoutMs { get; set; } = 5_000;
 
     /// <summary>
     /// Master toggle for the enrichment pipeline. When false, records pass
@@ -79,7 +106,38 @@ public sealed class ForgeSettings
     /// Directory where the Forge writes enriched JSONL failover files when the
     /// SQL writer channel is full or the circuit breaker is open. Enriched records
     /// are persisted here instead of being dropped, and replayed when SQL recovers.
+    /// Must be an absolute path.
+    /// </summary>
+    public string ForgeFailoverDirectory { get; set; } = @"C:\Services\SmartPiXL-Forge\ForgeFailover";
+
+    /// <summary>
+    /// Directory where the Forge writes dead-letter files when all batch retries
+    /// are exhausted. Must be an absolute path. Replayed by ForgeReplayService.
+    /// </summary>
+    public string DeadLetterDirectory { get; set; } = @"C:\Services\SmartPiXL-Forge\DeadLetter";
+
+    /// <summary>
+    /// Maximum number of records per SqlBulkCopy write to PiXL.Parsed.
+    /// Separate from <see cref="TrackingSettings.BatchSize"/> which controls the
+    /// Edge's write batches. Forge batches can be larger because the Forge writes
+    /// to a single table with fewer indexes. Default 500.
+    /// </summary>
+    public int ForgeBatchSize { get; set; } = 500;
+
+    // ========================================================================
+    // IP DATA ACQUISITION SETTINGS
+    // ========================================================================
+
+    /// <summary>
+    /// Directory where downloaded IP data files are cached on disk.
     /// Relative paths resolve from <c>AppContext.BaseDirectory</c>.
     /// </summary>
-    public string ForgeFailoverDirectory { get; set; } = "ForgeFailover";
+    public string IpDataDirectory { get; set; } = "IpData";
+
+    /// <summary>
+    /// UTC hour (0-23) when the daily IP data acquisition check runs.
+    /// Downloads new files if upstream sources have changed.
+    /// Default 1 AM UTC (low traffic, before enrichment cycle).
+    /// </summary>
+    public int IpDataAcquisitionHourUtc { get; set; } = 1;
 }

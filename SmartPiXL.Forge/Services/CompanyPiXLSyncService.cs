@@ -188,8 +188,8 @@ public sealed class CompanyPiXLSyncService : BackgroundService
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                INSERT INTO IPAPI.SyncLog (SyncType)
-                OUTPUT INSERTED.SyncId
+                INSERT INTO IPInfo.ImportLog (SyncType)
+                OUTPUT INSERTED.ImportId
                 VALUES (@SyncType)";
             cmd.Parameters.AddWithValue("@SyncType", syncType);
 
@@ -212,14 +212,14 @@ public sealed class CompanyPiXLSyncService : BackgroundService
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                UPDATE IPAPI.SyncLog SET
+                UPDATE IPInfo.ImportLog SET
                     CompletedAt     = SYSUTCDATETIME(),
-                    RowsInserted    = @RowsInserted,
+                    RowsImported    = @RowsInserted,
                     RowsUpdated     = @RowsUpdated,
                     RowsDeleted     = @RowsDeleted,
                     DurationMs      = DATEDIFF(MILLISECOND, StartedAt, SYSUTCDATETIME()),
                     ErrorMessage    = @ErrorMessage
-                WHERE SyncId = @SyncId";
+                WHERE ImportId = @SyncId";
             cmd.Parameters.AddWithValue("@SyncId", syncLogId);
             cmd.Parameters.AddWithValue("@RowsInserted", rowsInserted);
             cmd.Parameters.AddWithValue("@RowsUpdated", rowsUpdated);

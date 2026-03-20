@@ -15,6 +15,7 @@ namespace SmartPiXL.Endpoints;
 //   /debug/headers                                         →  Diagnostic JSON dump (localhost only)
 //   /health                                                →  Health check for load balancers
 //   /{companyId}/{pixlId}_{domain}_SMART.js  (catch-all)   →  Modern PiXL script endpoint
+//   /js/{clientId}/{pixlId}.js              (catch-all)   →  Legacy script endpoint (serves modern script)
 //   /{companyId}/{pixlId}_{domain}_SMART.DATA (POST)       →  Beacon data endpoint (sendBeacon)
 //   /{companyId}/{pixlId}_{domain}_SMART.GIF (catch-all)   →  Legacy/fallback tracking GIF endpoint
 //   /{**path} (catch-all fallback)                         →  Bot trap — returns GIF, flags record
@@ -189,6 +190,14 @@ public static partial class TrackingEndpoints
             // ── Modern PiXL script: *_SMART.js ──────────────────────────────
             if (path.EndsWith("_SMART.js", StringComparison.OrdinalIgnoreCase))
             {
+                // Block direct browser navigation — only serve when loaded as <script>.
+                // Sec-Fetch-Dest: "document" = browser address bar / link click.
+                // Sec-Fetch-Dest: "script"   = <script src="..."> (legitimate use).
+                // Missing header  = older browsers / curl — allow (obfuscated anyway).
+                var fetchDest = ctx.Request.Headers["Sec-Fetch-Dest"].FirstOrDefault();
+                if (string.Equals(fetchDest, "document", StringComparison.OrdinalIgnoreCase))
+                    return Results.StatusCode(403);
+
                 var urlMatch = PiXLUrlPattern().Match(path);
                 if (urlMatch.Success)
                 {
@@ -217,6 +226,32 @@ public static partial class TrackingEndpoints
                     }
                 }
                 return Results.StatusCode(400);
+            }
+            
+            // ── Legacy script: any .js request that didn't match _SMART.js ─
+            // smartpixl.com (and potentially other legacy installs) use an older
+            // script tag like <script src="/js/CLIENT_ID/PIXL_ID.js">.
+            // Serve the full fingerprint script with a placeholder callback URL
+            // so we still collect all client data — companyId/pixlId stay 0/0
+            // until the customer's tag is updated to the modern _SMART.js format.
+            if (path.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+            {
+                var fetchDest = ctx.Request.Headers["Sec-Fetch-Dest"].FirstOrDefault();
+                if (string.Equals(fetchDest, "document", StringComparison.OrdinalIgnoreCase))
+                    return Results.StatusCode(403);
+
+                var baseUrl = config["Tracking:BaseUrl"];
+                if (string.IsNullOrEmpty(baseUrl))
+                    baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+
+                var pixlUrl = $"{baseUrl}/0/0_legacy_SMART.GIF";
+                var javascript = PiXLScript.GetScript(pixlUrl);
+
+                ctx.Response.ContentType = JsContentType;
+                ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+                ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
+                return Results.Text(javascript, JsContentType);
             }
             
             // ── Legacy/Modern GIF: *_SMART.GIF ────────────────────────────

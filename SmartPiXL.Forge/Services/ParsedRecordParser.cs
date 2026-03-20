@@ -32,17 +32,18 @@ namespace SmartPiXL.Forge.Services;
 /// </summary>
 internal static class ParsedRecordParser
 {
-    /// <summary>Number of columns in PiXL.Parsed (column_id 1–230).</summary>
-    internal const int ColumnCount = 229;
+    /// <summary>Number of columns written to PiXL.Parsed (excludes SourceId which is SEQUENCE-generated).</summary>
+    internal const int ColumnCount = 230;
 
     /// <summary>
-    /// Column names in PiXL.Parsed column_id order (1–230 → index 0–229).
-    /// Used for <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> column mappings.
+    /// Column names for <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> mappings.
+    /// SourceId is omitted — SQL generates it via SEQUENCE DEFAULT (PiXL.HitSequence).
+    /// QueryString and HeadersJson are the raw fields merged from the former PiXL.Raw table.
     /// </summary>
     internal static readonly string[] ColumnNames =
     [
-        // ── Identifiers (cols 1–8) ─────────────────────────────────────
-        "SourceId",             // 0  — bigint   ← Raw.Id
+        // ── Raw field: QueryString (merged from PiXL.Raw) ──────────────
+        "QueryString",          // 0  — nvarchar(max) ← TrackingData.QueryString
         "CompanyID",            // 1  — int      ← Raw.CompanyID
         "PiXLID",               // 2  — int      ← Raw.PiXLID
         "IPAddress",            // 3  — varchar  ← Raw.IPAddress
@@ -301,34 +302,33 @@ internal static class ParsedRecordParser
         "AccessibilityBitmapValue", // 226 — int (NULL — computed)
         "BotBitmapValue",           // 227 — int (NULL — computed)
         "EvasionBitmapValue",       // 228 — int (NULL — computed)
+
+        // ── Raw field: HeadersJson (merged from PiXL.Raw) ──────────────
+        "HeadersJson",              // 229 — nvarchar(max) ← TrackingData.HeadersJson
     ];
 
     /// <summary>
-    /// Parses a single PiXL.Raw record into a 229-element value array for PiXL.Parsed.
-    /// Every assignment maps directly to an ETL proc phase. QueryString is parsed
-    /// using span-based <see cref="QueryParamReader"/> — zero-allocation for numeric reads.
+    /// Parses a single TrackingData record into a 230-element value array for PiXL.Parsed.
+    /// SourceId is omitted — SQL generates it via SEQUENCE DEFAULT.
+    /// QueryString and HeadersJson are preserved as raw fields for future re-parse capability.
     /// </summary>
-    /// <param name="sourceId">PiXL.Raw.Id (known for backfill, query-back for new traffic).</param>
-    /// <param name="companyId">PiXL.Raw.CompanyID</param>
-    /// <param name="pixlId">PiXL.Raw.PiXLID</param>
-    /// <param name="ipAddress">PiXL.Raw.IPAddress</param>
-    /// <param name="receivedAt">PiXL.Raw.ReceivedAt</param>
-    /// <param name="requestPath">PiXL.Raw.RequestPath</param>
-    /// <param name="userAgent">PiXL.Raw.UserAgent</param>
-    /// <param name="referer">PiXL.Raw.Referer</param>
-    /// <param name="queryString">PiXL.Raw.QueryString — the raw QS with all params.</param>
     internal static object?[] Parse(
-        long sourceId, int? companyId, int? pixlId, string? ipAddress,
-        DateTime receivedAt, string? requestPath, string? userAgent, string? referer,
-        string? queryString)
+        int? companyId, int? pixlId, string? ipAddress,
+        DateTime receivedAt, string? requestPath,
+        string? queryString, string? headersJson,
+        string? userAgent, string? referer)
     {
         var v = new object?[ColumnCount];
         var qs = queryString;
 
         // ════════════════════════════════════════════════════════════════
-        // IDENTIFIERS — Direct from PiXL.Raw (no parsing)
+        // RAW FIELD — QueryString preserved for re-parse capability
         // ════════════════════════════════════════════════════════════════
-        v[0]  = sourceId;                                       // SourceId
+        v[0]  = (object?)queryString ?? DBNull.Value;           // QueryString
+
+        // ════════════════════════════════════════════════════════════════
+        // IDENTIFIERS — Direct from TrackingData (no parsing)
+        // ════════════════════════════════════════════════════════════════
         v[1]  = (object?)companyId ?? DBNull.Value;             // CompanyID
         v[2]  = (object?)pixlId ?? DBNull.Value;                // PiXLID
         v[3]  = (object?)ipAddress ?? DBNull.Value;             // IPAddress
@@ -619,6 +619,11 @@ internal static class ParsedRecordParser
         v[226] = DBNull.Value;  // AccessibilityBitmapValue
         v[227] = DBNull.Value;  // BotBitmapValue
         v[228] = DBNull.Value;  // EvasionBitmapValue
+
+        // ════════════════════════════════════════════════════════════════
+        // RAW FIELD — HeadersJson preserved for re-parse capability
+        // ════════════════════════════════════════════════════════════════
+        v[229] = (object?)headersJson ?? DBNull.Value;          // HeadersJson
 
         return v;
     }

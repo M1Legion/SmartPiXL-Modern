@@ -1,5 +1,6 @@
-using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Microsoft.Extensions.Options;
+using SmartPiXL.Configuration;
 using SmartPiXL.Forge.Services.Enrichments;
 using SmartPiXL.Services;
 
@@ -8,7 +9,7 @@ namespace SmartPiXL.Forge.Services;
 // ============================================================================
 // BACKGROUND IP ENRICHMENT SERVICE — Lane 3 of the Three-Lane Architecture.
 //
-// Runs DNS, IPAPI, and WHOIS lookups OFF the enrichment hot path. Pipeline
+// Runs DNS and WHOIS lookups OFF the enrichment hot path. Pipeline
 // workers call Enqueue(ip) fire-and-forget; background workers perform the
 // actual I/O-bound lookups asynchronously. Results populate the per-service
 // ConcurrentDictionary caches so that SUBSEQUENT records for the same IP
@@ -19,7 +20,6 @@ namespace SmartPiXL.Forge.Services;
 //       → Channel<string>                [bounded 50K, DropOldest]
 //       → N background workers           [default 4, I/O-overlapped]
 //           → DnsLookupService.LookupAsync     → populates DNS cache
-//           → IpApiLookupService.LookupAsync   → populates IPAPI cache + writes IPAPI.IP
 //           → WhoisAsnService.LookupAsync      → populates WHOIS cache
 //                                                (only when MaxMind has CC but no ASN)
 //
@@ -39,7 +39,7 @@ namespace SmartPiXL.Forge.Services;
 // ============================================================================
 
 /// <summary>
-/// Background service that performs DNS, IPAPI, and WHOIS lookups off the
+/// Background service that performs DNS and WHOIS lookups off the
 /// enrichment hot path. Pipeline workers call <see cref="Enqueue"/> to
 /// submit IPs for asynchronous enrichment. Results populate service caches
 /// for zero-latency inline reads on subsequent records.
@@ -47,9 +47,8 @@ namespace SmartPiXL.Forge.Services;
 public sealed class BackgroundIpEnrichmentService : BackgroundService
 {
     private readonly Channel<string> _ipChannel;
-    private readonly ConcurrentDictionary<string, byte> _seen;
+    private readonly BoundedCache<string, byte> _seen; // dedup cache (value unused, timestamps tracked by BoundedCache)
     private readonly DnsLookupService? _dns;
-    private readonly IpApiLookupService? _ipApi;
     private readonly WhoisAsnService? _whois;
     private readonly MaxMindGeoService? _maxMind;
     private readonly ITrackingLogger _logger;
@@ -62,19 +61,20 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
 
     public BackgroundIpEnrichmentService(
         ITrackingLogger logger,
+        IOptions<ForgeSettings> forgeSettings,
         DnsLookupService? dns = null,
-        IpApiLookupService? ipApi = null,
         WhoisAsnService? whois = null,
         MaxMindGeoService? maxMind = null)
     {
         _logger = logger;
         _dns = dns;
-        _ipApi = ipApi;
         _whois = whois;
         _maxMind = maxMind;
-        _workerCount = 4; // 4 I/O-overlapped workers — DNS/WHOIS are 1-5s each
+        _workerCount = forgeSettings.Value.BackgroundIpWorkerCount;
 
-        _seen = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        _seen = new BoundedCache<string, byte>(
+            maxEntries: 500_000, evictTarget: 250_000,
+            maxAge: TimeSpan.FromMinutes(30), StringComparer.Ordinal);
         _ipChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50_000)
         {
             FullMode = BoundedChannelFullMode.DropOldest, // NEVER block the pipeline
@@ -116,7 +116,7 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
     {
         await Task.Yield();
 
-        var hasAnyService = _dns is not null || _ipApi is not null || _whois is not null;
+        var hasAnyService = _dns is not null || _whois is not null;
         if (!hasAnyService)
         {
             _logger.Info("BackgroundIpEnrichment: No I/O services registered — service disabled.");
@@ -125,23 +125,22 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
 
         _logger.Info($"BackgroundIpEnrichment started. Workers: {_workerCount}, " +
                      $"DNS: {(_dns is not null ? "ON" : "OFF")}, " +
-                     $"IPAPI: {(_ipApi is not null ? "ON" : "OFF")}, " +
                      $"WHOIS: {(_whois is not null ? "ON" : "OFF")}");
 
-        // Periodic cache eviction — prevent unbounded growth of _seen set
+        // Periodic cache eviction — delegates to BoundedCache hybrid strategy.
         _ = Task.Run(async () =>
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
-                    if (_seen.Count > 500_000)
-                    {
-                        var count = _seen.Count;
-                        _seen.Clear();
-                        _logger.Info($"BackgroundIpEnrichment: Evicted {count:N0} IPs from dedup cache");
-                    }
+                    await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+
+                    if (_seen.Count <= _seen.MaxEntries) continue;
+
+                    var evicted = _seen.Evict();
+                    if (evicted > 0)
+                        _logger.Info($"BackgroundIpEnrichment: Evicted {evicted:N0} IPs (remaining: {_seen.Count:N0})");
                 }
                 catch (OperationCanceledException) { break; }
             }
@@ -180,16 +179,9 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
             {
                 try
                 {
-                    // DNS and IPAPI can run in parallel — different I/O targets
-                    var dnsTask = _dns is not null
-                        ? _dns.LookupAsync(ip, ct)
-                        : Task.FromResult(default(DnsLookupService.DnsLookupResult));
-
-                    var ipApiTask = _ipApi is not null
-                        ? _ipApi.LookupAsync(ip, ct)
-                        : Task.FromResult(default(IpApiLookupService.IpApiResult));
-
-                    await Task.WhenAll(dnsTask, ipApiTask);
+                    // DNS lookup
+                    if (_dns is not null)
+                        await _dns.LookupAsync(ip, ct);
 
                     // WHOIS — only when MaxMind has country but no ASN (supplementary)
                     if (_whois is not null && _maxMind is not null)

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using DeviceDetectorNET;
 using UAParser;
 using SmartPiXL.Services;
@@ -34,12 +33,10 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class UaParsingService
 {
-    private readonly ConcurrentDictionary<string, UaParseResult> _cache = new();
+    private readonly BoundedCache<string, UaParseResult> _cache = new(
+        maxEntries: 50_000, evictTarget: 25_000, maxAge: TimeSpan.FromMinutes(30));
     private readonly Parser _uaParser;
     private readonly ITrackingLogger _logger;
-
-    /// <summary>Maximum cache entries before full eviction. 50K entries ≈ 15 MB.</summary>
-    private const int MaxCacheSize = 50_000;
 
     public UaParsingService(ITrackingLogger logger)
     {
@@ -70,18 +67,18 @@ public sealed class UaParsingService
         if (string.IsNullOrEmpty(userAgent))
             return default;
 
-        // Lock-free cache lookup — ConcurrentDictionary.TryGetValue is a hash probe
-        if (_cache.TryGetValue(userAgent, out var cached))
+        // Lock-free cache lookup — BoundedCache.TryGet is a hash probe
+        if (_cache.TryGet(userAgent, out var cached))
             return cached;
 
         // Cache miss — full parse through both libraries
         var result = ParseCore(userAgent);
 
-        // Bounded cache — full eviction at threshold
-        if (_cache.Count >= MaxCacheSize)
-            _cache.Clear();
+        // Hybrid eviction when over cap (shared BoundedCache pattern)
+        if (_cache.Count >= _cache.MaxEntries)
+            _cache.Evict();
 
-        _cache.TryAdd(userAgent, result);
+        _cache.Set(userAgent, result);
         return result;
     }
 

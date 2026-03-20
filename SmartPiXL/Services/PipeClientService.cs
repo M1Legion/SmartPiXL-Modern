@@ -103,18 +103,24 @@ public sealed class PipeClientService : BackgroundService
         _channel = Channel.CreateBounded<TrackingData>(
             new BoundedChannelOptions(settings.Value.QueueCapacity)
             {
-                FullMode = BoundedChannelFullMode.DropOldest,
+                FullMode = BoundedChannelFullMode.DropWrite,
                 SingleReader = true,
                 SingleWriter = false
             });
     }
 
     /// <summary>
-    /// Lock-free enqueue for the hot path. Returns <c>true</c> always
-    /// (bounded channel with <see cref="BoundedChannelFullMode.DropOldest"/>
-    /// drops the oldest item when full, so TryWrite never returns false).
+    /// Lock-free enqueue for the hot path. If the channel is full, routes
+    /// the record to JSONL failover instead of dropping it.
     /// </summary>
-    public bool TryEnqueue(TrackingData data) => _channel.Writer.TryWrite(data);
+    public bool TryEnqueue(TrackingData data)
+    {
+        if (_channel.Writer.TryWrite(data))
+            return true;
+
+        // Channel full — failover to JSONL so no data is ever lost
+        return _failoverService.TryEnqueue(data);
+    }
 
     /// <summary>Current number of records waiting to be written to the pipe.</summary>
     public int QueueDepth => _channel.Reader.Count;

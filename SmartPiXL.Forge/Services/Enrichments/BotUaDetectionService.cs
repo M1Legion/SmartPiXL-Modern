@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using NetCrawlerDetect;
 using SmartPiXL.Services;
 
@@ -33,11 +32,9 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class BotUaDetectionService
 {
-    private readonly ConcurrentDictionary<string, (bool IsCrawler, string? BotName)> _cache = new();
+    private readonly BoundedCache<string, (bool IsCrawler, string? BotName)> _cache = new(
+        maxEntries: 50_000, evictTarget: 25_000, maxAge: TimeSpan.FromMinutes(30));
     private readonly ITrackingLogger _logger;
-
-    /// <summary>Maximum cache entries before full eviction. 50K entries ≈ 10 MB.</summary>
-    private const int MaxCacheSize = 50_000;
 
     public BotUaDetectionService(ITrackingLogger logger)
     {
@@ -63,8 +60,8 @@ public sealed class BotUaDetectionService
         if (string.IsNullOrWhiteSpace(userAgent))
             return (false, null);
 
-        // Lock-free cache lookup — ConcurrentDictionary.TryGetValue is a hash probe
-        if (_cache.TryGetValue(userAgent, out var cached))
+        // Lock-free cache lookup — BoundedCache.TryGet is a hash probe
+        if (_cache.TryGet(userAgent, out var cached))
             return cached;
 
         // Cache miss — per-call instance avoids thread-safety issue with _matches field.
@@ -85,12 +82,11 @@ public sealed class BotUaDetectionService
                 ? (true, detector.Matches?.Count > 0 ? detector.Matches[0].Value : null)
                 : (false, (string?)null);
 
-            // Bounded cache — full eviction at threshold. Simpler than LRU,
-            // re-populates quickly from live traffic repeats.
-            if (_cache.Count >= MaxCacheSize)
-                _cache.Clear();
+            // Hybrid eviction when over cap (shared BoundedCache pattern)
+            if (_cache.Count >= _cache.MaxEntries)
+                _cache.Evict();
 
-            _cache.TryAdd(userAgent, result);
+            _cache.Set(userAgent, result);
             return result;
         }
         catch (Exception ex)

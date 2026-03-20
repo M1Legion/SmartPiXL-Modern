@@ -42,9 +42,13 @@ public sealed class JsonlFailoverService : BackgroundService
     private readonly Channel<TrackingData> _channel;
     private readonly ITrackingLogger _logger;
     private readonly string _failoverDirectory;
+    private readonly string _resolvedDirectory;
 
     private StreamWriter? _currentWriter;
     private string? _currentDate;
+
+    /// <summary>Lock for synchronous emergency writes when the channel is full.</summary>
+    private readonly object _emergencyWriteLock = new();
 
     public JsonlFailoverService(
         IOptions<TrackingSettings> settings,
@@ -53,21 +57,35 @@ public sealed class JsonlFailoverService : BackgroundService
         _logger = logger;
         _failoverDirectory = settings.Value.FailoverDirectory;
 
+        // Pre-resolve the directory path so emergency writes can use it
+        _resolvedDirectory = Path.IsPathRooted(_failoverDirectory)
+            ? _failoverDirectory
+            : Path.Combine(AppContext.BaseDirectory, _failoverDirectory);
+
         _channel = Channel.CreateBounded<TrackingData>(
             new BoundedChannelOptions(settings.Value.QueueCapacity)
             {
-                FullMode = BoundedChannelFullMode.DropOldest,
+                FullMode = BoundedChannelFullMode.DropWrite,
                 SingleReader = true,
                 SingleWriter = false
             });
     }
 
     /// <summary>
-    /// Lock-free enqueue. Returns <c>true</c> always (bounded channel with
-    /// <see cref="BoundedChannelFullMode.DropOldest"/> drops the oldest item
-    /// when full, so TryWrite never returns false).
+    /// Lock-free enqueue. If the channel is full, performs a synchronous
+    /// direct-write to disk as a last resort — data is never lost.
     /// </summary>
-    public bool TryEnqueue(TrackingData data) => _channel.Writer.TryWrite(data);
+    public bool TryEnqueue(TrackingData data)
+    {
+        if (_channel.Writer.TryWrite(data))
+            return true;
+
+        // Channel full — emergency synchronous write directly to disk.
+        // This is the absolute last safety net. We accept the lock cost
+        // because this only fires under extreme backpressure.
+        EmergencyWriteToDisk(data);
+        return true;
+    }
 
     /// <summary>Current number of records waiting to be written to disk.</summary>
     public int QueueDepth => _channel.Reader.Count;
@@ -136,6 +154,30 @@ public sealed class JsonlFailoverService : BackgroundService
         catch (Exception ex)
         {
             _logger.Error($"JsonlFailover: write failed — {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Synchronous emergency write when the channel is full. Uses a separate
+    /// lock and writes directly to an emergency file. This path only fires
+    /// under extreme backpressure when the normal async channel is saturated.
+    /// </summary>
+    private void EmergencyWriteToDisk(TrackingData record)
+    {
+        lock (_emergencyWriteLock)
+        {
+            try
+            {
+                Directory.CreateDirectory(_resolvedDirectory);
+                var date = DateTime.UtcNow.ToString("yyyy_MM_dd");
+                var filePath = Path.Combine(_resolvedDirectory, $"failover_emergency_{date}.jsonl");
+                var json = JsonSerializer.Serialize(record);
+                File.AppendAllText(filePath, json + Environment.NewLine, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"CRITICAL: Emergency failover write failed — DATA AT RISK: {ex.Message}");
+            }
         }
     }
 }

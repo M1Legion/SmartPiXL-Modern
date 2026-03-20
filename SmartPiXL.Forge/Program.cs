@@ -10,11 +10,11 @@ using SmartPiXL.Services;
 // ============================================================================
 // Background Windows Service that runs all non-hot-path workloads:
 //   - Named pipe server (receives enriched records from IIS Edge)
-//   - Enrichment pipeline (Tier 1-3, pass-through in Phase 2)
+//   - Enrichment pipeline (adaptive workers, NUMA-pinned)
 //   - SqlBulkCopy writer (Channel<T> → PiXL.Raw)
-//   - Failover catch-up (JSONL files → enrichment pipeline)
+//   - Unified replay (ForgeReplayService: Edge failover + Forge failover + dead-letter)
 //   - ETL pipeline (PiXL.Raw → PiXL.Parsed every 60s)
-//   - IP geolocation sync (Xavier → IPAPI.IP, daily 2 AM UTC)
+//   - IP data acquisition (IPtoASN, DB-IP Lite → IPInfo schema, daily)
 //   - Company/PiXL sync (Xavier → PiXL.Company/PiXL.Settings, every 6h)
 //   - Infrastructure health monitoring (InfraHealthService, 15s cache)
 //   - Self-healing (circuit breaker watch, filegroup checks, auto-remediation)
@@ -46,16 +46,15 @@ builder.Services.Configure<TrackingSettings>(
 builder.Services.Configure<ForgeSettings>(
     builder.Configuration.GetSection(ForgeSettings.SectionName));
 
-// Xavier SQL Auth rewrite (IIS app pool identity can't delegate Windows Auth
-// to the remote Xavier server — use machine-level environment variables instead)
+// Xavier SQL Auth rewrite — needed for CompanyPiXL sync (Xavier's SmartPiXL DB).
+// IIS app pool identity can't delegate Windows Auth to the remote Xavier server,
+// so use machine-level environment variables instead.
 var sqlUser = Environment.GetEnvironmentVariable("SQL_USERNAME", EnvironmentVariableTarget.Machine);
 var sqlPass = Environment.GetEnvironmentVariable("SQL_PASSWORD", EnvironmentVariableTarget.Machine);
 if (!string.IsNullOrEmpty(sqlUser) && !string.IsNullOrEmpty(sqlPass))
 {
     builder.Services.PostConfigure<TrackingSettings>(settings =>
     {
-        settings.XavierConnectionString = RewriteToSqlAuth(
-            settings.XavierConnectionString, sqlUser, sqlPass);
         settings.XavierSmartPiXLConnectionString = RewriteToSqlAuth(
             settings.XavierSmartPiXLConnectionString, sqlUser, sqlPass);
     });
@@ -107,8 +106,8 @@ builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, cli
 // ── Enrichment services ───────────────────────────────────────────────────
 // Three-lane architecture (Session 17):
 //   Lane 1: CPU/memory services run inline on enrichment workers (<5ms total)
-//   Lane 2: IPAPI geo enrichment via SQL ETL (batch JOIN, already exists)
-//   Lane 3: DNS/IpApi/WHOIS via BackgroundIpEnrichmentService (off hot path)
+//   Lane 2: IPInfo geo enrichment via SQL ETL (batch range-lookup)
+//   Lane 3: DNS/WHOIS via BackgroundIpEnrichmentService (off hot path)
 //
 // ── Lane 1 — Tier 1 (Phase 4) — Pure-compute / memory-only ──
 builder.Services.AddSingleton<BotUaDetectionService>();
@@ -116,9 +115,12 @@ builder.Services.AddSingleton<UaParsingService>();
 builder.Services.AddSingleton<MaxMindGeoService>();
 //
 // ── Lane 1 — Tier 2 (Phase 5) — In-memory state + math ──
+builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<SessionStitchingService>();
 builder.Services.AddSingleton<CrossCustomerIntelService>();
 builder.Services.AddSingleton<DeviceAffluenceService>();
+builder.Services.AddSingleton<FingerprintStabilityService>();
+builder.Services.AddSingleton<IpBehaviorService>();
 builder.Services.AddSingleton<LeadQualityScoringService>();
 //
 // ── Lane 1 — Tier 3 (Phase 6) — Rule engines + pattern detection ──
@@ -135,15 +137,17 @@ builder.Services.AddSingleton<DeadInternetService>();
 //   2. BackgroundIpEnrichmentService runs actual lookups asynchronously
 //   3. Results populate service caches for subsequent records
 builder.Services.AddSingleton<DnsLookupService>();
-// IpApiLookupService: DISABLED — the live Xavier system owns ip-api.com API calls.
-// IPAPI.IP (344M rows) is populated by Xavier. Forge reads it via Lane 2
-// (ETL.usp_EnrichParsedGeo batch JOIN). Do NOT call ip-api.com from Forge.
-// builder.Services.AddSingleton<IpApiLookupService>();
 builder.Services.AddSingleton<WhoisAsnService>();
+
+// DatacenterIpService: Downloads AWS/GCP IP ranges at startup, refreshes weekly.
+// Provides lock-free CIDR trie lookup for datacenter IP detection.
+builder.Services.AddHttpClient("DatacenterIp");
+builder.Services.AddSingleton<DatacenterIpService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
 
 // BackgroundIpEnrichmentService: Lane 3 background workers.
 // Receives unique IPs from pipeline via fire-and-forget Enqueue().
-// Runs DNS/IpApi/WHOIS async, populates caches for inline reads.
+// Runs DNS/WHOIS async, populates caches for inline reads.
 builder.Services.AddSingleton<BackgroundIpEnrichmentService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundIpEnrichmentService>());
 
@@ -175,11 +179,12 @@ builder.Services.AddHostedService<PipeListenerService>();
 // writes to SqlWriter channel.
 builder.Services.AddHostedService<EnrichmentPipelineService>();
 
-// SqlBulkCopyWriterService: Drains SqlWriter channel → SqlBulkCopy → PiXL.Raw.
+// SqlBulkCopyWriterService: Drains SqlWriter channel → parse inline → SqlBulkCopy → PiXL.Parsed.
 builder.Services.AddHostedService<SqlBulkCopyWriterService>();
 
-// FailoverCatchupService: Replays Edge JSONL failover files through the enrichment pipeline.
-builder.Services.AddHostedService<FailoverCatchupService>();
+// ForgeReplayService: Unified replay for Edge failover + Forge failover + dead-letter.
+// Scans directories on startup and periodically, routes records appropriately.
+builder.Services.AddHostedService<ForgeReplayService>();
 
 // ── Ported Worker services ────────────────────────────────────────────────
 
@@ -187,17 +192,20 @@ builder.Services.AddHostedService<FailoverCatchupService>();
 // every 60 seconds. Parsing is handled by ParsedBulkInsertService.
 builder.Services.AddHostedService<EtlBackgroundService>();
 
-// ParsedBulkInsertService: .NET backfill for PiXL.Parsed.
-// Reads Raw → parses QS in .NET (~1μs/row vs ~7ms/row in SQL UDFs)
-// → BulkCopy to Parsed → calls ETL proc for Phase 9–13 only.
-builder.Services.AddHostedService<ParsedBulkInsertService>();
+// ParsedBulkInsertService: DISABLED — The Forge now writes directly to PiXL.Parsed
+// via SqlBulkCopyWriterService (merged pipeline). The two-step Raw → Parsed pipeline
+// is eliminated. This service can be re-enabled for backfilling historical data.
+// builder.Services.AddHostedService<ParsedBulkInsertService>();
+
+// ── IP Data Acquisition ───────────────────────────────────────────────────
+// Downloads free public IP data (IPtoASN, DB-IP Lite, etc.) and imports into
+// the IPInfo SQL schema. Runs daily at the configured UTC hour.
+builder.Services.AddHttpClient<IpDataAcquisitionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IpDataAcquisitionService>());
 
 // ── Non-essential services DISABLED ───────────────────────────────────────
 // All background sync, maintenance, health, and notification services disabled
 // to isolate the core Pipe → SQL pipeline. Re-enable after baseline verified.
-//
-builder.Services.AddSingleton<IpApiSyncService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<IpApiSyncService>());
 //
 // builder.Services.AddSingleton<EmailNotificationService>();
 //
@@ -238,6 +246,22 @@ host.Services.GetRequiredService<IHostApplicationLifetime>()
 
 logger.Info("SmartPiXL Forge starting...");
 logger.Info($"Pipe: {host.Services.GetRequiredService<IOptions<ForgeSettings>>().Value.PipeName}");
+
+// NUMA node pinning — isolate Forge to a single NUMA node for cache locality.
+var forgeSettings = host.Services.GetRequiredService<IOptions<ForgeSettings>>().Value;
+if (forgeSettings.NumaNode >= 0)
+{
+    var lpCount = NumaHelper.PinToNumaNode(forgeSettings.NumaNode, logger);
+    if (lpCount > 0)
+    {
+        // Cap enrichment workers to the LP count on this NUMA node
+        if (forgeSettings.EnrichmentWorkerCount > lpCount)
+        {
+            logger.Warning($"NUMA: Capping EnrichmentWorkerCount from {forgeSettings.EnrichmentWorkerCount} to {lpCount} (NUMA node {forgeSettings.NumaNode} LP count)");
+            forgeSettings.EnrichmentWorkerCount = lpCount;
+        }
+    }
+}
 
 // Validate Edge connectivity — warn early if EdgeBaseUrl is misconfigured.
 _ = Task.Run(async () =>

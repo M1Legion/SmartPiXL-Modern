@@ -365,8 +365,9 @@ public static class DashboardEndpoints
         app.MapGet("/tron", ServeTronHtml);
         app.MapGet("/tron/analytics", ServeTronHtml);
         app.MapGet("/tron/{file}", ServeTronModule);
+        app.MapGet("/pipeline", ServePipelineHtml);
 
-        _logger.Info("[Dashboard] All dashboard endpoints mapped: /tron, /api/dash/*");
+        _logger.Info("[Dashboard] All dashboard endpoints mapped: /tron, /pipeline, /api/dash/*");
     }
 
     private static async Task ServeTronHtml(HttpContext ctx, IWebHostEnvironment env)
@@ -387,6 +388,27 @@ public static class DashboardEndpoints
         {
             ctx.Response.StatusCode = 404;
             await ctx.Response.WriteAsync("Tron dashboard not found.");
+        }
+    }
+
+    private static async Task ServePipelineHtml(HttpContext ctx, IWebHostEnvironment env)
+    {
+        if (!SentinelAccessControl.IsAllowed(ctx)) return;
+        var path = Path.Combine(env.WebRootPath ?? "wwwroot", "pipeline.html");
+        if (!File.Exists(path))
+            path = Path.Combine(env.ContentRootPath, "wwwroot", "pipeline.html");
+
+        if (File.Exists(path))
+        {
+            ctx.Response.ContentType = "text/html; charset=utf-8";
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers.Pragma = "no-cache";
+            await ctx.Response.SendFileAsync(path);
+        }
+        else
+        {
+            ctx.Response.StatusCode = 404;
+            await ctx.Response.WriteAsync("Pipeline explorer not found.");
         }
     }
 

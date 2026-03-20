@@ -6,22 +6,23 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Forge.Services;
 
 // ============================================================================
-// ETL BACKGROUND SERVICE — Runs identity resolution every 60 seconds.
+// ETL BACKGROUND SERVICE — Runs dimension processing + identity resolution.
+//
+// Phase 9-13 (usp_ProcessDimensions) is now called here because the merged
+// pipeline writes directly to PiXL.Parsed — ParsedBulkInsertService no longer
+// handles it. Uses a separate 'ProcessDimensions' watermark to track progress.
 //
 // Calls stored procedures in sequence:
-//   1. ETL.usp_MatchVisits        — Email-based identity resolution via AutoConsumer
-//   2. ETL.usp_MatchLegacyVisits  — Legacy IP-based matching via AutoConsumer
-//   3. ETL.usp_MatchGeoVisits     — Supplemental geo proximity resolution
-//
-// Phase 1 (usp_ParseNewHits) is handled by ParsedBulkInsertService.
-// Phase 3 (usp_EnrichParsedGeo) is disabled — geo enrichment not needed yet.
+//   0. ETL.usp_ProcessDimensions    — Device/IP/Visit upserts (Phase 9-13)
+//   1. ETL.usp_MatchVisits          — Email-based identity resolution
+//   2. ETL.usp_MatchLegacyVisits    — Legacy IP-based matching
+//   3. ETL.usp_MatchGeoVisits       — Supplemental geo proximity resolution
 // ============================================================================
 
 /// <summary>
-/// Background service that runs identity resolution every 60 seconds.
-/// Calls usp_MatchVisits (email), usp_MatchLegacyVisits (IP), and
-/// usp_MatchGeoVisits (geo proximity) to resolve PiXL.Visit records
-/// against AutoConsumer into PiXL.Match.
+/// Background service that runs dimension processing (Phase 9-13) and identity
+/// resolution every 60 seconds. Processes new PiXL.Parsed rows via watermark,
+/// then runs match procs.
 /// </summary>
 public sealed class EtlBackgroundService : BackgroundService
 {
@@ -69,14 +70,13 @@ public sealed class EtlBackgroundService : BackgroundService
 
     private async Task RunEtlAsync(CancellationToken ct)
     {
-        // ══════════════════════════════════════════════════════════════════
-        // Phase 1 (usp_ParseNewHits) is handled by ParsedBulkInsertService.
-        // Phase 3 (usp_EnrichParsedGeo) is disabled — geo is not needed yet.
-        // This service only runs the match procs (Phase 2 + Phase 4).
-        // ══════════════════════════════════════════════════════════════════
-
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
+
+        // ── Phase 9-13: Dimension processing (Device/IP/Visit upserts) ──
+        // Reads the 'ProcessDimensions' watermark, catches up to max SourceId
+        // in 50K batches, then advances the watermark.
+        await RunDimensionProcessingAsync(conn, ct);
 
         // Phase 2: Match visits by email
         await using (var matchCmd = conn.CreateCommand())
@@ -134,5 +134,66 @@ public sealed class EtlBackgroundService : BackgroundService
                     _logger.Info($"ETL geo match: {rowsProcessed} processed, {rowsMatched} matched by geo proximity");
             }
         }
+    }
+
+    private async Task RunDimensionProcessingAsync(SqlConnection conn, CancellationToken ct)
+    {
+        const int batchSize = 50_000;
+
+        // Read current watermark
+        long watermark;
+        await using (var wmCmd = conn.CreateCommand())
+        {
+            wmCmd.CommandText = "SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions'";
+            wmCmd.CommandTimeout = 30;
+            var result = await wmCmd.ExecuteScalarAsync(ct);
+            if (result is null or DBNull) return;
+            watermark = Convert.ToInt64(result);
+        }
+
+        // Read max SourceId in PiXL.Parsed
+        long maxId;
+        await using (var maxCmd = conn.CreateCommand())
+        {
+            maxCmd.CommandText = "SELECT MAX(SourceId) FROM PiXL.Parsed";
+            maxCmd.CommandTimeout = 30;
+            var result = await maxCmd.ExecuteScalarAsync(ct);
+            if (result is null or DBNull) return;
+            maxId = Convert.ToInt64(result);
+        }
+
+        if (watermark >= maxId) return;
+
+        long totalProcessed = 0;
+
+        while (watermark < maxId && !ct.IsCancellationRequested)
+        {
+            var toId = Math.Min(watermark + batchSize, maxId);
+
+            await using (var procCmd = conn.CreateCommand())
+            {
+                procCmd.CommandText = "ETL.usp_ProcessDimensions";
+                procCmd.CommandType = System.Data.CommandType.StoredProcedure;
+                procCmd.Parameters.AddWithValue("@FromId", watermark);
+                procCmd.Parameters.AddWithValue("@ToId", toId);
+                procCmd.CommandTimeout = 300;
+                await procCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            // Advance watermark
+            await using (var upCmd = conn.CreateCommand())
+            {
+                upCmd.CommandText = "UPDATE ETL.Watermark SET LastProcessedId = @ToId WHERE ProcessName = 'ProcessDimensions'";
+                upCmd.Parameters.AddWithValue("@ToId", toId);
+                upCmd.CommandTimeout = 30;
+                await upCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            totalProcessed += toId - watermark;
+            watermark = toId;
+        }
+
+        if (totalProcessed > 0)
+            _logger.Info($"ETL dimensions: processed {totalProcessed} rows (watermark now {watermark})");
     }
 }

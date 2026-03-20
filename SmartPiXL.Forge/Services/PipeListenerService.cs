@@ -51,11 +51,15 @@ public sealed class PipeListenerService : BackgroundService
     private readonly Channel<TrackingData> _enrichmentChannel;
     private readonly ITrackingLogger _logger;
     private readonly ForgeMetrics _metrics;
+    private readonly string _deadLetterDir;
 
     private static readonly JsonSerializerOptions s_jsonOpts = new()
     {
         PropertyNameCaseInsensitive = true
     };
+
+    /// <summary>Lock for dead-letter file writes.</summary>
+    private readonly object _deadLetterLock = new();
 
     public PipeListenerService(
         IOptions<ForgeSettings> forgeSettings,
@@ -67,6 +71,11 @@ public sealed class PipeListenerService : BackgroundService
         _enrichmentChannel = channels.Enrichment;
         _logger = logger;
         _metrics = metrics;
+
+        // Dead-letter files go in the failover directory alongside failover files
+        _deadLetterDir = Path.IsPathRooted(_forgeSettings.FailoverDirectory)
+            ? _forgeSettings.FailoverDirectory
+            : Path.Combine(AppContext.BaseDirectory, _forgeSettings.FailoverDirectory);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -110,6 +119,7 @@ public sealed class PipeListenerService : BackgroundService
             {
                 // PipeSecurity: grant the IIS app pool identity read access
                 // so the Edge (running as IIS APPPOOL\Smartpixl.info) can connect.
+                // TODO: Update pool name to "Smartpixl.com" when domain migrates (~6 months)
                 var pipeSecurity = new PipeSecurity();
                 pipeSecurity.AddAccessRule(new PipeAccessRule(
                     new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
@@ -133,8 +143,16 @@ public sealed class PipeListenerService : BackgroundService
                 _logger.Debug($"Pipe instance {instanceId}: waiting for connection...");
                 await pipeServer.WaitForConnectionAsync(ct);
                 _logger.Debug($"Pipe instance {instanceId}: client connected.");
+                _metrics.RecordPipeConnect();
 
-                await ReadRecordsAsync(pipeServer, instanceId, ct);
+                try
+                {
+                    await ReadRecordsAsync(pipeServer, instanceId, ct);
+                }
+                finally
+                {
+                    _metrics.RecordPipeDisconnect();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -196,23 +214,24 @@ public sealed class PipeListenerService : BackgroundService
                     try
                     {
                         using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        writeCts.CancelAfter(TimeSpan.FromSeconds(5));
+                        writeCts.CancelAfter(_forgeSettings.PipeChannelWriteTimeoutMs);
                         await _enrichmentChannel.Writer.WriteAsync(record, writeCts.Token);
                         _metrics.Record(Stage.PipeDeserialize, ts);
                         recordCount++;
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
-                        // 5s timeout expired — enrichment channel is critically backed up.
+                        // Timeout expired — enrichment channel is critically backed up.
                         // Edge has its own JSONL failover if we can't keep up.
                         _metrics.RecordDrop(Stage.PipeDeserialize);
-                        _logger.Warning($"Pipe instance {instanceId}: enrichment channel full for 5s — dropping record (Edge failover handles persistence)");
+                        _logger.Warning($"Pipe instance {instanceId}: enrichment channel full for {_forgeSettings.PipeChannelWriteTimeoutMs}ms — dropping record (Edge failover handles persistence)");
                     }
                 }
                 catch (JsonException ex)
                 {
                     _logger.Warning($"Pipe instance {instanceId}: malformed JSON — {ex.Message}");
-                    // Skip malformed line, continue reading
+                    // Preserve malformed line in dead-letter file
+                    WriteToDeadLetter(line, $"pipe_instance_{instanceId}");
                 }
             }
         }
@@ -223,6 +242,28 @@ public sealed class PipeListenerService : BackgroundService
 
         if (recordCount > 0)
             _logger.Debug($"Pipe instance {instanceId}: session ended, received {recordCount} records");
+    }
+
+    /// <summary>
+    /// Writes a raw line to a dead-letter file so malformed pipe data is never lost.
+    /// </summary>
+    private void WriteToDeadLetter(string rawLine, string source)
+    {
+        lock (_deadLetterLock)
+        {
+            try
+            {
+                Directory.CreateDirectory(_deadLetterDir);
+                var date = DateTime.UtcNow.ToString("yyyy_MM_dd");
+                var deadLetterPath = Path.Combine(_deadLetterDir, $"dead_letter_{date}.jsonl");
+                var entry = $"// Source: {source} at {DateTime.UtcNow:O}" + Environment.NewLine + rawLine;
+                File.AppendAllText(deadLetterPath, entry + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"PipeListener: failed to write dead-letter: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>

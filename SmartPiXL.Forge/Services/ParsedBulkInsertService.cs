@@ -183,15 +183,15 @@ public sealed class ParsedBulkInsertService : BackgroundService
             if (existingIds.Contains(id)) continue;
 
             parsed.Add(ParsedRecordParser.Parse(
-                id,
                 reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1),   // CompanyID
                 reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2),   // PiXLID
-                reader.IsDBNull(3) ? null : reader.GetString(3),   // IPAddress
-                reader.GetDateTime(4),                               // ReceivedAt
-                reader.IsDBNull(5) ? null : reader.GetString(5),   // RequestPath
-                reader.IsDBNull(7) ? null : reader.GetString(7),   // UserAgent
-                reader.IsDBNull(8) ? null : reader.GetString(8),   // Referer
-                reader.IsDBNull(6) ? null : reader.GetString(6))); // QueryString
+                reader.IsDBNull(3) ? null : reader.GetString(3),        // IPAddress
+                reader.GetDateTime(4),                                   // ReceivedAt
+                reader.IsDBNull(5) ? null : reader.GetString(5),        // RequestPath
+                reader.IsDBNull(6) ? null : reader.GetString(6),        // QueryString
+                null,                                                    // HeadersJson (not in Raw)
+                reader.IsDBNull(7) ? null : reader.GetString(7),        // UserAgent
+                reader.IsDBNull(8) ? null : reader.GetString(8)));      // Referer
         }
         await reader.CloseAsync();
         var parseMs = sw.ElapsedMilliseconds;

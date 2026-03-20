@@ -53,8 +53,16 @@ public sealed class ForgeMetrics
     private long _sqlMaxTicks;
     private long _sqlFailures;
 
+    // Batch fill: track how full batches are relative to max batch size
+    private long _batchFillSum;       // sum of (batch.Count / maxBatchSize * 100)
+    private long _batchFillCount;     // number of batches sampled
+
     // Failover: records diverted to JSONL on disk (channel full or circuit open)
     private long _failoverCount;
+
+    // Pipe connections: visibility into Edge↔Forge pipe health
+    private long _pipeConnects;
+    private long _pipeDisconnects;
 
     // Channel depths (sampled, not accumulated)
     private int _enrichmentChannelDepth;
@@ -108,6 +116,20 @@ public sealed class ForgeMetrics
     /// <summary>Records a record diverted to failover JSONL on disk.</summary>
     public void RecordFailover() => Interlocked.Increment(ref _failoverCount);
 
+    /// <summary>Records the batch fill percentage for a completed batch.</summary>
+    public void RecordBatchFill(int batchCount, int maxBatchSize)
+    {
+        var pct = maxBatchSize > 0 ? (long)(batchCount * 100 / maxBatchSize) : 0;
+        Interlocked.Add(ref _batchFillSum, pct);
+        Interlocked.Increment(ref _batchFillCount);
+    }
+
+    /// <summary>Records a pipe client connection (Edge connected to this Forge instance).</summary>
+    public void RecordPipeConnect() => Interlocked.Increment(ref _pipeConnects);
+
+    /// <summary>Records a pipe client disconnection.</summary>
+    public void RecordPipeDisconnect() => Interlocked.Increment(ref _pipeDisconnects);
+
     /// <summary>Updates the sampled channel depths (called periodically).</summary>
     public void SampleChannelDepths(int enrichmentDepth, int sqlWriterDepth)
     {
@@ -147,6 +169,14 @@ public sealed class ForgeMetrics
 
             // Failover
             FailoverCount = Interlocked.Exchange(ref _failoverCount, 0),
+
+            // Batch fill
+            BatchFillSum = Interlocked.Exchange(ref _batchFillSum, 0),
+            BatchFillCount = Interlocked.Exchange(ref _batchFillCount, 0),
+
+            // Pipe connections
+            PipeConnects = Interlocked.Exchange(ref _pipeConnects, 0),
+            PipeDisconnects = Interlocked.Exchange(ref _pipeDisconnects, 0),
 
             // Channel depths (sampled, not reset)
             EnrichmentChannelDepth = Volatile.Read(ref _enrichmentChannelDepth),
@@ -225,6 +255,14 @@ public readonly record struct MetricsSnapshot
     // ── Failover ──
     public long FailoverCount { get; init; }
 
+    // ── Batch fill ──
+    public long BatchFillSum { get; init; }
+    public long BatchFillCount { get; init; }
+
+    // ── Pipe connections ──
+    public long PipeConnects { get; init; }
+    public long PipeDisconnects { get; init; }
+
     // ── Channels ──
     public int EnrichmentChannelDepth { get; init; }
     public int SqlWriterChannelDepth { get; init; }
@@ -243,6 +281,7 @@ public readonly record struct MetricsSnapshot
     public double SqlMaxMs => SqlMaxTicks / s_ticksPerMs;
     public double SqlAvgPerRecordUs => SqlCount > 0 ? SqlTotalTicks / (SqlCount * s_ticksPerUs) : 0;
     public double SqlAvgBatchSize => SqlBatchCount > 0 ? (double)SqlCount / SqlBatchCount : 0;
+    public double BatchFillPct => BatchFillCount > 0 ? (double)BatchFillSum / BatchFillCount : 0;
 
     /// <summary>
     /// Formats the snapshot as a compact multi-line log entry.
@@ -257,8 +296,9 @@ public readonly record struct MetricsSnapshot
             $"═══ FORGE METRICS ({windowSeconds:F0}s window) ═══\n" +
             $"  PIPE→CH    {PipeCount,8:N0} rec  {pipeRps,8:N1}/s  avg {PipeAvgUs,8:N1}μs  min {PipeMinUs,8:N1}μs  max {PipeMaxUs,8:N1}μs  drops {PipeDrops}\n" +
             $"  ENRICH→CH  {EnrichCount,8:N0} rec  {enrichRps,8:N1}/s  avg {EnrichAvgUs,8:N1}μs  min {EnrichMinUs,8:N1}μs  max {EnrichMaxUs,8:N1}μs  drops {EnrichDrops}\n" +
-            $"  SQL→DB     {SqlCount,8:N0} rec  {sqlRps,8:N1}/s  avg {SqlAvgMs,8:N1}ms  min {SqlMinMs,8:N1}ms  max {SqlMaxMs,8:N1}ms  batches {SqlBatchCount}  avg/rec {SqlAvgPerRecordUs,8:N1}μs  ~{SqlAvgBatchSize:N1}rec/batch  fails {SqlFailures}\n" +
+            $"  SQL→DB     {SqlCount,8:N0} rec  {sqlRps,8:N1}/s  avg {SqlAvgMs,8:N1}ms  min {SqlMinMs,8:N1}ms  max {SqlMaxMs,8:N1}ms  batches {SqlBatchCount}  avg/rec {SqlAvgPerRecordUs,8:N1}μs  ~{SqlAvgBatchSize:N1}rec/batch  fill {BatchFillPct:N0}%  fails {SqlFailures}\n" +
             $"  CHANNELS   enrich={EnrichmentChannelDepth:N0}  sqlWriter={SqlWriterChannelDepth:N0}" +
+            (PipeConnects > 0 || PipeDisconnects > 0 ? $"  PIPE conn={PipeConnects} disconn={PipeDisconnects}" : "") +
             (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "");
     }
 }

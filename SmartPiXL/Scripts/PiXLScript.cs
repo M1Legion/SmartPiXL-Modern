@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using NUglify;
 
 namespace SmartPiXL.Scripts;
 
@@ -39,19 +40,29 @@ public static class PiXLScript
         
         var c = safeGet(n, 'connection', {}) || {};
         
-        var hashStr = (function() {
+        var hashStr = function(str) {
             var h = 0;
-            return function(str) {
-                h = 0;
-                for (var i = 0, len = str.length; i < len; i++) {
-                    h = ((h << 5) - h) + str.charCodeAt(i);
-                    h = h & h; // Convert to 32-bit integer
-                }
-                return Math.abs(h).toString(16);
-            };
-        })();
+            for (var i = 0, len = str.length; i < len; i++) {
+                h = ((h << 5) - h) + str.charCodeAt(i);
+                h = h & h;
+            }
+            return Math.abs(h).toString(16);
+        };
+        var sha256 = function(str) {
+            try {
+                var buf = new TextEncoder().encode(str);
+                return crypto.subtle.digest('SHA-256', buf).then(function(hash) {
+                    var arr = new Uint8Array(hash);
+                    var hex = '';
+                    for (var i = 0; i < arr.length; i++) {
+                        hex += ('0' + arr[i].toString(16)).slice(-2);
+                    }
+                    return hex;
+                });
+            } catch(e) { return Promise.resolve(hashStr(str)); }
+        };
         
-        var canvasResult = (function() {
+        var canvasPromise = (function() {
             try {
                 var canvas = document.createElement('canvas');
                 canvas.width = 280; canvas.height = 60;
@@ -61,15 +72,14 @@ public static class PiXLScript
                 ctx.fillRect(10, 10, 100, 40);
                 ctx.fillStyle = '#069';
                 ctx.font = '15px Arial';
-                ctx.fillText('SmartPiXL <canvas> 1.0', 2, 15);
+                ctx.fillText('Cwm fjord bank glyphs vext quiz', 2, 15);
                 ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
                 ctx.font = '18px Times New Roman';
-                ctx.fillText('Fingerprint!', 4, 45);
+                ctx.fillText('The five boxing wizards jump', 4, 45);
                 ctx.strokeStyle = 'rgb(120,186,176)';
                 ctx.arc(80, 30, 20, 0, Math.PI * 2);
                 ctx.stroke();
                 var dataUrl = canvas.toDataURL();
-                var hash = hashStr(dataUrl);
                 
                 var imgData = ctx.getImageData(0, 0, 280, 60).data;
                 var variance = 0, sum = 0, samples = 100;
@@ -83,16 +93,16 @@ public static class PiXLScript
                     variance += diff * diff;
                 }
                 variance = variance / samples;
-                
                 var evasion = (variance < 1 || dataUrl.length < 1000) ? 1 : 0;
                 
-                return { fp: hash, evasion: evasion };
-            } catch(e) { return { fp: '', evasion: 0 }; }
+                return sha256(dataUrl).then(function(hash) {
+                    data.canvasFP = hash;
+                    data.canvasEvasion = evasion;
+                });
+            } catch(e) { data.canvasFP = ''; data.canvasEvasion = 0; return Promise.resolve(); }
         })();
-        data.canvasFP = canvasResult.fp;
-        data.canvasEvasion = canvasResult.evasion;
         
-        data.canvasConsistency = (function() {
+        var canvasConsistencyPromise = (function() {
             try {
                 var c1 = document.createElement('canvas');
                 var c2 = document.createElement('canvas');
@@ -102,19 +112,22 @@ public static class PiXLScript
                 x1.fillStyle = '#000'; x1.font = '12px Arial'; x1.fillText('Test1', 5, 25);
                 x2.fillStyle = '#ff6600'; x2.fillRect(0, 0, 50, 50);
                 x2.fillStyle = '#000'; x2.font = '12px Arial'; x2.fillText('Test1', 5, 25);
-                var h1 = hashStr(c1.toDataURL()), h2 = hashStr(c2.toDataURL());
-                if (h1 !== h2) return 'noise-detected';
+                var d1 = c1.toDataURL(), d2 = c2.toDataURL();
                 x2.fillText('X', 60, 25);
-                if (h1 === hashStr(c2.toDataURL())) return 'canvas-blocked';
-                return 'clean';
-            } catch(e) { return 'error'; }
+                var d3 = c2.toDataURL();
+                return Promise.all([sha256(d1), sha256(d2), sha256(d3)]).then(function(r) {
+                    if (r[0] !== r[1]) { data.canvasConsistency = 'noise-detected'; return; }
+                    if (r[0] === r[2]) { data.canvasConsistency = 'canvas-blocked'; return; }
+                    data.canvasConsistency = 'clean';
+                });
+            } catch(e) { data.canvasConsistency = 'error'; return Promise.resolve(); }
         })();
         
-        var webglData = (function() {
+        var webglPromise = (function() {
             try {
                 var canvas = document.createElement('canvas');
                 var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                if (!gl) return { fp: '', gpu: '', gpuVendor: '', params: '', evasion: 0 };
+                if (!gl) { data.webglFP = ''; data.gpu = ''; data.gpuVendor = ''; data.webglParams = ''; data.webglExt = 0; data.webglEvasion = 0; return Promise.resolve(); }
                 var ext = gl.getExtension('WEBGL_debug_renderer_info');
                 var params = [
                     gl.getParameter(gl.VERSION),
@@ -148,25 +161,69 @@ public static class PiXLScript
                 var gpuVendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '';
                 var evasion = 0;
                 if (gpu && (gpu.indexOf('SwiftShader') > -1 || gpu.indexOf('llvmpipe') > -1 || gpu === 'Mesa' || gpu === 'Disabled')) {
-                    evasion = 1; // Software renderer often = headless/spoofed
+                    evasion = 1;
                 }
                 
-                return {
-                    fp: hashStr(str),
-                    gpu: gpu,
-                    gpuVendor: gpuVendor,
-                    params: params.slice(0, 5).join('|'),
-                    extensions: extensions.length,
-                    evasion: evasion
-                };
-            } catch(e) { return { fp: '', gpu: '', gpuVendor: '', params: '', extensions: 0, evasion: 0 }; }
+                // WebGL render fingerprint — draw a 3D scene and hash the pixels
+                var renderFP = '';
+                try {
+                    canvas.width = 64; canvas.height = 64;
+                    gl.viewport(0, 0, 64, 64);
+                    gl.clearColor(0.2, 0.4, 0.6, 1.0);
+                    gl.clear(gl.COLOR_BUFFER_BIT);
+                    var vs = gl.createShader(gl.VERTEX_SHADER);
+                    gl.shaderSource(vs, 'attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}');
+                    gl.compileShader(vs);
+                    var fs = gl.createShader(gl.FRAGMENT_SHADER);
+                    gl.shaderSource(fs, 'precision mediump float;void main(){gl_FragColor=vec4(0.9,0.3,0.1,1.0);}');
+                    gl.compileShader(fs);
+                    var prog = gl.createProgram();
+                    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+                    gl.linkProgram(prog); gl.useProgram(prog);
+                    var buf = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5,-0.5, 0.5,-0.5, 0.0,0.5]), gl.STATIC_DRAW);
+                    var loc = gl.getAttribLocation(prog, 'p');
+                    gl.enableVertexAttribArray(loc);
+                    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+                    gl.drawArrays(gl.TRIANGLES, 0, 3);
+                    var pixels = new Uint8Array(64 * 64 * 4);
+                    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                    var pxStr = '';
+                    for (var pi = 0; pi < pixels.length; pi += 16) pxStr += pixels[pi].toString(16);
+                    renderFP = pxStr;
+                } catch(re) {}
+                
+                data.gpu = gpu;
+                data.gpuVendor = gpuVendor;
+                data.webglParams = params.slice(0, 5).join('|');
+                data.webglExt = extensions.length;
+                data.webglEvasion = evasion;
+                
+                var promises = [sha256(str)];
+                if (renderFP) {
+                    // Noise check: render again and compare
+                    var renderFP2 = '';
+                    try {
+                        gl.clear(gl.COLOR_BUFFER_BIT);
+                        gl.drawArrays(gl.TRIANGLES, 0, 3);
+                        var px2 = new Uint8Array(64 * 64 * 4);
+                        gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px2);
+                        var pxStr2 = '';
+                        for (var pi2 = 0; pi2 < px2.length; pi2 += 16) pxStr2 += px2[pi2].toString(16);
+                        renderFP2 = pxStr2;
+                    } catch(re2) {}
+                    data.webglRenderStable = (renderFP === renderFP2) ? 1 : 0;
+                    if (renderFP !== renderFP2) data.webglRenderNoiseDetected = 1;
+                    promises.push(sha256(renderFP));
+                }
+                
+                return Promise.all(promises).then(function(hashes) {
+                    data.webglFP = hashes[0];
+                    if (hashes[1]) data.webglRenderFP = hashes[1];
+                });
+            } catch(e) { data.webglFP = ''; data.gpu = ''; data.gpuVendor = ''; data.webglParams = ''; data.webglExt = 0; data.webglEvasion = 0; return Promise.resolve(); }
         })();
-        data.webglFP = webglData.fp;
-        data.gpu = webglData.gpu;
-        data.gpuVendor = webglData.gpuVendor;
-        data.webglParams = webglData.params;
-        data.webglExt = webglData.extensions;
-        data.webglEvasion = webglData.evasion;
         
         var audioPromise = (function() {
             try {
@@ -195,9 +252,9 @@ public static class PiXLScript
                 };
                 return Promise.all([runAudioFP(), runAudioFP()]).then(function(r) {
                     data.audioFP = r[0].fp;
-                    data.audioHash = r[0].hash;
                     data.audioStable = (r[0].fp === r[1].fp) ? 1 : 0;
                     if (r[0].fp !== r[1].fp && r[0].fp !== 'blocked') data.audioNoiseDetected = 1;
+                    return sha256(r[0].hash).then(function(h) { data.audioHash = h; });
                 });
             } catch(e) { data.audioFP = ''; return Promise.resolve(); }
         })();
@@ -205,7 +262,11 @@ public static class PiXLScript
         data.fonts = (function() {
             try {
                 if (!document.body) return '';
-                var testFonts = [
+                var isMobile = s.width < 768;
+                var testFonts = isMobile ? [
+                    'Arial','Verdana','Times New Roman','Courier New','Georgia',
+                    'Helvetica','Roboto','Open Sans','Segoe UI','Monaco'
+                ] : [
                     'Arial','Arial Black','Verdana','Times New Roman','Courier New',
                     'Georgia','Comic Sans MS','Impact','Trebuchet MS','Tahoma',
                     'Segoe UI','Calibri','Consolas','Helvetica','Monaco',
@@ -245,12 +306,24 @@ public static class PiXLScript
             } catch(e) { return ''; }
         })();
         
-        data.voices = (function() {
+        var voicesPromise = (function() {
             try {
-                var v = speechSynthesis.getVoices();
-                if (v.length === 0) return '';
-                return v.map(function(x) { return x.name + '/' + x.lang; }).slice(0, 20).join('|');
-            } catch(e) { return ''; }
+                if (!w.speechSynthesis) { data.voices = ''; return Promise.resolve(); }
+                var getVoiceStr = function() {
+                    var v = speechSynthesis.getVoices();
+                    if (v.length === 0) return '';
+                    return v.map(function(x) { return x.name + '/' + x.lang; }).slice(0, 20).join('|');
+                };
+                var result = getVoiceStr();
+                if (result) { data.voices = result; return Promise.resolve(); }
+                return new Promise(function(resolve) {
+                    var done = false;
+                    speechSynthesis.addEventListener('voiceschanged', function() {
+                        if (!done) { done = true; data.voices = getVoiceStr(); resolve(); }
+                    });
+                    setTimeout(function() { if (!done) { done = true; data.voices = getVoiceStr(); resolve(); } }, 300);
+                });
+            } catch(e) { data.voices = ''; return Promise.resolve(); }
         })();
         
         (function() {
@@ -258,6 +331,8 @@ public static class PiXLScript
                 var rtc = new RTCPeerConnection({iceServers: []});
                 rtc.createDataChannel('');
                 rtc.createOffer().then(function(offer) { return rtc.setLocalDescription(offer); });
+                var closed = false;
+                var closeRtc = function() { if (!closed) { closed = true; try { rtc.close(); } catch(e2) {} } };
                 rtc.onicecandidate = function(e) {
                     if (e && e.candidate && e.candidate.candidate) {
                         var match = /([0-9]{1,3}\.){3}[0-9]{1,3}/.exec(e.candidate.candidate);
@@ -265,7 +340,9 @@ public static class PiXLScript
                             data.localIp = match[0];
                         }
                     }
+                    if (!e || !e.candidate) closeRtc();
                 };
+                setTimeout(closeRtc, 1000);
             } catch(e) {}
         })();
         
@@ -281,29 +358,9 @@ public static class PiXLScript
             } catch(e) {}
         })();
         
-        data.gamepads = (function() {
-            try {
-                var getGP = safeGet(n, 'getGamepads', null);
-                var gp = getGP ? getGP.call(n) : [];
-                var found = [];
-                for (var i = 0; i < gp.length; i++) {
-                    if (gp[i]) found.push(gp[i].id);
-                }
-                return found.join('|');
-            } catch(e) { return ''; }
-        })();
+
         
-        (function() {
-            try {
-                var getBat = safeGet(n, 'getBattery', null);
-                if (getBat) {
-                    getBat.call(n).then(function(b) {
-                        data.batteryLevel = Math.round(b.level * 100);
-                        data.batteryCharging = b.charging ? 1 : 0;
-                    });
-                }
-            } catch(e) {}
-        })();
+
         
         (function() {
             try {
@@ -320,6 +377,63 @@ public static class PiXLScript
                     });
                 }
             } catch(e) {}
+        })();
+        
+        var permissionsPromise = (function() {
+            try {
+                var perms = safeGet(n, 'permissions', null);
+                if (!perms || !perms.query) return Promise.resolve();
+                var names = ['camera', 'microphone', 'geolocation', 'notifications', 'push', 'persistent-storage', 'accelerometer', 'gyroscope', 'magnetometer', 'midi'];
+                var results = [];
+                var promises = [];
+                for (var i = 0; i < names.length; i++) {
+                    (function(name) {
+                        promises.push(
+                            perms.query({name: name}).then(function(r) {
+                                results.push(name + ':' + r.state);
+                            }).catch(function() {})
+                        );
+                    })(names[i]);
+                }
+                return Promise.all(promises).then(function() {
+                    data.permStates = results.join('|');
+                });
+            } catch(e) { return Promise.resolve(); }
+        })();
+        
+        var keyboardPromise = (function() {
+            try {
+                var kb = safeGet(n, 'keyboard', null);
+                if (!kb || !kb.getLayoutMap) return Promise.resolve();
+                return kb.getLayoutMap().then(function(map) {
+                    var keys = ['KeyA','KeyZ','KeyQ','KeyW','KeyY','Semicolon','BracketLeft','Minus'];
+                    var parts = [];
+                    for (var i = 0; i < keys.length; i++) {
+                        var v = map.get(keys[i]);
+                        if (v) parts.push(keys[i] + ':' + v);
+                    }
+                    data.kbLayout = parts.join('|');
+                }).catch(function() {});
+            } catch(e) { return Promise.resolve(); }
+        })();
+        
+        data.isInputPending = (function() {
+            try {
+                if (n.scheduling && n.scheduling.isInputPending) {
+                    return n.scheduling.isInputPending() ? 1 : 0;
+                }
+            } catch(e) {}
+            return '';
+        })();
+        
+        data.featurePolicy = (function() {
+            try {
+                var pp = document.permissionsPolicy || document.featurePolicy;
+                if (pp && pp.allowedFeatures) {
+                    return pp.allowedFeatures().slice(0, 30).join(',');
+                }
+            } catch(e) {}
+            return '';
         })();
         
         data.sw = s.width;
@@ -379,9 +493,6 @@ public static class PiXLScript
         data.cores = safeGet(n, 'hardwareConcurrency', '');
         data.mem = safeGet(n, 'deviceMemory', '');
         data.touch = safeGet(n, 'maxTouchPoints', 0);
-        data.product = safeGet(n, 'product', '');
-        data.productSub = safeGet(n, 'productSub', '');
-        data.vendorSub = safeGet(n, 'vendorSub', '');
         
         data.oscpu = safeGet(n, 'oscpu', '');  // Firefox only
         data.buildID = safeGet(n, 'buildID', '');  // Firefox only (version fingerprint)
@@ -396,10 +507,10 @@ public static class PiXLScript
         }
         
         var userAgentData = safeGet(n, 'userAgentData', null);
-        (function() {
+        var clientHintsPromise = (function() {
             try {
                 if (userAgentData && userAgentData.getHighEntropyValues) {
-                    userAgentData.getHighEntropyValues([
+                    return userAgentData.getHighEntropyValues([
                         'architecture', 'bitness', 'model', 'platformVersion',
                         'fullVersionList', 'wow64', 'formFactor'
                     ]).then(function(ua) {
@@ -417,6 +528,7 @@ public static class PiXLScript
                     }).catch(function() {});
                 }
             } catch(e) {}
+            return Promise.resolve();
         })();
         
         if (userAgentData) {
@@ -455,16 +567,14 @@ public static class PiXLScript
                 return mimes.join(',');
             } catch(e) { return ''; }
         })();
-        data.appName = safeGet(n, 'appName', '');
         data.appVersion = safeGet(n, 'appVersion', '');
-        data.appCodeName = safeGet(n, 'appCodeName', '');
         
         data.ck = safeGet(n, 'cookieEnabled', false) ? 1 : 0;
         data.dnt = safeGet(n, 'doNotTrack', '');
         data.pdf = safeGet(n, 'pdfViewerEnabled', false) ? 1 : 0;
         data.webdr = safeGet(n, 'webdriver', false) ? 1 : 0;
         data.online = safeGet(n, 'onLine', true) ? 1 : 0;
-        data.java = safeGet(n, 'javaEnabled', 0) ? 1 : 0;  // safeGet handles function call
+
         data.plugins = pluginsArray ? pluginsArray.length : 0;
         data.mimeTypes = mimeTypesArray ? mimeTypesArray.length : 0;
         
@@ -614,12 +724,7 @@ public static class PiXLScript
             
             data.scriptExecTime = Date.now() - d.getTime();
             
-            try {
-                if (eval.toString().indexOf('[native code]') === -1) {
-                    signals.push('eval-tampered');
-                    score += 5;
-                }
-            } catch(e) {}
+
             
             try {
                 var descGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
@@ -687,6 +792,38 @@ public static class PiXLScript
                     signals.push('heap-total-equals-used');
                     score += 5;
                 }
+            }
+            
+            try {
+                if (typeof Intl !== 'undefined' && Intl.v8BreakIterator) {
+                    signals.push('v8-break-iterator');
+                    score += 3;
+                }
+            } catch(e) {}
+            
+            try {
+                if (w.chrome && w.chrome.loadTimes) {
+                    signals.push('chrome-loadTimes');
+                    score += 2;
+                }
+                if (w.chrome && w.chrome.csi) {
+                    signals.push('chrome-csi');
+                    score += 2;
+                }
+            } catch(e) {}
+            
+            try {
+                var err = new Error();
+                var stack = err.stack || '';
+                if (/puppeteer|playwright|selenium|webdriver/i.test(stack)) {
+                    signals.push('stack-automation');
+                    score += 15;
+                }
+            } catch(e) {}
+            
+            if (typeof w.AudioWorklet !== 'undefined' && typeof w.SharedArrayBuffer === 'undefined') {
+                signals.push('worklet-no-sab');
+                score += 3;
             }
 
             return { signals: signals.join(','), score: score };
@@ -809,16 +946,19 @@ public static class PiXLScript
             }
         }
         
-        if (perf.timing) {
-            var t = perf.timing;
-            var pageLoad = (t.loadEventEnd - t.navigationStart) | 0;
-            var dns = (t.domainLookupEnd - t.domainLookupStart) | 0;
-            var tcp = (t.connectEnd - t.connectStart) | 0;
-            if (pageLoad > 0 && pageLoad < 50 && dns <= 1) {
-                flags += (flags ? ',' : '') + 'instant-page-load'; anomalyScore += 5;
-            }
-            if (tcp <= 1 && pageLoad > 0 && pageLoad < 100) {
-                flags += (flags ? ',' : '') + 'zero-latency-connection'; anomalyScore += 3;
+        if (perf.getEntriesByType) {
+            var navEntries = perf.getEntriesByType('navigation');
+            if (navEntries && navEntries.length > 0) {
+                var nt = navEntries[0];
+                var pageLoad = Math.round(nt.loadEventEnd - nt.startTime) | 0;
+                var dns = Math.round(nt.domainLookupEnd - nt.domainLookupStart) | 0;
+                var tcp = Math.round(nt.connectEnd - nt.connectStart) | 0;
+                if (pageLoad > 0 && pageLoad < 50 && dns <= 1) {
+                    flags += (flags ? ',' : '') + 'instant-page-load'; anomalyScore += 5;
+                }
+                if (tcp <= 1 && pageLoad > 0 && pageLoad < 100) {
+                    flags += (flags ? ',' : '') + 'zero-latency-connection'; anomalyScore += 3;
+                }
             }
         }
         
@@ -867,13 +1007,16 @@ public static class PiXLScript
         data.hash = location.hash;
         data.protocol = location.protocol;
         
-        if (perf.timing) {
-            var t = perf.timing;
-            data.loadTime = t.loadEventEnd - t.navigationStart;
-            data.domTime = t.domContentLoadedEventEnd - t.navigationStart;
-            data.dnsTime = t.domainLookupEnd - t.domainLookupStart;
-            data.tcpTime = t.connectEnd - t.connectStart;
-            data.ttfb = t.responseStart - t.requestStart;
+        if (perf.getEntriesByType) {
+            var navE = perf.getEntriesByType('navigation');
+            if (navE && navE.length > 0) {
+                var nt2 = navE[0];
+                data.loadTime = Math.round(nt2.loadEventEnd - nt2.startTime);
+                data.domTime = Math.round(nt2.domContentLoadedEventEnd - nt2.startTime);
+                data.dnsTime = Math.round(nt2.domainLookupEnd - nt2.domainLookupStart);
+                data.tcpTime = Math.round(nt2.connectEnd - nt2.connectStart);
+                data.ttfb = Math.round(nt2.responseStart - nt2.requestStart);
+            }
         }
         
         data.ls = (function() { try { return !!w.localStorage; } catch(e) { return 0; } })() ? 1 : 0;
@@ -905,8 +1048,16 @@ public static class PiXLScript
         data.pointer = w.matchMedia && w.matchMedia('(pointer: fine)').matches ? 'fine' : (w.matchMedia && w.matchMedia('(pointer: coarse)').matches ? 'coarse' : '');
         data.standalone = w.matchMedia && w.matchMedia('(display-mode: standalone)').matches ? 1 : 0;
         
+        data.colorGamut = w.matchMedia ? (w.matchMedia('(color-gamut: rec2020)').matches ? 'rec2020' : w.matchMedia('(color-gamut: p3)').matches ? 'p3' : w.matchMedia('(color-gamut: srgb)').matches ? 'srgb' : '') : '';
+        data.dynamicRange = w.matchMedia && w.matchMedia('(dynamic-range: high)').matches ? 'high' : 'standard';
+        data.overflowBlock = w.matchMedia ? (w.matchMedia('(overflow-block: scroll)').matches ? 'scroll' : w.matchMedia('(overflow-block: paged)').matches ? 'paged' : w.matchMedia('(overflow-block: none)').matches ? 'none' : '') : '';
+        data.overflowInline = w.matchMedia && w.matchMedia('(overflow-inline: scroll)').matches ? 'scroll' : 'none';
+        data.anyPointer = w.matchMedia ? (w.matchMedia('(any-pointer: fine)').matches ? 'fine' : w.matchMedia('(any-pointer: coarse)').matches ? 'coarse' : '') : '';
+        data.anyHover = w.matchMedia && w.matchMedia('(any-hover: hover)').matches ? 1 : 0;
+        data.colorScheme = w.matchMedia && w.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        
         data.docCharset = document.characterSet || '';
-        data.docCompat = document.compatMode || '';
+
         data.docReady = document.readyState || '';
         data.docHidden = document.hidden ? 1 : 0;
         data.docVisibility = document.visibilityState || '';
@@ -960,6 +1111,63 @@ public static class PiXLScript
         data.errorFP = (function() {
             try { null[0](); } catch(e) { return e.message.length + (e.stack ? e.stack.length : 0); }
             return '';
+        })();
+        
+        data.cssRenderFP = (function() {
+            try {
+                if (!document.body) return '';
+                var el = document.createElement('div');
+                el.style.cssText = 'position:absolute;left:-9999px;width:100px;height:100px;border-radius:50%;overflow:hidden;';
+                document.body.appendChild(el);
+                var cs = w.getComputedStyle(el);
+                var parts = [
+                    cs.borderTopLeftRadius,
+                    cs.borderTopRightRadius,
+                    el.offsetWidth,
+                    el.offsetHeight
+                ];
+                var inner = document.createElement('div');
+                inner.style.cssText = 'width:100px;height:100px;overflow:scroll;';
+                el.appendChild(inner);
+                var scrollW = inner.offsetWidth - inner.clientWidth;
+                parts.push(scrollW);
+                var aa = document.createElement('div');
+                aa.style.cssText = 'font-size:1px;width:0.5px;position:absolute;';
+                aa.innerHTML = '.';
+                el.appendChild(aa);
+                parts.push(aa.offsetWidth);
+                document.body.removeChild(el);
+                return parts.join('|');
+            } catch(e) { return ''; }
+        })();
+        
+        data.intlCollation = (function() {
+            try {
+                var chars = ['\u00e9', '\u00e8', '\u00ea', '\u00eb', '\u00f1', '\u00fc', '\u00e5', '\u00e6', '\u00f8'];
+                var sorted = chars.slice().sort(new Intl.Collator().compare);
+                var result = sorted.join('');
+                var locales = ['en', 'de', 'sv', 'ja'];
+                var parts = [result];
+                for (var i = 0; i < locales.length; i++) {
+                    try {
+                        var opts = new Intl.Collator(locales[i]).resolvedOptions();
+                        parts.push(opts.collation || '');
+                    } catch(e2) { parts.push(''); }
+                }
+                return parts.join('|');
+            } catch(e) { return ''; }
+        })();
+        
+        var canvasEmojiPromise = (function() {
+            try {
+                var c = document.createElement('canvas');
+                c.width = 40; c.height = 40;
+                var ctx = c.getContext('2d');
+                ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 40, 40);
+                ctx.font = '30px serif';
+                ctx.fillText('\ud83d\ude00', 0, 30);
+                return sha256(c.toDataURL()).then(function(h) { data.emojiRenderFP = h; });
+            } catch(e) { data.emojiRenderFP = ''; return Promise.resolve(); }
         })();
         
         data.stealthSignals = (function() {
@@ -1110,6 +1318,10 @@ public static class PiXLScript
         
         var sendPiXL = function() {
             calculateMouseEntropy();
+            // Client-side DeviceHash from stable fingerprint signals.
+            // Forge uses this for real-time session stitching; ETL recomputes SHA-256 server-side.
+            var fpParts = [data.canvasFP, data.fonts, data.gpu, data.webglFP, data.audioHash].filter(Boolean);
+            if (fpParts.length > 0) data.deviceHash = hashStr(fpParts.join('|'));
             var params = [];
             for (var key in data) {
                 if (data[key] !== '' && data[key] !== null && data[key] !== undefined) {
@@ -1142,23 +1354,37 @@ public static class PiXLScript
         
         var asyncPromises = [];
         if (typeof audioPromise !== 'undefined') asyncPromises.push(audioPromise);
+        if (typeof canvasPromise !== 'undefined') asyncPromises.push(canvasPromise);
+        if (typeof canvasConsistencyPromise !== 'undefined') asyncPromises.push(canvasConsistencyPromise);
+        if (typeof webglPromise !== 'undefined') asyncPromises.push(webglPromise);
+        if (typeof voicesPromise !== 'undefined') asyncPromises.push(voicesPromise);
+        if (typeof permissionsPromise !== 'undefined') asyncPromises.push(permissionsPromise);
+        if (typeof keyboardPromise !== 'undefined') asyncPromises.push(keyboardPromise);
+        if (typeof clientHintsPromise !== 'undefined') asyncPromises.push(clientHintsPromise);
         
-        // Send PiXL after async work completes, with a 500ms safety cap.
-        // - If all promises resolve before 500ms → send immediately (no padding delay)
-        // - If any promise hangs → 500ms timeout guarantees delivery
-        // - If Promise.allSettled is unavailable (IE11) → 500ms fallback
-        // Critical: the PiXL MUST fire. Never block the client site.
-        var timeoutPromise = new Promise(function(resolve) { setTimeout(resolve, 500); });
+        if (typeof canvasEmojiPromise !== 'undefined') asyncPromises.push(canvasEmojiPromise);
+        
+        // Send PiXL after async work completes, with a 1500ms safety cap.
+        // visibilitychange fires on tab close/navigate — send early if user is leaving.
+        var pixlSent = false;
+        var doSend = function() {
+            if (pixlSent) return;
+            pixlSent = true;
+            sendPiXL();
+        };
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden') doSend();
+        });
+        
+        var timeoutPromise = new Promise(function(resolve) { setTimeout(resolve, 1500); });
         
         if (asyncPromises.length > 0 && Promise.allSettled) {
             Promise.race([
                 Promise.allSettled(asyncPromises),
                 timeoutPromise
-            ]).then(sendPiXL);
+            ]).then(doSend);
         } else {
-            // No async work or no allSettled support — just send after 500ms
-            // to let synchronous data collection settle (stealth signals, etc.)
-            timeoutPromise.then(sendPiXL);
+            timeoutPromise.then(doSend);
         }
         
     } catch (e) {
@@ -1184,9 +1410,18 @@ public static class PiXLScript
     private static readonly ConcurrentDictionary<string, string> _cache = new();
     private const int MaxCacheEntries = 10_000;
 
+    // Minified template — computed once at startup, then URL-substituted per request.
+    private static readonly string _minifiedTemplate = MinifyTemplate();
+
+    private static string MinifyTemplate()
+    {
+        var result = Uglify.Js(Template);
+        return result.HasErrors ? Template : result.Code;
+    }
+
     /// <summary>
-    /// Returns script with PiXL URL injected. Cached per URL.
-    /// Uses simple Replace for correctness — cached so only runs once per URL.
+    /// Returns minified script with PiXL URL injected. Cached per URL.
+    /// Minification happens once at startup; per-URL substitution is cached.
     /// Evicts the entire cache if it grows beyond MaxCacheEntries to bound memory.
     /// </summary>
     public static string GetScript(string pixlUrl)
@@ -1195,6 +1430,6 @@ public static class PiXLScript
         {
             _cache.Clear(); // Nuclear eviction — acceptable since warm-up is cheap
         }
-        return _cache.GetOrAdd(pixlUrl, url => Template.Replace("{{PIXL_URL}}", url));
+        return _cache.GetOrAdd(pixlUrl, url => _minifiedTemplate.Replace("{{PIXL_URL}}", url));
     }
 }

@@ -1,6 +1,5 @@
-using System.Collections;
-using System.Data.Common;
-using System.Runtime.CompilerServices;
+using System.Data;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Data.SqlClient;
@@ -12,35 +11,32 @@ using SmartPiXL.Services;
 namespace SmartPiXL.Forge.Services;
 
 // ============================================================================
-// SQL BULK COPY WRITER SERVICE — Async bulk writer for the Forge pipeline.
+// SQL BULK COPY WRITER SERVICE — Merged pipeline: parse + write in one step.
 //
-// Ported from the Edge's DatabaseWriterService with identical architecture:
-//   EnrichmentPipelineService → ForgeChannels.SqlWriter → this → SqlBulkCopy → PiXL.Raw
+// Data flow:
+//   EnrichmentPipelineService → ForgeChannels.SqlWriter → this → parse QS →
+//   SqlBulkCopy → PiXL.Parsed (all 230 columns in a single write)
 //
-// KEY DIFFERENCES FROM EDGE's DatabaseWriterService:
-//   - Reads from ForgeChannels.SqlWriter (enrichment pipeline output)
-//   - No TryQueue() method (EnrichmentPipelineService writes directly to channel)
-//   - ForgeFailoverWriter: when SQL is down, drains channel to JSONL on disk
-//   - Replays failover files when SQL recovers
-//   - Otherwise identical: circuit breaker, retry, dead-letter, custom DbDataReader
+// PREVIOUS ARCHITECTURE (eliminated):
+//   Forge → SqlBulkCopy → PiXL.Raw (9 cols) → ParsedBulkInsertService →
+//   PiXL.Parsed (229 cols). That two-step pipeline is gone. PiXL.Raw is no
+//   longer written to by the Forge. QueryString and HeadersJson are now stored
+//   directly in PiXL.Parsed for re-parse capability.
+//
+// KEY DESIGN DECISIONS:
+//   • Parse inline: ParsedRecordParser.Parse() runs ~1μs/record — negligible
+//     overhead vs the SQL round-trip saved by eliminating the Raw pipeline.
+//   • SourceId auto-generated: SQL SEQUENCE (PiXL.HitSequence) provides IDs
+//     via DEFAULT constraint. BulkCopy omits SourceId from column mappings.
+//   • Connection reuse: Single SqlConnection kept open across batches.
+//     Reopened automatically on error. Avoids pool lookup + TDS setup per batch.
+//   • Deadlock handling: Error 1205 triggers retry (not circuit trip). Deadlocks
+//     are transient contention, not infrastructure failures.
+//   • Batch fill metrics: Records batch fill percentage for capacity planning.
 //
 // CIRCUIT BREAKER:
-//   Closed  → SQL is healthy. Records flow via SqlBulkCopy.
-//   Open    → SQL is down/slow. Drains channel to JSONL failover files.
-//              No SQL writes attempted. Probes after HalfOpenCooldown.
-//   HalfOpen → Tries one batch. If it succeeds → Closed (replays failover).
-//              If it fails → back to Open.
-//
-// TRIP CONDITIONS:
-//   - SQL error 1105 (filegroup full) or 9002 (log full): immediate trip
-//   - 2 consecutive batch failures (any error including timeouts): trip
-//
-// WHY DbDataReader INSTEAD OF DataTable?
-//   DataTable.Clone() + N DataRow allocations per batch = significant GC pressure.
-//   TrackingDataReader wraps the existing List<TrackingData> directly:
-//     • Zero intermediate allocations (no DataTable, no DataRow objects)
-//     • SqlBulkCopy calls Read() + GetValue() which index the list by ordinal
-//     • For 100 records, eliminates ~100 DataRow objects (~200+ bytes each)
+//   Same Closed/Open/HalfOpen pattern as before. Only infrastructure errors
+//   (1105 filegroup full, 9002 log full) and consecutive batch failures trip it.
 // ============================================================================
 
 /// <summary>Circuit breaker state for the SQL writer.</summary>
@@ -48,16 +44,14 @@ public enum ForgeCircuitState { Closed, Open, HalfOpen }
 
 /// <summary>
 /// Background service that consumes <see cref="TrackingData"/> from the SQL writer
-/// channel and bulk-writes batches to <c>PiXL.Raw</c> via <see cref="SqlBulkCopy"/>.
-/// <para>
-/// Ported from the Edge's <c>DatabaseWriterService</c> with the same circuit breaker,
-/// retry, dead-letter, and zero-allocation <see cref="DbDataReader"/> patterns.
-/// </para>
+/// channel, parses all fields inline via <see cref="ParsedRecordParser"/>, and
+/// bulk-writes batches to <c>PiXL.Parsed</c> via <see cref="SqlBulkCopy"/>.
 /// </summary>
 public sealed class SqlBulkCopyWriterService : BackgroundService
 {
     private readonly Channel<TrackingData> _channel;
-    private readonly TrackingSettings _settings;
+    private readonly TrackingSettings _trackingSettings;
+    private readonly ForgeSettings _forgeSettings;
     private readonly ITrackingLogger _logger;
     private readonly ForgeMetrics _metrics;
     private readonly ForgeFailoverWriter _failoverWriter;
@@ -70,9 +64,6 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     private static readonly TimeSpan HalfOpenCooldown = TimeSpan.FromMinutes(2);
 
     // ── Batch fill window ─────────────────────────────────────────────
-    // After the first item arrives, wait up to this duration for more items.
-    // At high throughput, 50ms collects hundreds of records per batch,
-    // reducing per-record overhead from connection/TDS setup.
     private static readonly TimeSpan BatchFillWindow = TimeSpan.FromMilliseconds(50);
 
     // ── Retry + dead-letter ────────────────────────────────────────────
@@ -80,6 +71,12 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     private static readonly int[] RetryDelaysMs = [1000, 2000, 4000];
     private readonly string _deadLetterDir;
     private static readonly JsonSerializerOptions s_jsonOpts = new() { WriteIndented = false };
+
+    // ── Connection reuse ───────────────────────────────────────────────
+    private SqlConnection? _conn;
+
+    // ── Drain buffer (reused to avoid allocation per drain cycle) ──────
+    private readonly List<TrackingData> _drainBuffer = new(500);
 
     /// <summary>Current circuit breaker state.</summary>
     public ForgeCircuitState Circuit => _circuitState;
@@ -102,50 +99,33 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         return true;
     }
 
-    /// <summary>
-    /// SQL column names in ordinal order. Must match the column order in <c>PiXL.Raw</c>.
-    /// </summary>
-    internal static readonly string[] ColumnNames =
-    [
-        "CompanyID",    // [0] int — client identifier from URL path (null if non-integer)
-        "PiXLID",       // [1] int — campaign/pixel identifier from URL path (null if non-integer)
-        "IPAddress",    // [2] nvarchar — real client IP (after proxy header extraction)
-        "RequestPath",  // [3] nvarchar — full URL path (e.g., /12345/1_SMART.GIF)
-        "QueryString",  // [4] nvarchar(max) — all ~90 JS-collected parameters
-        "HeadersJson",  // [5] nvarchar(max) — JSON object of captured HTTP headers
-        "UserAgent",    // [6] nvarchar(2000) — truncated User-Agent string
-        "Referer",      // [7] nvarchar(2000) — truncated Referer URL
-        "ReceivedAt"    // [8] datetime2 — UTC timestamp when the hit arrived
-    ];
-
     public SqlBulkCopyWriterService(
         ForgeChannels channels,
-        IOptions<TrackingSettings> settings,
+        IOptions<TrackingSettings> trackingSettings,
+        IOptions<ForgeSettings> forgeSettings,
         ITrackingLogger logger,
         ForgeMetrics metrics,
         ForgeFailoverWriter failoverWriter)
     {
         _channel = channels.SqlWriter;
-        _settings = settings.Value;
+        _trackingSettings = trackingSettings.Value;
+        _forgeSettings = forgeSettings.Value;
         _logger = logger;
         _metrics = metrics;
         _failoverWriter = failoverWriter;
-        _deadLetterDir = Path.Combine(AppContext.BaseDirectory, "DeadLetter");
+        _deadLetterDir = _forgeSettings.DeadLetterDirectory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Yield();
 
-        _logger.Info("SqlBulkCopyWriterService started.");
+        _logger.Info($"SqlBulkCopyWriterService started. " +
+            $"Target=PiXL.Parsed, BatchSize={_forgeSettings.ForgeBatchSize}, " +
+            $"DeadLetter={_deadLetterDir}");
 
-        // Replay any dead-letter files from a prior crash
-        await ReplayDeadLettersAsync(stoppingToken);
-
-        // Replay any failover JSONL files from a prior SQL outage
-        await ReplayFailoverFilesAsync(stoppingToken);
-
-        var batch = new List<TrackingData>(_settings.BatchSize);
+        var batchSize = _forgeSettings.ForgeBatchSize;
+        var batch = new List<TrackingData>(batchSize);
         var reader = _channel.Reader;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -159,12 +139,9 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
                 {
                     _circuitState = ForgeCircuitState.HalfOpen;
                     _logger.Info("Forge circuit breaker → HalfOpen, probing next batch");
-                    // Fall through to read a batch and try writing it
                 }
                 else
                 {
-                    // SQL is down — drain the channel to failover files so enriched
-                    // records are preserved on disk instead of overflowing the channel.
                     DrainChannelToFailover();
                     await Task.Delay(1000, stoppingToken);
                     continue;
@@ -175,29 +152,23 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             {
                 if (await reader.WaitToReadAsync(stoppingToken))
                 {
-                    // Greedy drain: grab everything available right now.
-                    while (batch.Count < _settings.BatchSize && reader.TryRead(out var item))
-                    {
+                    // Greedy drain
+                    while (batch.Count < batchSize && reader.TryRead(out var item))
                         batch.Add(item);
-                    }
 
-                    // Batch fill window: if we haven't hit BatchSize, wait briefly
-                    // for more items to arrive. At 70 rec/s, 150ms collects ~10 records
-                    // instead of writing 1-record batches 70 times per second.
-                    if (batch.Count < _settings.BatchSize)
+                    // Batch fill window: wait briefly for more items
+                    if (batch.Count < batchSize)
                     {
                         using var fillCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                         fillCts.CancelAfter(BatchFillWindow);
 
                         try
                         {
-                            while (batch.Count < _settings.BatchSize
+                            while (batch.Count < batchSize
                                 && await reader.WaitToReadAsync(fillCts.Token))
                             {
-                                while (batch.Count < _settings.BatchSize && reader.TryRead(out var extra))
-                                {
+                                while (batch.Count < batchSize && reader.TryRead(out var extra))
                                     batch.Add(extra);
-                                }
                             }
                         }
                         catch (OperationCanceledException) when (fillCts.IsCancellationRequested)
@@ -207,7 +178,10 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
                     }
 
                     if (batch.Count > 0)
+                    {
+                        _metrics.RecordBatchFill(batch.Count, batchSize);
                         await WriteBatchAsync(batch, stoppingToken);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -221,73 +195,57 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             }
         }
 
-        // Graceful shutdown: drain remaining items
-        await DrainChannelAsync(batch);
+        // Graceful shutdown
+        await DrainChannelAsync(batch, batchSize);
+
+        // Dispose persistent connection
+        _conn?.Dispose();
+        _conn = null;
     }
 
-    /// <summary>
-    /// Drains remaining channel items during graceful shutdown.
-    /// Attempts SQL write first; if that fails, persists to failover.
-    /// </summary>
-    private async Task DrainChannelAsync(List<TrackingData> batch)
+    // ════════════════════════════════════════════════════════════════════
+    // CONNECTION MANAGEMENT — Reuse across batches, reopen on error
+    // ════════════════════════════════════════════════════════════════════
+
+    private async ValueTask<SqlConnection> EnsureConnectionAsync(CancellationToken ct)
     {
-        _channel.Writer.TryComplete();
-        _logger.Info("Forge SQL writer shutting down. Draining remaining items...");
+        if (_conn is { State: ConnectionState.Open })
+            return _conn;
 
-        var deadline = DateTime.UtcNow.AddSeconds(_settings.ShutdownTimeoutSeconds);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            batch.Clear();
-
-            while (batch.Count < _settings.BatchSize && _channel.Reader.TryRead(out var item))
-            {
-                batch.Add(item);
-            }
-
-            if (batch.Count > 0)
-            {
-                if (_circuitState == ForgeCircuitState.Open)
-                {
-                    // SQL is down — persist to failover instead of trying SQL
-                    _failoverWriter.AppendBatch(batch);
-                }
-                else
-                {
-                    await WriteBatchAsync(batch, CancellationToken.None);
-                }
-            }
-            else
-                break;
-        }
-
-        var remaining = _channel.Reader.Count;
-        if (remaining > 0)
-        {
-            // Last resort — write any remaining records to failover
-            var finalBatch = new List<TrackingData>(remaining);
-            while (_channel.Reader.TryRead(out var item))
-                finalBatch.Add(item);
-
-            if (finalBatch.Count > 0)
-            {
-                _failoverWriter.AppendBatch(finalBatch);
-                _logger.Warning($"Forge shutdown — {finalBatch.Count} remaining items persisted to failover");
-            }
-        }
-        else
-            _logger.Info("Forge queue drained successfully");
-
-        // Ensure failover writer flushes to disk
-        _failoverWriter.Flush();
+        _conn?.Dispose();
+        _conn = new SqlConnection(_trackingSettings.ConnectionString);
+        await _conn.OpenAsync(ct);
+        return _conn;
     }
 
+    private void InvalidateConnection()
+    {
+        _conn?.Dispose();
+        _conn = null;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // BATCH WRITING — Parse inline + BulkCopy to PiXL.Parsed
+    // ════════════════════════════════════════════════════════════════════
+
     /// <summary>
-    /// Writes a batch via SqlBulkCopy with retry and dead-letter on failure.
+    /// Writes a batch: parse all records inline via ParsedRecordParser, then
+    /// BulkCopy to PiXL.Parsed with retry and dead-letter on failure.
     /// </summary>
     private async Task WriteBatchAsync(List<TrackingData> batch, CancellationToken ct)
     {
         if (batch.Count == 0) return;
+
+        // Parse all records inline (~1μs per record, ~0.5ms for 500 records)
+        var parsed = new List<object?[]>(batch.Count);
+        foreach (var td in batch)
+        {
+            parsed.Add(ParsedRecordParser.Parse(
+                td.CompanyID, td.PiXLID, td.IPAddress,
+                td.ReceivedAt, td.RequestPath,
+                td.QueryString, td.HeadersJson,
+                td.UserAgent, td.Referer));
+        }
 
         for (var attempt = 0; attempt <= MaxRetries; attempt++)
         {
@@ -302,13 +260,16 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             {
                 var ts = ForgeMetrics.StartTimer();
 
-                using var dataReader = new TrackingDataReader(batch);
-                using var bulkCopy = new SqlBulkCopy(_settings.ConnectionString);
-                bulkCopy.DestinationTableName = "PiXL.Raw";
-                bulkCopy.BatchSize = batch.Count;
-                bulkCopy.BulkCopyTimeout = _settings.BulkCopyTimeoutSeconds;
+                var conn = await EnsureConnectionAsync(ct);
+                using var dataReader = new ParsedDataReader(parsed);
+                using var bulkCopy = new SqlBulkCopy(conn)
+                {
+                    DestinationTableName = "PiXL.Parsed",
+                    BatchSize = parsed.Count,
+                    BulkCopyTimeout = _trackingSettings.BulkCopyTimeoutSeconds
+                };
 
-                var cols = ColumnNames;
+                var cols = ParsedRecordParser.ColumnNames;
                 for (var i = 0; i < cols.Length; i++)
                     bulkCopy.ColumnMappings.Add(i, cols[i]);
 
@@ -316,22 +277,37 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
                 _metrics.Record(Stage.SqlBulkCopy, ts, batch.Count);
                 OnWriteSuccess();
-                _logger.Debug($"Forge wrote {batch.Count} records");
+                _logger.Debug($"Forge wrote {batch.Count} records to PiXL.Parsed");
                 return;
             }
             catch (SqlException sqlEx) when (IsCircuitTripError(sqlEx))
             {
+                InvalidateConnection();
                 ClassifyAndTrip(sqlEx);
                 OnBatchFailure();
                 break;
             }
+            catch (SqlException sqlEx) when (IsDeadlock(sqlEx))
+            {
+                // Deadlock (1205): transient contention — always retry, never trip circuit
+                _logger.Warning($"Forge deadlock on attempt {attempt + 1}: {sqlEx.Message}");
+                InvalidateConnection();
+                if (attempt >= MaxRetries)
+                {
+                    _logger.Error($"Forge: deadlock persisted after {MaxRetries + 1} attempts for {batch.Count} records");
+                    break;
+                }
+                continue;
+            }
             catch (SqlException sqlEx) when (attempt < MaxRetries)
             {
                 _logger.Warning($"Forge SQL error on batch attempt {attempt + 1}: [{sqlEx.Number}] {sqlEx.Message}");
+                InvalidateConnection();
             }
             catch (SqlException sqlEx)
             {
                 _logger.Error($"Forge: all {MaxRetries + 1} attempts failed for batch of {batch.Count}: {sqlEx.Message}");
+                InvalidateConnection();
                 ClassifyAndTrip(sqlEx);
                 OnBatchFailure();
                 break;
@@ -339,16 +315,18 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             catch (Exception ex) when (attempt < MaxRetries)
             {
                 _logger.Warning($"Forge non-SQL error on batch attempt {attempt + 1}: {ex.Message}");
+                InvalidateConnection();
             }
             catch (Exception ex)
             {
                 _logger.Error($"Forge: all {MaxRetries + 1} attempts failed for batch of {batch.Count}: {ex.Message}");
+                InvalidateConnection();
                 OnBatchFailure();
                 break;
             }
         }
 
-        // All retries exhausted — persist to dead-letter file
+        // All retries exhausted — persist to dead-letter
         await WriteDeadLetterAsync(batch);
     }
 
@@ -361,6 +339,19 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         return false;
     }
 
+    private static bool IsDeadlock(SqlException sqlEx)
+    {
+        foreach (SqlError err in sqlEx.Errors)
+        {
+            if (err.Number == 1205) return true;
+        }
+        return false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // DEAD-LETTER PERSISTENCE
+    // ════════════════════════════════════════════════════════════════════
+
     private async Task WriteDeadLetterAsync(List<TrackingData> batch)
     {
         try
@@ -368,11 +359,15 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
             Directory.CreateDirectory(_deadLetterDir);
 
             var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            var fileName = $"deadletter_{timestamp}_{Guid.NewGuid():N}.json";
+            var fileName = $"deadletter_{timestamp}_{Guid.NewGuid():N}.jsonl";
             var filePath = Path.Combine(_deadLetterDir, fileName);
 
-            var json = JsonSerializer.Serialize(batch, s_jsonOpts);
-            await File.WriteAllTextAsync(filePath, json);
+            await using var writer = new StreamWriter(filePath, append: false, Encoding.UTF8);
+            foreach (var record in batch)
+            {
+                var line = JsonSerializer.Serialize(record, s_jsonOpts);
+                await writer.WriteLineAsync(line);
+            }
 
             _logger.Warning($"Forge dead-lettered {batch.Count} records to {fileName}");
         }
@@ -382,41 +377,9 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         }
     }
 
-    private async Task ReplayDeadLettersAsync(CancellationToken ct)
-    {
-        if (!Directory.Exists(_deadLetterDir)) return;
-
-        var files = Directory.GetFiles(_deadLetterDir, "deadletter_*.json");
-        if (files.Length == 0) return;
-
-        _logger.Info($"Forge found {files.Length} dead-letter file(s) to replay");
-
-        foreach (var file in files.OrderBy(f => f))
-        {
-            if (ct.IsCancellationRequested) break;
-
-            try
-            {
-                var json = await File.ReadAllTextAsync(file, ct);
-                var batch = JsonSerializer.Deserialize<List<TrackingData>>(json);
-
-                if (batch is null || batch.Count == 0)
-                {
-                    File.Delete(file);
-                    continue;
-                }
-
-                _logger.Info($"Forge replaying {batch.Count} dead-lettered records from {Path.GetFileName(file)}");
-                await WriteBatchAsync(batch, ct);
-
-                if (File.Exists(file)) File.Delete(file);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Forge failed to replay {Path.GetFileName(file)}: {ex.Message}");
-            }
-        }
-    }
+    // ════════════════════════════════════════════════════════════════════
+    // CIRCUIT BREAKER
+    // ════════════════════════════════════════════════════════════════════
 
     private void ClassifyAndTrip(SqlException sqlEx)
     {
@@ -427,39 +390,21 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
                 case 1105:
                     var msg = err.Message;
                     var isPrimary = msg.Contains("'PRIMARY'", StringComparison.OrdinalIgnoreCase);
-                    if (isPrimary)
-                    {
-                        TripCircuit("PrimaryFilegroupFull",
-                            $"SQL error 1105 on PRIMARY filegroup — object on wrong filegroup. Detail: {msg}");
-                    }
-                    else
-                    {
-                        TripCircuit("DiskFull",
-                            $"SQL error 1105 — filegroup full (disk space). Detail: {msg}");
-                    }
+                    TripCircuit(
+                        isPrimary ? "PrimaryFilegroupFull" : "DiskFull",
+                        $"SQL error 1105 — {(isPrimary ? "object on wrong filegroup" : "filegroup full")}. Detail: {msg}");
                     return;
 
                 case 9002:
                     TripCircuit("TransactionLogFull",
                         $"SQL error 9002 — transaction log full. Detail: {err.Message}");
                     return;
-
-                case 1205:
-                    _logger.Warning($"Forge deadlock on batch write: {err.Message}");
-                    return;
             }
         }
 
-        // Don't increment here — OnBatchFailure handles counting
         _logger.Error($"Forge SQL error writing batch: {sqlEx.Message}");
     }
 
-    /// <summary>
-    /// Called when a batch exhausts all retry attempts. Tracks consecutive
-    /// batch failures and trips the circuit breaker after 2 in a row.
-    /// This is counted per-BATCH (not per-attempt), so a single batch
-    /// failing 4 times counts as 1 batch failure.
-    /// </summary>
     private void OnBatchFailure()
     {
         _consecutiveBatchFailures++;
@@ -477,32 +422,17 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         _circuitState = ForgeCircuitState.Open;
         _circuitOpenedUtc = DateTime.UtcNow;
         _lastTripReason = reason;
+        InvalidateConnection();
         _logger.Error($"Forge circuit breaker TRIPPED → Open. Reason: {reason}. {detail}");
     }
 
     private void OnWriteSuccess()
     {
-        var previousState = _circuitState;
-
         if (_circuitState == ForgeCircuitState.HalfOpen)
         {
             _circuitState = ForgeCircuitState.Closed;
             _consecutiveBatchFailures = 0;
             _logger.Info("Forge circuit breaker → Closed (probe write succeeded, SQL recovered)");
-
-            // Replay failover files now that SQL is back — fire-and-forget.
-            // This runs on a separate task so the write loop isn't blocked.
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await ReplayFailoverFilesAsync(CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error($"Forge failover replay after recovery failed: {ex.Message}");
-                }
-            });
         }
         else if (_consecutiveBatchFailures > 0)
         {
@@ -510,193 +440,74 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Drains all pending records from the SQL writer channel directly to
-    /// failover JSONL files. Called when the circuit breaker is Open to prevent
-    /// channel overflow while SQL is unavailable. Records are already enriched.
-    /// </summary>
+    // ════════════════════════════════════════════════════════════════════
+    // FAILOVER DRAIN — Reuses buffer to avoid allocation per cycle
+    // ════════════════════════════════════════════════════════════════════
+
     private void DrainChannelToFailover()
     {
-        var drainBatch = new List<TrackingData>(100);
+        _drainBuffer.Clear();
 
         while (_channel.Reader.TryRead(out var item))
         {
-            drainBatch.Add(item);
+            _drainBuffer.Add(item);
 
-            if (drainBatch.Count >= 100)
+            if (_drainBuffer.Count >= _forgeSettings.ForgeBatchSize)
             {
-                _failoverWriter.AppendBatch(drainBatch);
-                drainBatch.Clear();
+                _failoverWriter.AppendBatch(_drainBuffer);
+                _drainBuffer.Clear();
             }
         }
 
-        if (drainBatch.Count > 0)
-            _failoverWriter.AppendBatch(drainBatch);
+        if (_drainBuffer.Count > 0)
+            _failoverWriter.AppendBatch(_drainBuffer);
     }
 
-    /// <summary>
-    /// Replays failover JSONL files from a prior SQL outage. Each file contains
-    /// enriched records that were persisted to disk instead of being dropped.
-    /// Writes directly via SqlBulkCopy, bypassing the channel.
-    /// </summary>
-    private async Task ReplayFailoverFilesAsync(CancellationToken ct)
+    // ════════════════════════════════════════════════════════════════════
+    // GRACEFUL SHUTDOWN DRAIN
+    // ════════════════════════════════════════════════════════════════════
+
+    private async Task DrainChannelAsync(List<TrackingData> batch, int batchSize)
     {
-        var files = _failoverWriter.GetFailoverFiles();
-        if (files.Length == 0) return;
+        _channel.Writer.TryComplete();
+        _logger.Info("Forge SQL writer shutting down. Draining remaining items...");
 
-        _logger.Info($"Forge found {files.Length} failover file(s) to replay");
-        var totalReplayed = 0;
+        var deadline = DateTime.UtcNow.AddSeconds(_trackingSettings.ShutdownTimeoutSeconds);
 
-        foreach (var file in files)
+        while (DateTime.UtcNow < deadline)
         {
-            if (ct.IsCancellationRequested) break;
+            batch.Clear();
 
-            var records = _failoverWriter.ReadFile(file);
-            if (records.Count == 0)
+            while (batch.Count < batchSize && _channel.Reader.TryRead(out var item))
+                batch.Add(item);
+
+            if (batch.Count > 0)
             {
-                _failoverWriter.DeleteFile(file);
-                continue;
-            }
-
-            _logger.Info($"Forge replaying {records.Count} failover records from {Path.GetFileName(file)}");
-
-            // Write in batches through the normal WriteBatchAsync path (retry + dead-letter)
-            for (var i = 0; i < records.Count; i += _settings.BatchSize)
-            {
-                if (ct.IsCancellationRequested) break;
-
-                var batchEnd = Math.Min(i + _settings.BatchSize, records.Count);
-                var batch = records.GetRange(i, batchEnd - i);
-                await WriteBatchAsync(batch, ct);
-
-                // If circuit tripped during replay, stop — we'll retry on next recovery
                 if (_circuitState == ForgeCircuitState.Open)
-                {
-                    _logger.Warning($"Forge circuit tripped during failover replay — aborting replay, will retry on next recovery");
-                    return;
-                }
+                    _failoverWriter.AppendBatch(batch);
+                else
+                    await WriteBatchAsync(batch, CancellationToken.None);
             }
-
-            totalReplayed += records.Count;
-            _failoverWriter.DeleteFile(file);
+            else
+                break;
         }
 
-        if (totalReplayed > 0)
-            _logger.Info($"Forge failover replay complete: {totalReplayed:N0} records recovered");
-    }
-
-    // ========================================================================
-    // TRACKING DATA READER — Zero-allocation DbDataReader over List<TrackingData>
-    // ========================================================================
-
-    /// <summary>
-    /// Lightweight <see cref="DbDataReader"/> that wraps a <c>List&lt;TrackingData&gt;</c>
-    /// for direct consumption by <see cref="SqlBulkCopy"/>. No intermediate allocations.
-    /// </summary>
-    private sealed class TrackingDataReader(List<TrackingData> batch) : DbDataReader
-    {
-        private int _index = -1;
-
-        public override int FieldCount => ColumnNames.Length;
-        public override int RecordsAffected => -1;
-        public override bool HasRows => batch.Count > 0;
-        public override bool IsClosed => _index >= batch.Count;
-        public override int Depth => 0;
-        public override bool Read() => ++_index < batch.Count;
-        public override bool NextResult() => false;
-
-        public override object GetValue(int ordinal)
+        var remaining = _channel.Reader.Count;
+        if (remaining > 0)
         {
-            var d = batch[_index];
-            return ordinal switch
+            var finalBatch = new List<TrackingData>(remaining);
+            while (_channel.Reader.TryRead(out var item))
+                finalBatch.Add(item);
+
+            if (finalBatch.Count > 0)
             {
-                0 => (object?)d.CompanyID ?? DBNull.Value,
-                1 => (object?)d.PiXLID ?? DBNull.Value,
-                2 => (object?)d.IPAddress ?? DBNull.Value,
-                3 => (object?)d.RequestPath ?? DBNull.Value,
-                4 => (object?)d.QueryString ?? DBNull.Value,
-                5 => (object?)d.HeadersJson ?? DBNull.Value,
-                6 => (object?)d.UserAgent ?? DBNull.Value,
-                7 => (object?)d.Referer ?? DBNull.Value,
-                8 => d.ReceivedAt,
-                _ => throw new IndexOutOfRangeException()
-            };
+                _failoverWriter.AppendBatch(finalBatch);
+                _logger.Warning($"Forge shutdown — {finalBatch.Count} remaining items persisted to failover");
+            }
         }
+        else
+            _logger.Info("Forge queue drained successfully");
 
-        public override bool IsDBNull(int ordinal)
-        {
-            if (ordinal == 8) return false;
-            var d = batch[_index];
-            return ordinal switch
-            {
-                0 => d.CompanyID is null,
-                1 => d.PiXLID is null,
-                2 => d.IPAddress is null,
-                3 => d.RequestPath is null,
-                4 => d.QueryString is null,
-                5 => d.HeadersJson is null,
-                6 => d.UserAgent is null,
-                7 => d.Referer is null,
-                _ => true
-            };
-        }
-
-        public override string GetName(int ordinal) => ColumnNames[ordinal];
-        public override int GetOrdinal(string name) => Array.IndexOf(ColumnNames, name);
-        public override string GetDataTypeName(int ordinal) => ordinal switch
-        {
-            0 or 1 => "int",
-            8 => "datetime2",
-            _ => "nvarchar"
-        };
-        public override Type GetFieldType(int ordinal) => ordinal switch
-        {
-            0 or 1 => typeof(int),
-            8 => typeof(DateTime),
-            _ => typeof(string)
-        };
-        public override object this[int ordinal] => GetValue(ordinal);
-        public override object this[string name] => GetValue(GetOrdinal(name));
-
-        public override int GetValues(object[] values)
-        {
-            var count = Math.Min(values.Length, FieldCount);
-            for (var i = 0; i < count; i++) values[i] = GetValue(i);
-            return count;
-        }
-
-        public override string GetString(int ordinal)
-        {
-            var d = batch[_index];
-            return (ordinal switch
-            {
-                2 => d.IPAddress,
-                3 => d.RequestPath, 4 => d.QueryString, 5 => d.HeadersJson,
-                6 => d.UserAgent, 7 => d.Referer, _ => null
-            }) ?? throw new InvalidCastException();
-        }
-
-        public override DateTime GetDateTime(int ordinal) =>
-            ordinal == 8 ? batch[_index].ReceivedAt : throw new InvalidCastException();
-
-        // Abstract stubs — never called by SqlBulkCopy for PiXL.Raw column types
-        public override bool GetBoolean(int ordinal) => throw new NotSupportedException();
-        public override byte GetByte(int ordinal) => throw new NotSupportedException();
-        public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => 0;
-        public override char GetChar(int ordinal) => throw new NotSupportedException();
-        public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => 0;
-        public override decimal GetDecimal(int ordinal) => throw new NotSupportedException();
-        public override double GetDouble(int ordinal) => throw new NotSupportedException();
-        public override float GetFloat(int ordinal) => throw new NotSupportedException();
-        public override Guid GetGuid(int ordinal) => throw new NotSupportedException();
-        public override short GetInt16(int ordinal) => throw new NotSupportedException();
-        public override int GetInt32(int ordinal) => ordinal switch
-        {
-            0 => batch[_index].CompanyID ?? throw new InvalidCastException(),
-            1 => batch[_index].PiXLID ?? throw new InvalidCastException(),
-            _ => throw new InvalidCastException()
-        };
-        public override long GetInt64(int ordinal) => throw new NotSupportedException();
-        public override IEnumerator GetEnumerator() => throw new NotSupportedException();
+        _failoverWriter.Flush();
     }
 }

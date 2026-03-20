@@ -1,0 +1,1267 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartPiXL — Pipeline Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════
+   ROOT & RESET
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  --cyan:       #00f3ff;
+  --cyan-dim:   rgba(0,243,255,0.35);
+  --cyan-ghost: rgba(0,243,255,0.08);
+  --green:      #00ff88;
+  --green-dim:  rgba(0,255,136,0.35);
+  --orange:     #ff6a00;
+  --orange-dim: rgba(255,106,0,0.35);
+  --red:        #ff2d55;
+  --bg:         #030810;
+  --panel:      rgba(3,8,16,0.75);
+  --border:     rgba(0,243,255,0.18);
+  --font-head:  'Orbitron', sans-serif;
+  --font-mono:  'Share Tech Mono', monospace;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); color:#fff; }
+body { font-family:var(--font-mono); }
+
+/* ═══════════════════════════════════════════════════════════
+   BACKGROUND
+   ═══════════════════════════════════════════════════════════ */
+#bg-grid {
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    linear-gradient(rgba(0,243,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,243,255,0.025) 1px, transparent 1px);
+  background-size:60px 60px;
+  transition: background-size 0.8s ease;
+  animation: grid-drift 40s linear infinite;
+}
+#bg-grid.detailed { background-size:35px 35px; }
+@keyframes grid-drift { to { background-position:60px 60px; } }
+
+#scanlines {
+  position:fixed; inset:0; z-index:100; pointer-events:none;
+  background: repeating-linear-gradient(
+    0deg, transparent 0px, transparent 3px,
+    rgba(0,243,255,0.008) 3px, rgba(0,243,255,0.008) 6px);
+  will-change: auto;
+}
+#vignette {
+  position:fixed; inset:0; z-index:100; pointer-events:none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.6) 100%);
+}
+#fx-canvas { position:fixed; inset:0; z-index:10; pointer-events:none; will-change:contents; }
+
+/* ═══════════════════════════════════════════════════════════
+   LAYER SYSTEM
+   ═══════════════════════════════════════════════════════════ */
+#scene { position:fixed; inset:0; z-index:5; }
+
+.layer {
+  position:absolute; inset:0;
+  will-change: transform, opacity;
+}
+
+/* Zoom handled by Web Animations API — no CSS transitions on these */
+#overview-layer { transition: none; }
+.substep-layer  { transition: none; }
+.layer-svg {
+  position:absolute; inset:0; width:100%; height:100%; pointer-events:none;
+}
+.layer-svg .conn {
+  fill:none; stroke-width:2; stroke-linecap:round;
+  filter: url(#glow);
+}
+.layer-svg .conn.c-cyan   { stroke:var(--cyan);   opacity:0.45; }
+.layer-svg .conn.c-green  { stroke:var(--green);  opacity:0.45; }
+.layer-svg .conn.c-orange { stroke:var(--orange); opacity:0.45; }
+.layer-svg .conn.active   { opacity:0.9; stroke-width:3; }
+
+.layer-svg .conn-dash {
+  fill:none; stroke-width:2; stroke-linecap:round;
+  stroke-dasharray:8 12; animation:dash-flow 1.5s linear infinite;
+}
+.layer-svg .conn-dash.c-cyan   { stroke:var(--cyan);   opacity:0.2; }
+.layer-svg .conn-dash.c-green  { stroke:var(--green);  opacity:0.2; }
+.layer-svg .conn-dash.c-orange { stroke:var(--orange); opacity:0.2; }
+@keyframes dash-flow { to { stroke-dashoffset:-20; } }
+
+/* Overview layer zoom-out (final state applied by Web Animations API) */
+#overview-layer.zoomed-out {
+  opacity:0; transform:scale(1.5); pointer-events:none;
+}
+
+/* Substep layers hidden by default */
+.substep-layer {
+  opacity:0; transform:scale(1.08); pointer-events:none;
+}
+.substep-layer.active {
+  opacity:1; transform:scale(1); pointer-events:auto;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   OVERVIEW NODES
+   ═══════════════════════════════════════════════════════════ */
+.node {
+  position:absolute; transform:translate(-50%,-50%);
+  width:140px; padding:16px 10px;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  background:rgba(3,8,16,0.92);
+  border:1px solid var(--border); border-radius:10px;
+  cursor:pointer; user-select:none;
+  transition: border-color 0.4s, box-shadow 0.4s, opacity 0.5s;
+  opacity:0;
+}
+.node .step-num {
+  font-family:var(--font-mono); font-size:11px; color:rgba(0,243,255,0.4); letter-spacing:2px;
+}
+.node .label {
+  font-family:var(--font-head); font-size:12px; font-weight:700;
+  color:var(--cyan); letter-spacing:1px; text-align:center;
+  text-shadow:0 0 10px var(--cyan-dim);
+}
+.node:hover { border-color:rgba(0,243,255,0.5); box-shadow:0 0 20px rgba(0,243,255,0.15), inset 0 0 20px rgba(0,243,255,0.03); }
+.node.active { border-color:rgba(0,243,255,0.8); box-shadow:0 0 40px rgba(0,243,255,0.3), inset 0 0 30px rgba(0,243,255,0.05); }
+.node.visited { border-color:rgba(0,243,255,0.35); box-shadow:0 0 12px rgba(0,243,255,0.1); }
+.node.entered { opacity:1; }
+
+/* ═══════════════════════════════════════════════════════════
+   SUBSTEP NODES
+   ═══════════════════════════════════════════════════════════ */
+.snode {
+  position:absolute; transform:translate(-50%,-50%);
+  width:120px; padding:12px 8px;
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  background:rgba(3,8,16,0.92);
+  border:1px solid var(--border); border-radius:8px;
+  cursor:pointer; user-select:none;
+  transition: border-color 0.4s, box-shadow 0.4s;
+}
+.snode .s-num {
+  font-size:16px; line-height:1;
+  color:var(--cyan); text-shadow:0 0 8px var(--cyan-dim);
+}
+.snode .s-label {
+  font-family:var(--font-mono); font-size:9px; text-align:center;
+  color:rgba(255,255,255,0.7); letter-spacing:0.5px; line-height:1.3;
+}
+.snode.tier2 .s-num { color:var(--green);  text-shadow:0 0 8px var(--green-dim); }
+.snode.tier3 .s-num { color:var(--orange); text-shadow:0 0 8px var(--orange-dim); }
+.snode.tier2 { --tier-clr:var(--green);  --tier-dim:var(--green-dim); }
+.snode.tier3 { --tier-clr:var(--orange); --tier-dim:var(--orange-dim); }
+
+.snode:hover { border-color:rgba(0,243,255,0.5); box-shadow:0 0 18px rgba(0,243,255,0.15); }
+.snode.active { border-color:var(--tier-clr, var(--cyan)); box-shadow:0 0 35px var(--tier-dim, var(--cyan-dim)), inset 0 0 15px rgba(0,0,0,0.3); animation:snode-pulse 0.4s ease-out; }
+.snode.visited { border-color:color-mix(in srgb, var(--tier-clr, var(--cyan)) 40%, transparent); box-shadow:0 0 8px color-mix(in srgb, var(--tier-clr, var(--cyan)) 15%, transparent); }
+@keyframes snode-pulse { 0%{transform:translate(-50%,-50%) scale(1)} 40%{transform:translate(-50%,-50%) scale(1.07)} 100%{transform:translate(-50%,-50%) scale(1)} }
+
+.tier-label {
+  position:absolute; transform:translateY(-50%);
+  font-family:var(--font-head); font-size:11px; font-weight:700; letter-spacing:3px;
+}
+.tier-label.t1 { color:var(--cyan);   text-shadow:0 0 15px var(--cyan-dim); }
+.tier-label.t2 { color:var(--green);  text-shadow:0 0 15px var(--green-dim); }
+.tier-label.t3 { color:var(--orange); text-shadow:0 0 15px var(--orange-dim); }
+
+.stage-title {
+  position:absolute; top:8%; left:50%; transform:translateX(-50%);
+  font-family:var(--font-head); font-size:13px; font-weight:700;
+  color:rgba(0,243,255,0.5); letter-spacing:5px;
+  text-shadow:0 0 20px var(--cyan-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════ */
+header {
+  position:fixed; top:0; left:0; right:0; z-index:200;
+  display:flex; align-items:center; gap:16px;
+  padding:14px 24px;
+  background:linear-gradient(180deg, rgba(3,8,16,0.9) 0%, transparent 100%);
+}
+header .logo {
+  font-family:var(--font-head); font-size:14px; font-weight:900;
+  color:var(--cyan); letter-spacing:4px;
+  text-shadow:0 0 20px var(--cyan-dim), 0 0 60px rgba(0,243,255,0.15);
+}
+header .subtitle {
+  font-family:var(--font-head); font-size:11px; font-weight:400;
+  color:rgba(255,255,255,0.5); letter-spacing:3px;
+}
+header .nav-link {
+  margin-left:auto;
+  font-family:var(--font-mono); font-size:11px;
+  color:rgba(0,243,255,0.5); text-decoration:none; letter-spacing:1px;
+  transition:color 0.3s;
+}
+header .nav-link:hover { color:var(--cyan); }
+
+/* ═══════════════════════════════════════════════════════════
+   BREADCRUMB
+   ═══════════════════════════════════════════════════════════ */
+#breadcrumb {
+  position:fixed; top:52px; left:24px; z-index:200;
+  font-family:var(--font-mono); font-size:11px; letter-spacing:1px;
+  color:rgba(255,255,255,0.35);
+  transition: opacity 0.4s;
+}
+#breadcrumb .bc-sep { color:rgba(0,243,255,0.25); margin:0 6px; }
+#breadcrumb .bc-active { color:var(--cyan); }
+
+/* ═══════════════════════════════════════════════════════════
+   CONTROLS
+   ═══════════════════════════════════════════════════════════ */
+#controls {
+  position:fixed; top:14px; left:50%; transform:translateX(-50%);
+  z-index:200; display:flex; align-items:center; gap:8px;
+}
+#controls button {
+  width:36px; height:36px;
+  font-size:14px; line-height:36px; text-align:center;
+  background:rgba(3,8,16,0.92); color:var(--cyan);
+  border:1px solid var(--border); border-radius:6px;
+  cursor:pointer; font-family:var(--font-mono);
+  transition:background 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+#controls button:hover {
+  background:rgba(0,243,255,0.08); border-color:rgba(0,243,255,0.5);
+  box-shadow:0 0 15px rgba(0,243,255,0.15);
+}
+#controls button.active-btn {
+  background:rgba(0,243,255,0.12); border-color:rgba(0,243,255,0.6);
+  box-shadow:0 0 20px rgba(0,243,255,0.2);
+}
+#step-indicator {
+  font-family:var(--font-mono); font-size:11px;
+  color:rgba(255,255,255,0.4); letter-spacing:2px;
+  min-width:80px; text-align:center;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NARRATION PANEL
+   ═══════════════════════════════════════════════════════════ */
+#narration {
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+  z-index:200; width:min(700px, 92vw);
+  padding:20px 28px;
+  background:rgba(3,8,16,0.94);
+  border:1px solid var(--border); border-radius:12px;
+  transition:opacity 0.4s, transform 0.4s;
+}
+#narr-title {
+  font-family:var(--font-head); font-size:14px; font-weight:700;
+  color:var(--cyan); letter-spacing:2px; margin-bottom:8px;
+  text-shadow:0 0 15px var(--cyan-dim);
+}
+#narr-text { font-size:13px; line-height:1.6; color:rgba(255,255,255,0.8); }
+#narr-tech { margin-top:10px; font-size:11px; color:rgba(0,243,255,0.45); letter-spacing:0.5px; }
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════ */
+@media (max-width:900px) {
+  .node { width:110px; padding:12px 8px; }
+  .node .label { font-size:10px; }
+  .snode { width:95px; padding:8px 4px; }
+  .snode .s-num { font-size:14px; }
+  .snode .s-label { font-size:8px; }
+  #narration { padding:14px 18px; }
+}
+.layer-svg .conn-failover {
+  fill:none; stroke-width:2; stroke-linecap:round;
+  stroke:var(--orange); opacity:0.25;
+  stroke-dasharray:6 8;
+  filter: url(#glow);
+}
+</style>
+</head>
+<body>
+<div id="bg-grid"></div>
+<canvas id="fx-canvas"></canvas>
+<div id="scanlines"></div>
+<div id="vignette"></div>
+
+<div id="scene"></div>
+
+<header>
+  <span class="logo">SMARTPIXL</span>
+  <span class="subtitle">PIPELINE EXPLORER</span>
+  <a class="nav-link" href="/tron">&#x2190; TRON DASHBOARD</a>
+</header>
+
+<div id="breadcrumb">OVERVIEW</div>
+
+<div id="controls">
+  <button id="btn-prev" title="Previous step">&#x25C0;</button>
+  <button id="btn-play" title="Play / Pause">&#x25B6;</button>
+  <button id="btn-next" title="Next step">&#x25B6;</button>
+  <span id="step-indicator">READY</span>
+</div>
+
+<div id="narration">
+  <div id="narr-title">SMARTPIXL PIPELINE</div>
+  <div id="narr-text">Follow a data packet from the browser through every system in the pipeline. Press Play to watch the full journey, or step through with the arrows.</div>
+  <div id="narr-tech"></div>
+</div>
+
+<script>
+/* =================================================================
+   CONFIGURATION - OVERVIEW STAGES
+   ================================================================= */
+var VB_W = 1400, VB_H = 800;
+
+var STAGES = [
+  { id:'browser',  num:'01', label:'BROWSER',    x:140,  y:350,
+    desc:'A visitor lands on a website with the PiXL Script installed. In under 100 milliseconds, the script silently captures 40+ browser signals \u2014 building a unique digital fingerprint.',
+    tech:'PiXL Script \xb7 40+ signals \xb7 <100ms collection' },
+  { id:'edge',     num:'02', label:'PIXL EDGE',  x:420,  y:180,
+    desc:'The fingerprint data arrives at the server as a tiny pixel request. The Edge parses, validates, and packages it into a structured record in under 2 milliseconds.',
+    tech:'IIS \u2192 Kestrel \xb7 QueryString parse \xb7 TrackingData assembly \xb7 <2ms' },
+  { id:'pipe',     num:'03', label:'NAMED PIPE', x:700,  y:420,
+    desc:'A high-speed inter-process channel moves data from the Edge server to the Forge intelligence engine entirely in memory. If the Forge is offline, records fail over to disk \u2014 zero data loss.',
+    tech:'Windows Named Pipe \xb7 50-record batches \xb7 JSONL failover' },
+  { id:'forge',    num:'04', label:'FORGE',       x:980,  y:180,
+    desc:'The intelligence engine. Seventeen enrichment steps across three tiers analyze every visitor \u2014 from bot detection to behavioral analysis to lead scoring \u2014 in about 12 milliseconds per record.',
+    tech:'17 enrichments \xb7 3 tiers \xb7 8-32 adaptive workers \xb7 ~12ms total' },
+  { id:'database', num:'05', label:'SQL SERVER',  x:1260, y:350,
+    desc:'Fully enriched records write to the database through a circuit-breaker-protected path. ETL procedures then aggregate data into dashboards, alerts, and customer reports.',
+    tech:'SqlBulkCopy \xb7 PiXL.Hit \xb7 ETL procs \xb7 Dashboards \xb7 TrafficAlert API' },
+];
+
+var OVERVIEW_CURVES = [
+  { cx1:280,  cy1:350, cx2:280,  cy2:180 },
+  { cx1:560,  cy1:180, cx2:560,  cy2:420 },
+  { cx1:840,  cy1:420, cx2:840,  cy2:180 },
+  { cx1:1120, cy1:180, cx2:1120, cy2:350 },
+];
+
+/* =================================================================
+   CONFIGURATION - SUBSTEPS PER STAGE
+   ================================================================= */
+var SUBSTEPS = {
+  browser: {
+    title: 'BROWSER \u2014 Signal Collection',
+    travel: 600, dwell: 1500,
+    tierLabels: [
+      { text:'SEQUENTIAL COLLECTION PIPELINE', cls:'t1', x:400, y:340 },
+    ],
+    steps: [
+      { num:'\u2776', label:'Script\nInject',    x:100,  y:400,
+        desc:'When someone visits the website, a tiny JavaScript file loads silently in the background. It\u2019s smaller than most images on the page \u2014 invisible to the visitor and ready in milliseconds.',
+        tech:'Inline <script> tag \xb7 async load \xb7 no external dependencies' },
+      { num:'\u2777', label:'Canvas\nFingerprint', x:300,  y:400,
+        desc:'The script draws an invisible image on a hidden canvas element. Every device renders it slightly differently based on its graphics hardware and drivers \u2014 creating the first piece of a unique fingerprint.',
+        tech:'Canvas 2D \xb7 toDataURL hash \xb7 GPU-dependent rendering' },
+      { num:'\u2778', label:'WebGL\nProbe',      x:500,  y:400,
+        desc:'A 3D rendering test extracts the visitor\u2019s GPU model \u2014 like reading the VIN number off a car\u2019s engine. An NVIDIA RTX 4090 tells a very different story than integrated Intel graphics.',
+        tech:'WebGL renderer string \xb7 GPU vendor \xb7 shader precision \xb7 extensions' },
+      { num:'\u2779', label:'Audio\nHash',       x:700,  y:400,
+        desc:'The browser\u2019s audio processing pipeline has unique mathematical characteristics. By generating a silent audio signal, we capture another stable fingerprint dimension invisible to the visitor.',
+        tech:'AudioContext \xb7 OfflineAudioContext \xb7 oscillator hash' },
+      { num:'\u277A', label:'Fonts &\nScreen',   x:900,  y:400,
+        desc:'Available fonts vary dramatically between devices. Combined with exact screen dimensions and pixel density, this creates a remarkably specific device profile.',
+        tech:'Font enumeration \xb7 screen.width/height \xb7 devicePixelRatio' },
+      { num:'\u277B', label:'Hardware\nSignals',  x:1100, y:400,
+        desc:'Device memory, CPU core count, touch capability, and platform identity round out the hardware profile \u2014 each one narrowing the pool of matching devices.',
+        tech:'navigator.hardwareConcurrency \xb7 deviceMemory \xb7 maxTouchPoints \xb7 platform' },
+      { num:'\u277C', label:'Package\n& Fire',    x:1300, y:400,
+        desc:'All 40+ collected signals are bundled into a single request disguised as a 1\xd71 transparent pixel image. The browser fires it automatically \u2014 the entire collection takes under 100 milliseconds.',
+        tech:'Image() request \xb7 query-string encoding \xb7 _SMART.GIF \xb7 <100ms total' },
+    ]
+  },
+
+  edge: {
+    title: 'PIXL EDGE \u2014 Request Processing',
+    travel: 600, dwell: 1400,
+    tierLabels: [
+      { text:'REQUEST INTAKE', cls:'t1', x:200, y:100 },
+      { text:'PROCESSING PIPELINE', cls:'t1', x:700, y:425 },
+    ],
+    steps: [
+      { num:'\u2776', label:'Pixel\nRequest',     x:250,  y:150,
+        desc:'The pixel request arrives at the server carrying all collected signals encoded in its URL. To the network, it looks like any ordinary image request \u2014 invisible to ad blockers and firewalls.',
+        tech:'GET /_SMART.GIF?px=...&cv=...&wg=... \xb7 ~2KB query string' },
+      { num:'\u2777', label:'IIS\nRouting',        x:250,  y:310,
+        desc:'Microsoft IIS receives the request and routes it to the Kestrel application server. The request enters the SmartPiXL middleware pipeline \u2014 a zero-allocation hot path optimized for throughput.',
+        tech:'IIS \u2192 Kestrel reverse proxy \xb7 zero-alloc middleware \xb7 <0.5ms' },
+      { num:'\u2778', label:'Query\nParse',        x:250,  y:480,
+        desc:'Every signal from the browser is extracted from the URL query string and validated. Malformed or suspiciously over-sized data is flagged immediately.',
+        tech:'Custom parser \xb7 string pooling \xb7 validation guards \xb7 ~0.3ms' },
+      { num:'\u2779', label:'PiXL Code\nValidate', x:580,  y:480,
+        desc:'The customer\u2019s PiXL code is checked against the active customer registry. Invalid or expired codes are rejected \u2014 ensuring only authorized tracking feeds into the system.',
+        tech:'In-memory lookup \xb7 O(1) hash check \xb7 reject \u2192 1\xd71 transparent GIF' },
+      { num:'\u277A', label:'Build\nRecord',       x:900,  y:480,
+        desc:'All parsed and validated signals are assembled into a structured TrackingData object \u2014 the canonical format that flows through the entire pipeline from here to the database.',
+        tech:'TrackingData struct \xb7 40+ fields \xb7 server-side params (_srv_*) appended' },
+      { num:'\u277B', label:'Pipe\nTransmit',      x:1220, y:480,
+        desc:'The TrackingData record is enqueued for inter-process transmission. The Edge server is now free to handle the next incoming request \u2014 total processing time under 2 milliseconds.',
+        tech:'PipeClient.EnqueueAsync() \xb7 batch buffer \xb7 round-robin pipe instances' },
+    ]
+  },
+
+  pipe: {
+    title: 'NAMED PIPE \u2014 Transport',
+    travel: 700, dwell: 1500,
+    conns: [
+      { from:0, to:1 },
+      { from:1, to:2 },
+      { from:1, to:3, failover:true },
+      { from:2, to:4 },
+      { from:3, to:4, failover:true },
+    ],
+    tierLabels: [
+      { text:'HAPPY PATH', cls:'t1', x:850, y:175 },
+      { text:'FAILOVER', cls:'t3', x:850, y:625 },
+    ],
+    steps: [
+      { num:'\u2776', label:'Batch\nBuffer',     x:170,  y:400,
+        desc:'Records accumulate in a memory buffer. Each incoming TrackingData record is serialized and queued. Batching is key \u2014 one network write per 50 records instead of one per record.',
+        tech:'MemoryStream buffer \xb7 JSONL serialization \xb7 configurable batch size' },
+      { num:'\u2777', label:'Flush\nTrigger',    x:470,  y:400,
+        desc:'When the buffer reaches 50 records or a timeout fires, the batch is sealed. This timer ensures records are never stuck waiting during low-traffic periods.',
+        tech:'50-record threshold \xb7 250ms timeout \xb7 whichever comes first' },
+      { num:'\u2778', label:'Pipe\nWrite',       x:800,  y:240,
+        desc:'The batch writes through a Windows named pipe \u2014 a direct memory-to-memory channel between the Edge and Forge processes. No network stack, no disk I/O, no serialization overhead.',
+        tech:'Named pipe \xb7 4 server instances \xb7 64KB buffer' },
+      { num:'\u2779', label:'Failover\nGate',    x:800,  y:560,
+        desc:'If the pipe is unavailable \u2014 Forge restart, crash, or maintenance \u2014 records automatically write to JSONL files on disk. Three-tier failover ensures absolutely zero data loss.',
+        tech:'Tier 1: retry pipe \xb7 Tier 2: JSONL to Failover/ \xb7 Tier 3: archive' },
+      { num:'\u277A', label:'Forge\nIntake',     x:1150, y:400,
+        desc:'The Forge reads the batch from its pipe endpoint. Each record enters a high-performance async Channel \u2014 an in-memory queue that feeds the adaptive enrichment workers.',
+        tech:'PipeServerManager \xb7 Channel<TrackingData> \u2192 enrichment workers' },
+    ]
+  },
+
+  forge: {
+    title: 'FORGE \u2014 Enrichment Engine',
+    travel: 500, dwell: 1000,
+    steps: [
+      { num:'\u2460', label:'Bot\nDetection',     x:120,  y:155, tier:1,
+        desc:'Checks the User-Agent against known bot signatures \u2014 Googlebot, Bingbot, scrapers, headless browsers. Known bots are flagged immediately so downstream steps can skip unnecessary analysis.',
+        tech:'BoundedCache \xb7 regex patterns \xb7 _srv_knownBot \xb7 <0.5ms' },
+      { num:'\u2461', label:'UA\nParsing',        x:330,  y:155, tier:1,
+        desc:'Extracts browser name, version, operating system, and device type from the User-Agent string. Results are cached so repeat visitors skip the regex work.',
+        tech:'Regex extraction \xb7 BoundedCache \xb7 browser, OS, device type' },
+      { num:'\u2462', label:'DNS\nLookup',        x:540,  y:155, tier:1,
+        desc:'Checks the in-memory DNS cache for the visitor\u2019s reverse hostname. Cloud provider domains like amazonaws.com instantly reveal datacenter traffic.',
+        tech:'In-memory cache read \xb7 Lane 3 background resolution \xb7 rDNS' },
+      { num:'\u2463', label:'MaxMind\nGeo',       x:750,  y:155, tier:1,
+        desc:'Looks up the IP in the MaxMind GeoLite2 database \u2014 an in-memory B-tree that returns country, region, city, coordinates, timezone, and ISP with no network call.',
+        tech:'GeoLite2-City.mmdb \xb7 memory-mapped \xb7 <1ms lookup' },
+      { num:'\u2464', label:'Datacenter\nIP',     x:960,  y:155, tier:1,
+        desc:'Checks the IP against preloaded CIDR ranges from AWS, Google Cloud, Azure, and Cloudflare. Identifies traffic from cloud infrastructure vs. residential networks.',
+        tech:'Preloaded CIDRs \xb7 AWS + GCP + Azure + CF \xb7 O(log n)' },
+      { num:'\u2465', label:'WHOIS\nASN',         x:1170, y:155, tier:1,
+        desc:'Checks the WHOIS cache for the IP\u2019s Autonomous System Number and organization. Reveals the network operator \u2014 residential ISP, hosting provider, or enterprise.',
+        tech:'In-memory cache \xb7 Lane 3 background WHOIS \xb7 ASN + Org' },
+
+      { num:'\u2466', label:'Fingerprint\nStability', x:1200, y:400, tier:2,
+        desc:'Compares the current fingerprint against previous visits by the same identity. A score of 100 means rock-solid consistency; drops indicate device changes, VPN switches, or anti-detect browsers.',
+        tech:'Hash comparison \xb7 per-piXLId history \xb7 0-100 score' },
+      { num:'\u2467', label:'IP\nBehavior',          x:950,  y:400, tier:2,
+        desc:'Analyzes the IP\u2019s recent activity \u2014 how many distinct visitors, domains, and requests per minute. High ratios signal shared proxies, VPN exit nodes, or botnets.',
+        tech:'IP activity aggregation \xb7 distinct piXLIds + domains \xb7 hits/min' },
+      { num:'\u2468', label:'Session\nStitching',    x:700,  y:400, tier:2,
+        desc:'Links individual page views into coherent browsing sessions. Uses the PiXL cookie when available, falls back to fingerprint matching at 80%+ confidence for cookieless visitors.',
+        tech:'Cookie + fingerprint matching \xb7 80% confidence \xb7 page sequence' },
+      { num:'\u2469', label:'Cross-\nCustomer',      x:450,  y:400, tier:2,
+        desc:'Checks if this visitor has appeared across multiple customer sites. Cross-site patterns distinguish legitimate browsers from coordinated bot networks.',
+        tech:'Cross-piXLCode scan \xb7 first/last seen \xb7 count distinct' },
+      { num:'\u246A', label:'Device\nAffluence',     x:200,  y:400, tier:2,
+        desc:'Scores the visitor\u2019s hardware tier from GPU model, screen resolution, RAM, and CPU cores. A MacBook Pro visitor has different purchasing intent than a budget Chromebook.',
+        tech:'GPU tier lookup \xb7 screen + memory + cores \xb7 0-100 affluence' },
+
+      { num:'\u246B', label:'Contradiction\nMatrix', x:120,  y:645, tier:3,
+        desc:'Cross-references all signals for impossible combinations \u2014 Windows UA on an iPhone, New York timezone with Tokyo IP, mobile screen from a desktop GPU.',
+        tech:'Rule engine \xb7 TZ vs geo \xb7 OS vs UA \xb7 screen vs device \xb7 bitmask' },
+      { num:'\u246C', label:'Geographic\nArbitrage',  x:330,  y:645, tier:3,
+        desc:'Detects location mismatches \u2014 timezone offset doesn\u2019t match the GeoIP country, or browser language is inconsistent with the reported region.',
+        tech:'TZ vs GeoIP \xb7 language vs country \xb7 distance calculation' },
+      { num:'\u246D', label:'Device Age\nEstimate',   x:540,  y:645, tier:3,
+        desc:'Estimates device age from GPU release date, supported APIs, and hardware capabilities. A 2019-era GPU on a supposedly new device suggests emulation or spoofing.',
+        tech:'GPU release year \xb7 API ceiling \xb7 hardware era blend' },
+      { num:'\u246E', label:'Behavioral\nReplay',     x:750,  y:645, tier:3,
+        desc:'Analyzes human interaction patterns \u2014 mouse movement entropy, scroll jitter, keystroke cadence. Automation tools produce statistically detectable uniformity that humans never exhibit.',
+        tech:'Mouse entropy \xb7 scroll velocity \xb7 keystroke cadence \xb7 threshold' },
+      { num:'\u246F', label:'Dead\nInternet',         x:960,  y:645, tier:3,
+        desc:'Identifies coordinated synthetic traffic \u2014 clusters of identical fingerprints arriving at uniform intervals. The hallmark of bot farms, click fraud, and impression inflation.',
+        tech:'Fingerprint clustering \xb7 arrival intervals \xb7 coordination score' },
+      { num:'\u2470', label:'Lead\nScore',            x:1170, y:645, tier:3,
+        desc:'The final verdict. All sixteen prior signals combine into a weighted 0-100 score with a letter grade. Grade A = high-quality human. Grade F = bot or fraud.',
+        tech:'Bot 25% \xb7 Contradiction 15% \xb7 Stability 15% \xb7 Affluence 10% \xb7 Replay 10% \xb7 Session 10% \xb7 Cross-customer 10% \xb7 Dead internet 5%' },
+    ],
+    tierLabels: [
+      { text:'TIER 1 \xb7 FAST DETECTION',  cls:'t1', x:14,   y:155 },
+      { text:'TIER 2 \xb7 BEHAVIORAL',      cls:'t2', x:1386, y:400, right:true },
+      { text:'TIER 3 \xb7 SCORING',         cls:'t3', x:14,   y:645 },
+      { text:'CHANNEL [50K] \u2192 \u00d732 WORKERS \u2192 WRITER', cls:'t1', x:350, y:95 },
+    ]
+  },
+
+  database: {
+    title: 'SQL SERVER \u2014 Storage & Analytics',
+    travel: 600, dwell: 1400,
+    tierLabels: [
+      { text:'WRITE PATH', cls:'t1', x:300, y:205 },
+      { text:'ETL \xb7 ANALYTICS', cls:'t2', x:950, y:495 },
+    ],
+    steps: [
+      { num:'\u2776', label:'Circuit\nBreaker',   x:170,  y:270,
+        desc:'Before writing, the SQL writer checks its circuit breaker \u2014 a safety mechanism that stops hammering a struggling database. Consecutive failures trip the breaker; it resets after a cool-down.',
+        tech:'CircuitBreakerWriter \xb7 5 failure threshold \xb7 30s reset \xb7 Closed/Open/HalfOpen' },
+      { num:'\u2777', label:'Batch\nBuild',       x:470,  y:270,
+        desc:'Enriched records accumulate from the writer channel into a batch. Batching minimizes round-trips, maximizing throughput per database connection.',
+        tech:'Channel<TrackingData> \u2192 List<T> drain \xb7 configurable batch window' },
+      { num:'\u2778', label:'Bulk\nInsert',       x:770,  y:270,
+        desc:'SqlBulkCopy streams the entire batch to SQL Server in a single high-speed operation \u2014 the fastest possible write path. Thousands of records in one network round-trip.',
+        tech:'SqlBulkCopy \xb7 PiXL.Hit target \xb7 ~2ms per 100-row batch' },
+      { num:'\u2779', label:'ETL\nPipeline',      x:770,  y:560,
+        desc:'Stored procedures fire on a watermark schedule: parsing new hits, enriching with geographic data, updating scores, and aggregating metrics. All business logic lives in SQL.',
+        tech:'ETL.Watermark \xb7 ParseNewHits \u2192 GeoEnrich \u2192 ScoreUpdate' },
+      { num:'\u277A', label:'Score &\nClassify',  x:1050, y:560,
+        desc:'Each record receives its final classification \u2014 human visitor, suspicious, or confirmed bot. Anomaly detection flags sudden traffic pattern changes for investigation.',
+        tech:'TrafficAlert scoring \xb7 anomaly detection \xb7 threshold rules' },
+      { num:'\u277B', label:'Dashboards\n& API',  x:1300, y:560,
+        desc:'The final enriched data feeds real-time dashboards, the TrafficAlert REST API, anomaly notifications, and customer-facing reports. Browser to actionable intelligence in under 15 milliseconds.',
+        tech:'Tron dashboard \xb7 TrafficAlert API \xb7 Email/SMS alerts \xb7 ~5-6M records/day' },
+    ]
+  },
+};
+
+/* =================================================================
+   STATE
+   ================================================================= */
+var viewState    = 'overview';
+var activeStage  = -1;
+var currentStep  = -1;
+var isPlaying    = false;
+var isTransitioning = false;
+var playCtrl     = null;
+var orbX = -100, orbY = -100, orbVisible = false;
+var bursts = [];
+var motes  = [];
+
+/* =================================================================
+   CANVAS
+   ================================================================= */
+var canvas = document.getElementById('fx-canvas');
+var ctx = canvas.getContext('2d');
+function resizeCanvas() {
+  var d = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * d;
+  canvas.height = window.innerHeight * d;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+var bgGrid = document.getElementById('bg-grid');
+
+/* =================================================================
+   COORDINATE MATH
+   ================================================================= */
+function vbToScreen(x, y) {
+  return { x: (x / VB_W) * window.innerWidth, y: (y / VB_H) * window.innerHeight };
+}
+function vbToPct(x, y) {
+  return { left: (x / VB_W * 100) + '%', top: (y / VB_H * 100) + '%' };
+}
+function cubicBez(t, p0, p1, p2, p3) {
+  var mt = 1 - t;
+  return mt*mt*mt*p0 + 3*mt*mt*t*p1 + 3*mt*t*t*p2 + t*t*t*p3;
+}
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+}
+function straightCP(x0, y0, x1, y1) {
+  return { cx1: x0+(x1-x0)/3, cy1: y0+(y1-y0)/3, cx2: x0+2*(x1-x0)/3, cy2: y0+2*(y1-y0)/3 };
+}
+
+/* =================================================================
+   MOTES
+   ================================================================= */
+for (var mi = 0; mi < 30; mi++) {
+  motes.push({
+    x: Math.random() * window.innerWidth,
+    y: Math.random() * window.innerHeight,
+    vx: (Math.random() - 0.5) * 0.25,
+    vy: -Math.random() * 0.4 - 0.05,
+    size: Math.random() * 1.8 + 0.4,
+    alpha: Math.random() * 0.25 + 0.03,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function emitBurst(x, y) {
+  bursts.push({ x: x, y: y, radius: 4, alpha: 0.65 });
+}
+
+/* =================================================================
+   RENDER LOOP (single rAF — merged canvas + parallax)
+   ================================================================= */
+var _trailWrite = 0;  // ring-buffer write cursor
+var TRAIL_MAX = 50;
+var trailBuf = [];
+for (var _ti = 0; _ti < TRAIL_MAX; _ti++) trailBuf.push({ x:0, y:0, age:999 });
+var parallaxTarget = { x: 0, y: 0 };
+var pxCur = { x: 0, y: 0 };
+
+function render(time) {
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+  var W = window.innerWidth, H = window.innerHeight;
+  var i, m, b, life, pulse, a;
+
+  /* --- parallax (merged) --- */
+  pxCur.x += (parallaxTarget.x - pxCur.x) * 0.08;
+  pxCur.y += (parallaxTarget.y - pxCur.y) * 0.08;
+  bgGrid.style.transform = 'translate(' + pxCur.x + 'px, ' + pxCur.y + 'px)';
+
+  /* --- motes --- */
+  ctx.globalCompositeOperation = 'lighter';
+  for (i = 0; i < motes.length; i++) {
+    m = motes[i];
+    m.x += m.vx; m.y += m.vy;
+    if (m.y < -10) { m.y = H + 10; m.x = Math.random() * W; }
+    if (m.x < -10) m.x = W + 10;
+    if (m.x > W + 10) m.x = -10;
+    pulse = Math.sin(time * 0.0015 + m.phase) * 0.5 + 0.5;
+    ctx.fillStyle = 'rgba(0,243,255,' + (m.alpha * (0.4 + pulse * 0.6)) + ')';
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.size, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /* --- trail (ring-buffer, no splice) --- */
+  for (i = 0; i < TRAIL_MAX; i++) {
+    var t = trailBuf[i];
+    if (t.age > 40) continue;
+    t.age++;
+    life = 1 - t.age / 40;
+    ctx.fillStyle = 'rgba(0,243,255,' + (life * 0.35) + ')';
+    ctx.beginPath(); ctx.arc(t.x, t.y, life * 6 + 1, 0, Math.PI * 2); ctx.fill();
+  }
+  if (orbVisible) {
+    trailBuf[_trailWrite].x = orbX;
+    trailBuf[_trailWrite].y = orbY;
+    trailBuf[_trailWrite].age = 0;
+    _trailWrite = (_trailWrite + 1) % TRAIL_MAX;
+  }
+
+  /* --- bursts (swap-pop, no splice) --- */
+  for (i = bursts.length - 1; i >= 0; i--) {
+    b = bursts[i];
+    b.radius += 1.2; b.alpha *= 0.94;
+    if (b.alpha < 0.01) {
+      bursts[i] = bursts[bursts.length - 1]; bursts.pop(); continue;
+    }
+    ctx.strokeStyle = 'rgba(0,243,255,' + b.alpha + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  /* --- orb (simplified — 2 draws instead of 3 gradients) --- */
+  if (orbVisible) {
+    ctx.fillStyle = 'rgba(0,243,255,0.12)';
+    ctx.beginPath(); ctx.arc(orbX, orbY, 50, 0, Math.PI * 2); ctx.fill();
+
+    var g = ctx.createRadialGradient(orbX, orbY, 0, orbX, orbY, 18);
+    g.addColorStop(0, 'rgba(200,250,255,0.8)');
+    g.addColorStop(0.5, 'rgba(0,243,255,0.4)');
+    g.addColorStop(1, 'rgba(0,243,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(orbX, orbY, 18, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+/* =================================================================
+   DOM GENERATION
+   ================================================================= */
+var sceneEl = document.getElementById('scene');
+var GLOW_SVG = '<defs><filter id="glow"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="rgba(0,243,255,0.4)"/></filter></defs>';
+
+function makeSvgPath(svg, x0, y0, cx1, cy1, cx2, cy2, x1, y1, cls) {
+  var d = 'M'+x0+','+y0+' C'+cx1+','+cy1+' '+cx2+','+cy2+' '+x1+','+y1;
+  ['conn', 'conn-dash'].forEach(function(type) {
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('class', type + ' ' + cls);
+    svg.appendChild(p);
+  });
+  return d;
+}
+
+// -- OVERVIEW LAYER --
+var overviewEl = document.createElement('div');
+overviewEl.id = 'overview-layer';
+overviewEl.className = 'layer';
+
+var overviewSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+overviewSvg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+overviewSvg.setAttribute('preserveAspectRatio', 'none');
+overviewSvg.classList.add('layer-svg');
+overviewSvg.innerHTML = GLOW_SVG;
+overviewEl.appendChild(overviewSvg);
+
+var overviewPathData = [];
+for (var oi = 0; oi < STAGES.length - 1; oi++) {
+  var oa = STAGES[oi], ob = STAGES[oi+1], oc = OVERVIEW_CURVES[oi];
+  makeSvgPath(overviewSvg, oa.x, oa.y, oc.cx1, oc.cy1, oc.cx2, oc.cy2, ob.x, ob.y, 'c-cyan');
+  overviewPathData.push({ x0:oa.x, y0:oa.y, cx1:oc.cx1, cy1:oc.cy1, cx2:oc.cx2, cy2:oc.cy2, x1:ob.x, y1:ob.y });
+}
+
+var overviewNodes = [];
+STAGES.forEach(function(s, i) {
+  var div = document.createElement('div');
+  div.className = 'node';
+  div.dataset.idx = i;
+  var pos = vbToPct(s.x, s.y);
+  div.style.left = pos.left; div.style.top = pos.top;
+  div.innerHTML = '<span class="step-num">' + s.num + '</span><span class="label">' + s.label + '</span>';
+  div.addEventListener('click', function() { if (viewState === 'overview') triggerZoomIn(i); });
+  overviewEl.appendChild(div);
+  overviewNodes.push(div);
+  setTimeout(function() { div.classList.add('entered'); }, 200 + i * 120);
+});
+
+sceneEl.appendChild(overviewEl);
+
+// -- SUBSTEP LAYERS --
+var substepLayers = {};
+var substepNodes  = {};
+
+STAGES.forEach(function(stage) {
+  var cfg = SUBSTEPS[stage.id];
+  if (!cfg) return;
+
+  var layer = document.createElement('div');
+  layer.className = 'substep-layer layer';
+  layer.dataset.stage = stage.id;
+
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.classList.add('layer-svg');
+  svg.innerHTML = GLOW_SVG;
+  layer.appendChild(svg);
+
+  var titleDiv = document.createElement('div');
+  titleDiv.className = 'stage-title';
+  titleDiv.textContent = cfg.title;
+  layer.appendChild(titleDiv);
+
+  if (cfg.tierLabels) {
+    cfg.tierLabels.forEach(function(tl) {
+      var lbl = document.createElement('div');
+      lbl.className = 'tier-label ' + tl.cls;
+      var pos = vbToPct(tl.x, tl.y);
+      lbl.style.top = pos.top;
+      if (tl.right) { lbl.style.right = '1%'; } else { lbl.style.left = pos.left; }
+      lbl.textContent = tl.text;
+      layer.appendChild(lbl);
+    });
+  }
+
+  var steps = cfg.steps;
+  if (cfg.conns) {
+    cfg.conns.forEach(function(c) {
+      var sa = steps[c.from], sb = steps[c.to];
+      var cp = straightCP(sa.x, sa.y, sb.x, sb.y);
+      if (c.failover) {
+        var d = 'M'+sa.x+','+sa.y+' C'+cp.cx1+','+cp.cy1+' '+cp.cx2+','+cp.cy2+' '+sb.x+','+sb.y;
+        var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', d);
+        p.setAttribute('class', 'conn-failover');
+        svg.appendChild(p);
+      } else {
+        var colorCls = c.color || ((sb.tier === 2) ? 'c-green' : (sb.tier === 3) ? 'c-orange' : 'c-cyan');
+        makeSvgPath(svg, sa.x, sa.y, cp.cx1, cp.cy1, cp.cx2, cp.cy2, sb.x, sb.y, colorCls);
+      }
+    });
+  } else {
+    for (var si = 0; si < steps.length - 1; si++) {
+      var sa = steps[si], sb = steps[si + 1];
+      var cp = straightCP(sa.x, sa.y, sb.x, sb.y);
+      var colorCls = (sb.tier === 2) ? 'c-green' : (sb.tier === 3) ? 'c-orange' : 'c-cyan';
+      makeSvgPath(svg, sa.x, sa.y, cp.cx1, cp.cy1, cp.cx2, cp.cy2, sb.x, sb.y, colorCls);
+    }
+  }
+
+  var nodeArr = [];
+  steps.forEach(function(s, i) {
+    var div = document.createElement('div');
+    var tierClass = s.tier === 2 ? ' tier2' : s.tier === 3 ? ' tier3' : '';
+    div.className = 'snode' + tierClass;
+    div.dataset.idx = i;
+    var pos = vbToPct(s.x, s.y);
+    div.style.left = pos.left; div.style.top = pos.top;
+    div.innerHTML = '<span class="s-num">' + s.num + '</span><span class="s-label">' + s.label.replace(/\n/g, '<br>') + '</span>';
+    div.addEventListener('click', function() { if (viewState === 'substep') manualStepTo(i); });
+    layer.appendChild(div);
+    nodeArr.push(div);
+  });
+
+  sceneEl.appendChild(layer);
+  substepLayers[stage.id] = layer;
+  substepNodes[stage.id]  = nodeArr;
+});
+
+/* =================================================================
+   NARRATION
+   ================================================================= */
+var narrTitle = document.getElementById('narr-title');
+var narrText  = document.getElementById('narr-text');
+var narrTech  = document.getElementById('narr-tech');
+var stepInd   = document.getElementById('step-indicator');
+var bcEl      = document.getElementById('breadcrumb');
+
+function setNarration(title, text, tech) {
+  narrTitle.textContent = title;
+  narrText.textContent  = text;
+  narrTech.textContent  = tech ? '\u25ba ' + tech : '';
+}
+
+function setBreadcrumb(parts) {
+  bcEl.innerHTML = parts.map(function(p, i) {
+    return i === parts.length - 1
+      ? '<span class="bc-active">' + p + '</span>'
+      : p + '<span class="bc-sep">\u203a</span>';
+  }).join('');
+}
+
+/* =================================================================
+   LAYER RESET
+   ================================================================= */
+function resetAllLayers() {
+  _cancelZoom();
+  STAGES.forEach(function(stage) {
+    var layer = substepLayers[stage.id];
+    if (layer) {
+      layer.classList.remove('active');
+      layer.style.opacity = '0';
+      layer.style.transform = 'scale(1.08)';
+      layer.style.pointerEvents = 'none';
+    }
+    var nodes = substepNodes[stage.id];
+    if (nodes) nodes.forEach(function(n) { n.classList.remove('active', 'visited'); });
+  });
+  overviewEl.classList.remove('zoomed-out');
+  overviewEl.style.opacity = '1';
+  overviewEl.style.transform = 'scale(1)';
+  overviewEl.style.pointerEvents = '';
+  bgGrid.classList.remove('detailed');
+  orbVisible = false;
+  isTransitioning = false;
+  for (var ri = 0; ri < TRAIL_MAX; ri++) trailBuf[ri].age = 999;
+  _trailWrite = 0;
+}
+
+/* =================================================================
+   ZOOM TRANSITIONS
+   ================================================================= */
+var ZOOM_MS = 900;
+var _zoomAnims = [];          // track in-flight animations for cleanup
+
+function _cancelZoom() {
+  _zoomAnims.forEach(function(a) { try { a.cancel(); } catch(e){} });
+  _zoomAnims = [];
+}
+
+function zoomIn(stageIdx) {
+  var s = STAGES[stageIdx];
+  var cfg = SUBSTEPS[s.id];
+
+  _cancelZoom();
+  isTransitioning = true;
+
+  // Deactivate any previously active substep layer
+  STAGES.forEach(function(st) {
+    if (st.id !== s.id && substepLayers[st.id]) {
+      substepLayers[st.id].classList.remove('active');
+      substepLayers[st.id].style.opacity = '0';
+      substepLayers[st.id].style.transform = 'scale(1.08)';
+      substepLayers[st.id].style.pointerEvents = 'none';
+      var nodes = substepNodes[st.id];
+      if (nodes) nodes.forEach(function(n) { n.classList.remove('active', 'visited'); });
+    }
+  });
+
+  overviewEl.style.transformOrigin = (s.x / VB_W * 100) + '% ' + (s.y / VB_H * 100) + '%';
+
+  // Web Animations API — compositor-accelerated, frame-synced
+  var ovOut = overviewEl.animate([
+    { opacity: 1, transform: 'scale(1)' },
+    { opacity: 0, transform: 'scale(1.5)' }
+  ], { duration: 550, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' });
+
+  var subLayer = substepLayers[s.id];
+  subLayer.style.pointerEvents = 'auto';
+  var subIn = subLayer.animate([
+    { opacity: 0, transform: 'scale(1.06)' },
+    { opacity: 1, transform: 'scale(1)' }
+  ], { duration: 500, delay: 150, easing: 'cubic-bezier(0.0, 0, 0.2, 1)', fill: 'forwards' });
+
+  _zoomAnims = [ovOut, subIn];
+
+  // Commit final state when both finish
+  Promise.all([ovOut.finished, subIn.finished]).then(function() {
+    overviewEl.style.opacity = '0';
+    overviewEl.style.transform = 'scale(1.5)';
+    overviewEl.style.pointerEvents = 'none';
+    overviewEl.classList.add('zoomed-out');
+    ovOut.cancel();
+
+    subLayer.style.opacity = '1';
+    subLayer.style.transform = 'scale(1)';
+    subLayer.classList.add('active');
+    subIn.cancel();
+
+    _zoomAnims = [];
+    isTransitioning = false;
+  }).catch(function() { isTransitioning = false; });
+
+  bgGrid.classList.add('detailed');
+  orbVisible = false;
+  activeStage = stageIdx;
+  viewState = 'substep';
+  currentStep = -1;
+
+  setBreadcrumb(['OVERVIEW', s.label]);
+  setNarration(cfg.title, 'Entering ' + s.label.toLowerCase() + ' \u2014 ' + cfg.steps.length + ' internal steps.', '');
+  stepInd.textContent = s.label;
+}
+
+function zoomOut() {
+  if (activeStage < 0) return;
+  _cancelZoom();
+  isTransitioning = true;
+  var s = STAGES[activeStage];
+
+  var nodes = substepNodes[s.id];
+  for (var ni = 0; ni < nodes.length; ni++) {
+    nodes[ni].classList.remove('active', 'visited');
+  }
+
+  var subLayer = substepLayers[s.id];
+
+  // Phase 1: substep fades out
+  var subOut = subLayer.animate([
+    { opacity: 1, transform: 'scale(1)' },
+    { opacity: 0, transform: 'scale(0.96)' }
+  ], { duration: 400, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' });
+
+  // Phase 2: overview fades back in (overlaps by 250ms)
+  var ovIn = overviewEl.animate([
+    { opacity: 0, transform: 'scale(1.5)' },
+    { opacity: 1, transform: 'scale(1)' }
+  ], { duration: 550, delay: 150, easing: 'cubic-bezier(0.0, 0, 0.2, 1)', fill: 'forwards' });
+
+  _zoomAnims = [subOut, ovIn];
+
+  Promise.all([subOut.finished, ovIn.finished]).then(function() {
+    subLayer.style.opacity = '0';
+    subLayer.style.transform = 'scale(1.08)';
+    subLayer.style.pointerEvents = 'none';
+    subLayer.classList.remove('active');
+    subOut.cancel();
+
+    overviewEl.style.opacity = '1';
+    overviewEl.style.transform = 'scale(1)';
+    overviewEl.style.pointerEvents = '';
+    overviewEl.classList.remove('zoomed-out');
+    ovIn.cancel();
+
+    _zoomAnims = [];
+    isTransitioning = false;
+  }).catch(function() { isTransitioning = false; });
+
+  bgGrid.classList.remove('detailed');
+  orbVisible = false;
+  viewState = 'overview';
+  currentStep = -1;
+
+  setBreadcrumb(['OVERVIEW']);
+  setNarration('STEP ' + s.num + ' \xb7 ' + s.label, s.desc, s.tech);
+  stepInd.textContent = (activeStage + 1) + ' / ' + STAGES.length;
+}
+
+/* =================================================================
+   STEPPING
+   ================================================================= */
+function highlightOverviewNode(idx) {
+  for (var ni = 0; ni < overviewNodes.length; ni++) overviewNodes[ni].classList.remove('active');
+  for (var vi = 0; vi <= idx; vi++) overviewNodes[vi].classList.add('visited');
+  overviewNodes[idx].classList.add('active');
+
+  var s = STAGES[idx];
+  setNarration('STEP ' + s.num + ' \xb7 ' + s.label, s.desc, s.tech);
+  stepInd.textContent = (idx + 1) + ' / ' + STAGES.length;
+  setBreadcrumb(['OVERVIEW']);
+
+  var p = vbToScreen(s.x, s.y);
+  orbX = p.x; orbY = p.y; orbVisible = true;
+  currentStep = idx;
+}
+
+function highlightSubstep(idx) {
+  var s = STAGES[activeStage];
+  var cfg = SUBSTEPS[s.id];
+  var steps = cfg.steps;
+  var nodes = substepNodes[s.id];
+
+  for (var ni = 0; ni < nodes.length; ni++) nodes[ni].classList.remove('active');
+  for (var vi = 0; vi <= idx; vi++) nodes[vi].classList.add('visited');
+  nodes[idx].classList.add('active');
+
+  var step = steps[idx];
+  var tierTag = step.tier ? ' \xb7 TIER ' + step.tier : '';
+  setNarration(step.num + ' ' + step.label.replace(/\n/g, ' ') + tierTag, step.desc, step.tech);
+  stepInd.textContent = (idx + 1) + ' / ' + steps.length;
+  setBreadcrumb(['OVERVIEW', s.label, step.label.replace(/\n/g, ' ')]);
+
+  var p = vbToScreen(step.x, step.y);
+  orbX = p.x; orbY = p.y; orbVisible = true;
+  emitBurst(p.x, p.y);
+  currentStep = idx;
+}
+
+function manualStepTo(idx) {
+  cancelPlay();
+  highlightSubstep(idx);
+}
+
+function triggerZoomIn(stageIdx) {
+  cancelPlay();
+  zoomIn(stageIdx);
+}
+
+/* =================================================================
+   ANIMATION HELPERS
+   ================================================================= */
+function delayMs(ms, signal) {
+  return new Promise(function(resolve, reject) {
+    if (signal && signal.aborted) { reject(new DOMException('', 'AbortError')); return; }
+    var id = setTimeout(resolve, ms);
+    if (signal) signal.addEventListener('abort', function() { clearTimeout(id); reject(new DOMException('', 'AbortError')); }, { once: true });
+  });
+}
+
+function animateOrb(seg, duration, signal) {
+  return new Promise(function(resolve, reject) {
+    if (signal && signal.aborted) { reject(new DOMException('', 'AbortError')); return; }
+    var start = performance.now();
+    function tick(now) {
+      if (signal && signal.aborted) { reject(new DOMException('', 'AbortError')); return; }
+      var raw = Math.min((now - start) / duration, 1);
+      var t = easeInOutCubic(raw);
+      var bx = cubicBez(t, seg.x0, seg.cx1, seg.cx2, seg.x1);
+      var by = cubicBez(t, seg.y0, seg.cy1, seg.cy2, seg.y1);
+      var scr = vbToScreen(bx, by);
+      orbX = scr.x; orbY = scr.y;
+      if (raw < 1) requestAnimationFrame(tick); else resolve();
+    }
+    requestAnimationFrame(tick);
+  });
+}
+
+function getOverviewSeg(i) {
+  var a = STAGES[i], b = STAGES[i + 1], c = OVERVIEW_CURVES[i];
+  return { x0: a.x, y0: a.y, cx1: c.cx1, cy1: c.cy1, cx2: c.cx2, cy2: c.cy2, x1: b.x, y1: b.y };
+}
+
+function getSubstepSeg(stageId, i) {
+  var steps = SUBSTEPS[stageId].steps;
+  var a = steps[i], b = steps[i + 1];
+  var cp = straightCP(a.x, a.y, b.x, b.y);
+  return { x0: a.x, y0: a.y, cx1: cp.cx1, cy1: cp.cy1, cx2: cp.cx2, cy2: cp.cy2, x1: b.x, y1: b.y };
+}
+
+/* =================================================================
+   PLAY SEQUENCE
+   ================================================================= */
+async function playStage(stageIdx, signal) {
+  var s = STAGES[stageIdx];
+  var cfg = SUBSTEPS[s.id];
+  var steps = cfg.steps;
+
+  zoomIn(stageIdx);
+  await delayMs(ZOOM_MS + 100, signal);
+
+  highlightSubstep(0);
+  orbVisible = true;
+  await delayMs(cfg.dwell, signal);
+
+  for (var i = 1; i < steps.length; i++) {
+    var seg = getSubstepSeg(s.id, i - 1);
+    await animateOrb(seg, cfg.travel, signal);
+    highlightSubstep(i);
+    await delayMs(cfg.dwell, signal);
+  }
+
+  await delayMs(400, signal);
+  orbVisible = false;
+  zoomOut();
+  await delayMs(ZOOM_MS + 100, signal);
+
+  highlightOverviewNode(stageIdx);
+}
+
+async function playFullSequence(startStageIdx, signal) {
+  resetAllLayers();
+  for (var ni = 0; ni < overviewNodes.length; ni++) overviewNodes[ni].classList.remove('active', 'visited');
+  viewState = 'overview';
+  activeStage = -1;
+  currentStep = -1;
+  orbVisible = false;
+
+  // Mark stages before startStageIdx as visited
+  for (var v = 0; v < startStageIdx; v++) overviewNodes[v].classList.add('visited');
+
+  for (var i = startStageIdx; i < STAGES.length; i++) {
+    if (i > startStageIdx) {
+      var seg = getOverviewSeg(i - 1);
+      orbVisible = true;
+      await animateOrb(seg, 1200, signal);
+      await delayMs(400, signal);
+    } else if (i > 0) {
+      // Resuming mid-pipeline: show orb at this stage
+      highlightOverviewNode(i);
+      await delayMs(800, signal);
+    } else {
+      highlightOverviewNode(0);
+      await delayMs(1200, signal);
+    }
+
+    await playStage(i, signal);
+
+    if (i < STAGES.length - 1) {
+      await delayMs(600, signal);
+    }
+  }
+
+  setNarration(
+    'PIPELINE COMPLETE',
+    'Every visitor is captured, fingerprinted, transported, analyzed through 17 enrichment steps, scored, and stored \u2014 from pixel fire to database in under 15 milliseconds.',
+    '~350,000 records/hour peak \xb7 ~5-6 million records/day'
+  );
+  setBreadcrumb(['COMPLETE']);
+  stepInd.textContent = 'DONE';
+  await delayMs(4000, signal);
+  orbVisible = false;
+}
+
+/* =================================================================
+   CONTROLS
+   ================================================================= */
+var btnPlay = document.getElementById('btn-play');
+var btnPrev = document.getElementById('btn-prev');
+var btnNext = document.getElementById('btn-next');
+
+function cancelPlay() {
+  if (playCtrl) { playCtrl.abort(); playCtrl = null; }
+  isPlaying = false;
+  btnPlay.textContent = '\u25b6';
+  btnPlay.classList.remove('active-btn');
+}
+
+function resetToOverview() {
+  resetAllLayers();
+  viewState = 'overview';
+  activeStage = -1;
+  currentStep = -1;
+  for (var ni = 0; ni < overviewNodes.length; ni++) overviewNodes[ni].classList.remove('active', 'visited');
+  setBreadcrumb(['OVERVIEW']);
+}
+
+btnPlay.addEventListener('click', function() {
+  if (isPlaying) { cancelPlay(); return; }
+
+  // Determine resume point: if in substep, resume from that stage; in overview, from current or 0
+  var resumeFrom = 0;
+  if (viewState === 'substep' && activeStage >= 0) {
+    resumeFrom = activeStage;
+  } else if (viewState === 'overview' && currentStep > 0) {
+    resumeFrom = currentStep;
+  }
+
+  isPlaying = true;
+  btnPlay.textContent = '\u23f8';
+  btnPlay.classList.add('active-btn');
+  playCtrl = new AbortController();
+
+  playFullSequence(resumeFrom, playCtrl.signal)
+    .then(function() { cancelPlay(); })
+    .catch(function(e) { if (e.name !== 'AbortError') console.error(e); });
+});
+
+btnNext.addEventListener('click', function() {
+  if (isTransitioning) return;
+  cancelPlay();
+  if (viewState === 'overview') {
+    var target = Math.min(Math.max(currentStep, 0), STAGES.length - 1);
+    triggerZoomIn(target);
+    setTimeout(function() { highlightSubstep(0); }, ZOOM_MS + 50);
+  } else {
+    var s = STAGES[activeStage];
+    var maxStep = SUBSTEPS[s.id].steps.length - 1;
+    if (currentStep >= maxStep) {
+      var nextStage = Math.min(activeStage + 1, STAGES.length - 1);
+      zoomOut();
+      setTimeout(function() { highlightOverviewNode(nextStage); }, ZOOM_MS + 50);
+    } else {
+      highlightSubstep(currentStep + 1);
+    }
+  }
+});
+
+btnPrev.addEventListener('click', function() {
+  if (isTransitioning) return;
+  cancelPlay();
+  if (viewState === 'overview') {
+    if (currentStep > 0) highlightOverviewNode(currentStep - 1);
+  } else {
+    if (currentStep <= 0) {
+      zoomOut();
+      setTimeout(function() { highlightOverviewNode(Math.max(activeStage, 0)); }, ZOOM_MS + 50);
+    } else {
+      highlightSubstep(currentStep - 1);
+    }
+  }
+});
+
+/* =================================================================
+   PARALLAX
+   ================================================================= */
+document.addEventListener('mousemove', function(e) {
+  var cx = (e.clientX / window.innerWidth  - 0.5) * 2;
+  var cy = (e.clientY / window.innerHeight - 0.5) * 2;
+  parallaxTarget.x = cx * -4;
+  parallaxTarget.y = cy * -3;
+});
+
+/* =================================================================
+   KEYBOARD
+   ================================================================= */
+document.addEventListener('keydown', function(e) {
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); btnPlay.click(); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); btnNext.click(); }
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); btnPrev.click(); }
+  if (e.key === 'Escape' && viewState === 'substep') {
+    cancelPlay();
+    zoomOut();
+    setTimeout(function() { highlightOverviewNode(Math.max(activeStage, 0)); }, ZOOM_MS + 50);
+  }
+});
+
+</script>
+</body>
+</html>
+

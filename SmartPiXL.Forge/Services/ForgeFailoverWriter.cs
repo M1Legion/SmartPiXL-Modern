@@ -176,7 +176,9 @@ public sealed class ForgeFailoverWriter : IDisposable
                 }
                 catch (JsonException)
                 {
-                    _logger.Warning($"Forge failover: skipping malformed line in {Path.GetFileName(filePath)}");
+                    _logger.Warning($"Forge failover: dead-lettering malformed line in {Path.GetFileName(filePath)}");
+                    // Preserve malformed line in dead-letter file
+                    WriteToDeadLetter(line, Path.GetFileName(filePath));
                 }
             }
         }
@@ -189,18 +191,40 @@ public sealed class ForgeFailoverWriter : IDisposable
     }
 
     /// <summary>
-    /// Deletes a failover file after successful replay.
+    /// Renames a failover file to <c>.processed</c> after successful replay.
+    /// Source data is preserved for 7 days in case of downstream failures.
     /// </summary>
-    public void DeleteFile(string filePath)
+    public void MarkFileProcessed(string filePath)
     {
         try
         {
             if (File.Exists(filePath))
-                File.Delete(filePath);
+            {
+                var processedPath = filePath + ".processed";
+                File.Move(filePath, processedPath);
+            }
         }
         catch (Exception ex)
         {
-            _logger.Warning($"Forge failover: failed to delete {Path.GetFileName(filePath)}: {ex.Message}");
+            _logger.Warning($"Forge failover: failed to mark processed {Path.GetFileName(filePath)}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Writes a raw line to a dead-letter file so malformed data is never lost.
+    /// </summary>
+    private void WriteToDeadLetter(string rawLine, string sourceFileName)
+    {
+        try
+        {
+            var date = DateTime.UtcNow.ToString("yyyy_MM_dd");
+            var deadLetterPath = Path.Combine(_failoverDir, $"dead_letter_{date}.jsonl");
+            var entry = $"// Source: {sourceFileName} at {DateTime.UtcNow:O}" + Environment.NewLine + rawLine;
+            File.AppendAllText(deadLetterPath, entry + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Forge failover: failed to write dead-letter: {ex.Message}");
         }
     }
 

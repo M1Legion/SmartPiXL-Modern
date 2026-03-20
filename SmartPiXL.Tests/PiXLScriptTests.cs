@@ -210,4 +210,44 @@ public sealed class PiXLScriptTests
         PiXLScript.Template.Should().Contain("2000",
             "mousePath must be capped at 2000 chars to prevent query string bloat");
     }
+
+    // ========================================================================
+    // MINIFICATION
+    // ========================================================================
+
+    [Fact]
+    public void GetScript_should_returnMinifiedOutput()
+    {
+        var url = "https://smartpixl.info/1/1_SMART.GIF";
+        var script = PiXLScript.GetScript(url);
+        var unminified = PiXLScript.Template.Replace("{{PIXL_URL}}", url);
+
+        // Minified output should be smaller than raw template with same URL
+        script.Length.Should().BeLessThan(unminified.Length,
+            $"GetScript should return minified JavaScript. Raw={unminified.Length}, Minified={script.Length}");
+        script.Should().NotContain("{{PIXL_URL}}",
+            "Placeholder must be replaced");
+        script.Should().Contain("smartpixl.info",
+            "PiXL URL must be injected");
+    }
+
+    [Fact]
+    public void MinifyTemplate_should_notHaveErrors()
+    {
+        var result = NUglify.Uglify.Js(PiXLScript.Template);
+        var errors = result.Errors.Where(e => e.IsError).Select(e => e.ToString()).ToList();
+        errors.Should().BeEmpty($"NUglify should produce no errors, but got: {string.Join("; ", errors)}");
+    }
+
+    [Fact]
+    public void GetScript_should_preserveFunctionality()
+    {
+        var script = PiXLScript.GetScript("https://smartpixl.info/1/1_SMART.GIF");
+
+        // Critical signals must survive minification
+        script.Should().Contain("sendBeacon", "sendBeacon must survive minification");
+        script.Should().Contain("canvasFP", "canvasFP data key must survive minification");
+        script.Should().Contain("deviceHash", "deviceHash must survive minification");
+        script.Should().Contain("SHA-256", "SHA-256 digest call must survive minification");
+    }
 }

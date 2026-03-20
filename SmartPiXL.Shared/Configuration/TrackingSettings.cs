@@ -85,7 +85,7 @@ public sealed class TrackingSettings
     /// <c>FailoverCatchupService</c> can pick up the files.
     /// Default: <c>Failover</c>.
     /// </summary>
-    public string FailoverDirectory { get; set; } = "Failover";
+    public string FailoverDirectory { get; set; } = @"C:\inetpub\Smartpixl.info\Failover";
     
     // ========================================================================
     // EDGE COMMUNICATION SETTINGS (Forge only)
@@ -104,18 +104,20 @@ public sealed class TrackingSettings
     public string? BaseUrl { get; set; }
 
     // ========================================================================
-    // IP-API / GEO SYNC SETTINGS
+    // IP-API / GEO SYNC SETTINGS — RETIRED (see IPInfo schema)
     // ========================================================================
     
     // ========================================================================
-    // XAVIER SYNC SETTINGS — TEMPORARY BRIDGE
+    // XAVIER COMPANY/PIXL SYNC SETTINGS — TEMPORARY BRIDGE
     //
-    // These three Xavier syncs (IPGEO, Company, PiXL) exist ONLY as a
-    // transitional bridge while Xavier's legacy front-end is the client-
-    // facing product. Once a new front-end is built (not yet scoped),
-    // SmartPiXL becomes the authoritative data source and Xavier syncs
-    // are decommissioned. They are expected to run for an extended period
-    // but are NOT permanent architecture.
+    // The Company and PiXL syncs from Xavier exist ONLY as a transitional
+    // bridge while Xavier's legacy front-end is the client-facing product.
+    // Once a new front-end is built (not yet scoped), SmartPiXL becomes the
+    // authoritative data source and these syncs are decommissioned.
+    //
+    // NOTE: The Xavier IPGEO sync (IpApiSyncService) has been retired and
+    // replaced by IpDataAcquisitionService which uses free public data
+    // (IPtoASN, DB-IP Lite, etc.) imported into the IPInfo schema.
     //
     // CERT STATUS: Xavier (192.168.88.35 / D43DQBM2) has a self-signed
     // cert (CN=192.168.88.35, sha1RSA, thumbprint 02AC76BB...) installed
@@ -129,19 +131,12 @@ public sealed class TrackingSettings
     
     /// <summary>
     /// Connection string for Xavier (192.168.88.35) — the IPGEO database.
-    /// Used by <see cref="Services.IpApiSyncService"/> to pull delta rows from
-    /// <c>IPGEO.dbo.IP_Location_New</c>. Null or empty = sync disabled.
-    /// <para>
-    /// <b>TEMPORARY</b>: This sync is a transitional bridge while Xavier's legacy
-    /// front-end is client-facing. Once a new front-end replaces Xavier, SmartPiXL
-    /// becomes authoritative for IP geolocation and this sync is decommissioned.
-    /// </para>
-    /// <para>
-    /// <b>CERT</b>: <c>TrustServerCertificate=True</c> is required until Xavier's
-    /// SQL Server is configured to present the custom cert (CN=192.168.88.35).
-    /// See <c>TrackingSettings.cs</c> cert status notes.
-    /// </para>
+    /// <b>RETIRED</b>: No longer used. The IpApiSyncService that consumed this
+    /// has been replaced by IpDataAcquisitionService. This property is retained
+    /// temporarily so existing appsettings.json files don't cause binding errors.
+    /// Safe to remove once all config files are updated.
     /// </summary>
+    [Obsolete("IPGEO sync retired. Use IpDataAcquisitionService + IPInfo schema instead.")]
     public string? XavierConnectionString { get; set; }
 
     /// <summary>
@@ -162,9 +157,10 @@ public sealed class TrackingSettings
     public string? XavierSmartPiXLConnectionString { get; set; }
     
     /// <summary>
-    /// UTC hour (0–23) when the daily IP-API sync runs.
-    /// Default is 2 AM UTC to avoid peak traffic windows.
+    /// UTC hour (0–23) when the daily IP-API sync ran.
+    /// <b>RETIRED</b>: No longer used. Retained to avoid config binding errors.
     /// </summary>
+    [Obsolete("IPGEO sync retired. IP data acquisition schedule is in ForgeSettings.")]
     public int IpApiSyncHourUtc { get; set; } = 2;
     
     /// <summary>
