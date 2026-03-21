@@ -82,6 +82,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
     private readonly UaParsingService _uaParsing;
     private readonly DnsLookupService _dnsLookup;
     private readonly MaxMindGeoService _maxMindGeo;
+    private readonly IpRangeLookupService _ipRangeLookup;
     private readonly WhoisAsnService _whoisAsn;
     private readonly DatacenterIpService _datacenterIp;
 
@@ -121,6 +122,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         UaParsingService uaParsing,
         DnsLookupService dnsLookup,
         MaxMindGeoService maxMindGeo,
+        IpRangeLookupService ipRangeLookup,
         WhoisAsnService whoisAsn,
         DatacenterIpService datacenterIp,
         SessionStitchingService sessionStitching,
@@ -146,6 +148,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _uaParsing = uaParsing;
         _dnsLookup = dnsLookup;
         _maxMindGeo = maxMindGeo;
+        _ipRangeLookup = ipRangeLookup;
         _whoisAsn = whoisAsn;
         _datacenterIp = datacenterIp;
         _sessionStitching = sessionStitching;
@@ -367,17 +370,28 @@ public sealed class EnrichmentPipelineService : BackgroundService
             }
         }
 
-        // ── 4. MaxMind Geo ────────────────────────────────────────────────
-        var mmResult = _maxMindGeo.Lookup(record.IPAddress);
-        if (mmResult.CountryCode is not null) AppendParam(sb, "_srv_mmCC", mmResult.CountryCode);
-        if (mmResult.Region is not null) AppendParam(sb, "_srv_mmReg", Uri.EscapeDataString(mmResult.Region));
-        if (mmResult.City is not null) AppendParam(sb, "_srv_mmCity", Uri.EscapeDataString(mmResult.City));
-        if (mmResult.Latitude.HasValue) AppendParam(sb, "_srv_mmLat", mmResult.Latitude.Value.ToString("F6", CultureInfo.InvariantCulture));
-        if (mmResult.Longitude.HasValue) AppendParam(sb, "_srv_mmLon", mmResult.Longitude.Value.ToString("F6", CultureInfo.InvariantCulture));
-        if (mmResult.Asn.HasValue) AppendParam(sb, "_srv_mmASN", mmResult.Asn.Value.ToString(CultureInfo.InvariantCulture));
-        if (mmResult.AsnOrg is not null) AppendParam(sb, "_srv_mmASNOrg", Uri.EscapeDataString(mmResult.AsnOrg));
-        if (mmResult.PostalCode is not null) AppendParam(sb, "_srv_mmZip", mmResult.PostalCode);
-        if (mmResult.TimeZone is not null) AppendParam(sb, "_srv_mmTZ", Uri.EscapeDataString(mmResult.TimeZone));
+        // ── 4. IP Geo/ASN (in-memory range tables, O(log n) binary search) ──
+        // Uses IpRangeLookupService (loaded from IPInfo.GeoRange + IPInfo.AsnRange).
+        // Falls back to MaxMind .mmdb if range tables are empty (first run before import).
+        var ipResult = _ipRangeLookup.Lookup(record.IPAddress);
+        if (ipResult.CountryCode is null)
+        {
+            // Fallback: MaxMind .mmdb (gracefully returns default if no files present)
+            var mmFallback = _maxMindGeo.Lookup(record.IPAddress);
+            ipResult = new IpRangeLookupService.IpLookupResult(
+                mmFallback.CountryCode, mmFallback.Region, mmFallback.City,
+                mmFallback.Latitude, mmFallback.Longitude,
+                mmFallback.Asn, mmFallback.AsnOrg, mmFallback.PostalCode, mmFallback.TimeZone);
+        }
+        if (ipResult.CountryCode is not null) AppendParam(sb, "_srv_mmCC", ipResult.CountryCode);
+        if (ipResult.Region is not null) AppendParam(sb, "_srv_mmReg", Uri.EscapeDataString(ipResult.Region));
+        if (ipResult.City is not null) AppendParam(sb, "_srv_mmCity", Uri.EscapeDataString(ipResult.City));
+        if (ipResult.Latitude.HasValue) AppendParam(sb, "_srv_mmLat", ipResult.Latitude.Value.ToString("F6", CultureInfo.InvariantCulture));
+        if (ipResult.Longitude.HasValue) AppendParam(sb, "_srv_mmLon", ipResult.Longitude.Value.ToString("F6", CultureInfo.InvariantCulture));
+        if (ipResult.Asn.HasValue) AppendParam(sb, "_srv_mmASN", ipResult.Asn.Value.ToString(CultureInfo.InvariantCulture));
+        if (ipResult.AsnOrg is not null) AppendParam(sb, "_srv_mmASNOrg", Uri.EscapeDataString(ipResult.AsnOrg));
+        if (ipResult.PostalCode is not null) AppendParam(sb, "_srv_mmZip", ipResult.PostalCode);
+        if (ipResult.TimeZone is not null) AppendParam(sb, "_srv_mmTZ", Uri.EscapeDataString(ipResult.TimeZone));
 
         // ── Lane 3: Fire-and-forget background IP enrichment ──────────────
         // Enqueues unique IPs for async DNS/WHOIS lookups. Non-blocking.
@@ -394,7 +408,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         }
 
         // ── 6. WHOIS ASN (cache-only — lookups run in Lane 3 background) ──
-        if (!mmResult.Asn.HasValue && mmResult.CountryCode is not null)
+        if (!ipResult.Asn.HasValue && ipResult.CountryCode is not null)
         {
             var whoisCache = _whoisAsn.TryGetCached(record.IPAddress);
             if (whoisCache.HasValue)
@@ -529,7 +543,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         var voices = QueryParamReader.Get(qs, "voices");
 
         var arbitrageResult = _geographicArbitrage.Analyze(
-            mmResult.CountryCode, platform, fonts, lang, timezone, numberFormat, tzLocale, voices, uaResult.OS);
+            ipResult.CountryCode, platform, fonts, lang, timezone, numberFormat, tzLocale, voices, uaResult.OS);
         AppendParam(sb, "_srv_culturalScore", arbitrageResult.CulturalScore.ToString(CultureInfo.InvariantCulture));
         if (arbitrageResult.Flags is not null)
             AppendParam(sb, "_srv_culturalFlags", Uri.EscapeDataString(arbitrageResult.Flags));

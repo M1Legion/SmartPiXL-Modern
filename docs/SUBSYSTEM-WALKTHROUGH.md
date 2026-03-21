@@ -382,7 +382,7 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F2 | Enrichment Engine | EnrichmentPipelineService + 17 services | **DONE** | FD9–FD15 |
 | F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **DONE** | FD16–FD22 |
 | F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **DONE** | FD23 |
-| F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | not started | — |
+| F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | **DONE** | FD24–FD32 |
 | F6 | Background IP | BackgroundIpEnrichmentService | not started | — |
 | F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
 | F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | not started | — |
@@ -835,3 +835,111 @@ REPLAY (unified background service, every 60s):
 - Q2 (indented JSON): Deferred. Low-impact optimization for rare event.
 - Q3 (replay metrics): **Yes — implemented as FD23.**
 - Q4 (directory consolidation): Deferred. Trivial cleanup, not urgent.
+
+### F5 — ETL Pipeline
+
+**Scope:** `ParsedBulkInsertService.cs` (350 lines) + `EtlBackgroundService.cs` (199 lines)
+
+**What it does:** Two background services that handle post-ingest data processing. `EtlBackgroundService` is the **active** service — it runs Phase 9–13 dimension processing (Device/IP/Visit upserts) and identity resolution (email, IP, geo matching) every 60 seconds. `ParsedBulkInsertService` is **disabled** — it was the original Raw → Parsed backfill pipeline, now replaced by the merged pipeline (SqlBulkCopyWriterService writes directly to Parsed).
+
+#### Architecture
+
+```
+ACTIVE — EtlBackgroundService (every 60s):
+  ├─ Phase 9-13: RunDimensionProcessingAsync()
+  │   ├─ Read 'ProcessDimensions' watermark from ETL.Watermark
+  │   ├─ Read MAX(SourceId) from PiXL.Parsed
+  │   ├─ Loop in 50K batches: EXEC ETL.usp_ProcessDimensions @FromId, @ToId
+  │   └─ Advance watermark after each batch
+  ├─ EXEC ETL.usp_MatchVisits @BatchSize=1000        (email identity resolution)
+  ├─ EXEC ETL.usp_MatchLegacyVisits @BatchSize=5000  (legacy IP matching)
+  └─ EXEC ETL.usp_MatchGeoVisits @BatchSize=2000     (geo proximity matching)
+
+DISABLED — ParsedBulkInsertService (commented out in Program.cs):
+  ├─ Read 'ParseNewHits' watermark from ETL.Watermark
+  ├─ Read PiXL.Raw batch (50K rows)
+  ├─ Parse QueryString in .NET via ParsedRecordParser
+  ├─ SqlBulkCopy → PiXL.Parsed (with crash-recovery dedup via HashSet)
+  └─ EXEC ETL.usp_ProcessDimensions + advance watermark
+```
+
+#### File Inventory
+
+| File | Lines | Status | Purpose | Dependencies |
+|------|-------|--------|---------|--------------|
+| `EtlBackgroundService.cs` | 199 | **Active** | Dimension processing (Phase 9-13) + identity resolution | TrackingSettings, ITrackingLogger |
+| `ParsedBulkInsertService.cs` | 350 | **Disabled** | Historical Raw → Parsed backfill (can re-enable) | TrackingSettings, ITrackingLogger |
+
+**Total: 549 lines across 2 files (199 active).**
+
+#### EtlBackgroundService — Key Design Points
+
+**Watermark-driven dimensions:** Uses a separate `ProcessDimensions` watermark (distinct from `ParseNewHits`). Reads MAX(SourceId) from PiXL.Parsed, then processes 50K rows per batch via `ETL.usp_ProcessDimensions(@FromId, @ToId)`. This decouples dimension processing from ingest — the merged pipeline writes to Parsed and the ETL service catches up asynchronously.
+
+**Identity resolution sequence:** After dimensions, three match procs run sequentially with different batch sizes: `usp_MatchVisits` (1000), `usp_MatchLegacyVisits` (5000), `usp_MatchGeoVisits` (2000). Batch sizes probably tuned to their respective query costs — email matching is more expensive per row than simple IP matching.
+
+**Fixed 60s interval:** Wait happens *after* the entire ETL cycle completes, so actual period is `cycle_time + 60s`. No overlap protection needed because there's only one instance.
+
+**Single connection:** One SqlConnection for the entire cycle (dimensions + 3 match procs). Connection stays open for the full cycle duration.
+
+#### ParsedBulkInsertService — Key Design Points
+
+**Disabled but compilable.** Commented out in Program.cs with explanation: "The Forge now writes directly to PiXL.Parsed via SqlBulkCopyWriterService (merged pipeline). Can be re-enabled for backfilling historical data."
+
+**Crash recovery:** Before BulkCopy, reads existing SourceIds in Parsed for the target range into a HashSet. Skips rows already present. This handles the case where a previous batch wrote to Parsed but the watermark wasn't advanced (proc failure / crash).
+
+**No HeadersJson:** Passes `null` for the `headersJson` parameter to `ParsedRecordParser.Parse()` because PiXL.Raw doesn't store headers. This means backfilled records will have no header-derived columns — acceptable since headers are a recent addition to the ingest pipeline.
+
+**Direct watermark management:** Unlike EtlBackgroundService which relies on the proc, ParsedBulkInsertService manually advances the `ParseNewHits` watermark via direct SQL UPDATE after the proc completes. This avoids the "self-healing range collision" where the proc might advance watermark past the pre-parsed range.
+
+**Detailed telemetry:** Logs per-batch timing breakdown (read/parse/bulk/etl ms), total rate, remaining rows, and ETA. Useful for monitoring backfill progress.
+
+#### Observations
+
+| # | Severity | Summary |
+|---|----------|---------|
+| O1 | Nitpick | Match procs run every cycle even when no new dimensions |
+| O2 | Nitpick | Dimension processing results silently discarded |
+| O3 | Nitpick | Repeated proc call boilerplate across 3 match procs |
+| O4 | Minor | `ParsedBulkInsertService` has stale comment referencing `usp_ParseNewHits` |
+| O5 | Nitpick | No error handling per-batch in dimension loop |
+
+**O1. Match procs run every cycle regardless of dimension progress.** [Severity: Nitpick] The three match procs execute every 60s even when `RunDimensionProcessingAsync` found no new rows. These procs have their own internal watermarks so they'll short-circuit quickly when there's nothing to do, but it's unnecessary SQL round trips when idle. Could skip match procs when no dimensions were processed, but the overhead is negligible.
+
+**O2. Dimension processing results discarded in EtlBackgroundService.** [Severity: Nitpick] `EtlBackgroundService.RunDimensionProcessingAsync` calls `ExecuteNonQueryAsync`, so proc output (devices, IPs, visits created) is not captured. `ParsedBulkInsertService.CallDimensionsAndAdvanceWatermarkAsync` uses `ExecuteReaderAsync` and logs the counts. The EtlBackgroundService version only logs total rows processed per cycle, not the breakdown. Low priority — the total log message is sufficient for monitoring.
+
+**O3. Repeated boilerplate for match proc calls.** [Severity: Nitpick] The 3 match procs in `RunEtlAsync` follow identical patterns: create command, set proc name, add @BatchSize, execute reader, read 2 values, log. Could extract a helper like `CallMatchProcAsync(conn, procName, batchSize, label, ct)`. Pure code style — works as-is.
+
+**O4. Stale comment in ParsedBulkInsertService header.** [Severity: Minor] The header comment (line 22-26) still references "Call ETL.usp_ParseNewHits" as step 5 of the pipeline, but the actual code calls `ETL.usp_ProcessDimensions` directly and manages the watermark itself. The `usp_ParseNewHits` integration was removed during the merged pipeline work but the comment wasn't updated. Misleading for anyone reading the code fresh.
+
+**O5. No per-batch error handling in dimension loop.** [Severity: Nitpick] If `ETL.usp_ProcessDimensions` throws on batch N of 10, the entire `RunDimensionProcessingAsync` exits. The watermark is already advanced for batches 1 through N-1 (each batch advances it), so only batch N is lost. The outer `ExecuteAsync` catch logs the error and the next 60s cycle retries from the correct watermark. Effective enough.
+
+#### Questions
+
+**Q1.** The `ParsedBulkInsertService` header comment still describes the pre-merge workflow (step 5 calls `usp_ParseNewHits`). Should I fix the comment to accurately reflect the current code (calls `usp_ProcessDimensions` directly + manual watermark advance)? This is trivially fixable.
+
+**Q2.** EtlBackgroundService uses `ExecuteNonQueryAsync` for `usp_ProcessDimensions`, losing the proc's output (device/IP/visit counts). ParsedBulkInsertService uses `ExecuteReaderAsync` and logs them. Should the active service (EtlBackgroundService) match the more informative approach and log per-batch Device/IP/Visit counts?
+
+#### Owner Decisions
+
+**FD24 — C# stays as proc scheduler; all ETL logic in stored procedures.** Owner: "This is big batch work and that's what SQL is good at." C# services call procs, manage watermarks, and handle scheduling. No batch-level business logic in .NET.
+
+**FD25 — Replace all MERGEs with INSERT + UPDATE.** Owner: "I detest MERGE in SQL. It's too slow for me in almost all use cases." Verified: The live `ETL.usp_ProcessDimensions` proc already uses UPDATE + INSERT (no MERGE). The MERGE pattern only remains in the old `ETL.usp_ParseNewHits` proc body (in `20_ETLPhases9to13.sql`) which is the historical parsing proc, not the active dimension processing path. No code change needed — already done.
+
+**FD26 — PiXL.IP = single source of truth (behavioral + enriched).** Owner: "We could just feed it into the PiXL.IP table and THAT is the source of truth." Verified: PiXL.IP already has 29 columns including Geo*, MaxMind*, ReverseDNS*, Subnet*. The table is already designed as the unified IP truth. What's missing: the IPInfo range tables that feed enrichment data into it.
+
+**FD27 — Surrogate BIGINT keys for joins.** Already in place — PiXL.IP.IpId is BIGINT IDENTITY with NONCLUSTERED PK, IPAddress is VARCHAR(50) UNIQUE CLUSTERED.
+
+**FD28 — IPInfo range tables = internal plumbing for enrichment.** Deploy `70_IPInfo_Schema.sql` to create IPInfo.GeoRange, IPInfo.AsnRange, IPInfo.ProxyRange, IPInfo.DatacenterRange, plus dimension tables (DataSource, ASN), ImportLog, helper functions, and lookup/enrichment procs.
+
+**FD29 — Deploy 70_IPInfo_Schema.sql + enable IpDataAcquisitionService.** The script was committed (0754394) but never executed. Deploy it now so IpDataAcquisitionService stops failing silently.
+
+**FD30 — Re-enrichment pass after data source updates.** IPInfo.usp_EnrichGeo already exists in the script — it updates PiXL.IP geo columns from range tables. Will be callable after each data import cycle.
+
+**FD31 — Replace MaxMind .mmdb with in-memory range table lookups.** Owner: "Why load the inferior MaxMind file into memory when we can just load the superior IP data into memory?" Create `IpRangeLookupService` that loads IPInfo.GeoRange + IPInfo.AsnRange into sorted arrays at startup and performs binary search lookups. Same result type as MaxMindGeoService, same call pattern, better data.
+
+**FD32 — Hot reload via IpDataAcquisitionService → IpRangeLookupService.ReloadAsync().** Owner: "If the server is online for a year and we do monthly updates and only load the data on launch, we never load the updated IP data." After each data import cycle completes, IpDataAcquisitionService calls `ReloadAsync()` which loads fresh data into new arrays and does an atomic `Interlocked.Exchange` pointer swap. Zero-downtime, no locks needed for reads.
+
+**Answers to Questions:**
+- Q1 (stale ParsedBulkInsertService comment): Deferred as a nitpick. Will fix when next touching the file.
+- Q2 (ExecuteNonQueryAsync → ExecuteReaderAsync): Deferred. Good improvement but not urgent — dimension counts are logged at the proc level anyway.

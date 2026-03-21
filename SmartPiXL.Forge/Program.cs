@@ -113,6 +113,7 @@ builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, cli
 builder.Services.AddSingleton<BotUaDetectionService>();
 builder.Services.AddSingleton<UaParsingService>();
 builder.Services.AddSingleton<MaxMindGeoService>();
+builder.Services.AddSingleton<IpRangeLookupService>();
 //
 // ── Lane 1 — Tier 2 (Phase 5) — In-memory state + math ──
 builder.Services.AddMemoryCache();
@@ -245,6 +246,11 @@ host.Services.GetRequiredService<IHostApplicationLifetime>()
     });
 
 logger.Info("SmartPiXL Forge starting...");
+
+// Pre-load IPInfo range tables into memory for fast IP lookups.
+var ipRangeLookup = host.Services.GetRequiredService<IpRangeLookupService>();
+await ipRangeLookup.LoadAsync(CancellationToken.None);
+
 logger.Info($"Pipe: {host.Services.GetRequiredService<IOptions<ForgeSettings>>().Value.PipeName}");
 
 // NUMA node pinning — isolate Forge to a single NUMA node for cache locality.
@@ -285,4 +291,4 @@ _ = Task.Run(async () =>
 
 logger.Info("SmartPiXL Forge running");
 
-host.Run();
+await host.RunAsync();

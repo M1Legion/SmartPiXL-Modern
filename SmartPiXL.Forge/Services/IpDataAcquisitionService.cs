@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
+using SmartPiXL.Forge.Services.Enrichments;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Forge.Services;
@@ -50,6 +51,7 @@ public sealed class IpDataAcquisitionService : BackgroundService
     private readonly TrackingSettings _trackingSettings;
     private readonly ITrackingLogger _logger;
     private readonly HttpClient _http;
+    private readonly IpRangeLookupService _ipRangeLookup;
     private string _dataDir = null!;
 
     // Known data source URLs
@@ -65,12 +67,14 @@ public sealed class IpDataAcquisitionService : BackgroundService
         IOptions<ForgeSettings> forgeSettings,
         IOptions<TrackingSettings> trackingSettings,
         ITrackingLogger logger,
-        HttpClient http)
+        HttpClient http,
+        IpRangeLookupService ipRangeLookup)
     {
         _forgeSettings = forgeSettings.Value;
         _trackingSettings = trackingSettings.Value;
         _logger = logger;
         _http = http;
+        _ipRangeLookup = ipRangeLookup;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -121,6 +125,9 @@ public sealed class IpDataAcquisitionService : BackgroundService
 
         sw.Stop();
         _logger.Info($"IpDataAcquisition: import cycle complete in {sw.Elapsed.TotalSeconds:F1}s");
+
+        // Hot-reload in-memory range tables so enrichment uses fresh data
+        await _ipRangeLookup.ReloadAsync(ct);
     }
 
     // ========================================================================

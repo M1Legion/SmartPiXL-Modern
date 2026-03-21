@@ -34,6 +34,7 @@
 -- ============================================================================
 
 SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
 PRINT '=== 70_IPInfo_Schema.sql ===';
 PRINT '';
 
@@ -266,9 +267,9 @@ BEGIN
     );
 
     -- Clustered index for range lookup: seek to IpStart <= @ip, verify IpEnd >= @ip
+    -- IpEnd is in the leaf rows of a clustered index by definition (all columns are).
     CREATE CLUSTERED INDEX IX_IPInfo_GeoRange_Lookup
-        ON IPInfo.GeoRange (AddrFamily, IpStart)
-        INCLUDE (IpEnd);
+        ON IPInfo.GeoRange (AddrFamily, IpStart);
 
     -- Filtered index for IPv4-only lookups (the hot path)
     CREATE NONCLUSTERED INDEX IX_IPInfo_GeoRange_V4_Lookup
@@ -302,8 +303,7 @@ BEGIN
     );
 
     CREATE CLUSTERED INDEX IX_IPInfo_AsnRange_Lookup
-        ON IPInfo.AsnRange (AddrFamily, IpStart)
-        INCLUDE (IpEnd);
+        ON IPInfo.AsnRange (AddrFamily, IpStart);
 
     PRINT '  Created IPInfo.AsnRange with range-lookup indexes';
 END
@@ -338,8 +338,7 @@ BEGIN
     );
 
     CREATE CLUSTERED INDEX IX_IPInfo_ProxyRange_Lookup
-        ON IPInfo.ProxyRange (AddrFamily, IpStart)
-        INCLUDE (IpEnd);
+        ON IPInfo.ProxyRange (AddrFamily, IpStart);
 
     PRINT '  Created IPInfo.ProxyRange with range-lookup indexes';
 END
@@ -366,8 +365,7 @@ BEGIN
     );
 
     CREATE CLUSTERED INDEX IX_IPInfo_DatacenterRange_Lookup
-        ON IPInfo.DatacenterRange (AddrFamily, IpStart)
-        INCLUDE (IpEnd);
+        ON IPInfo.DatacenterRange (AddrFamily, IpStart);
 
     PRINT '  Created IPInfo.DatacenterRange with range-lookup indexes';
 END
