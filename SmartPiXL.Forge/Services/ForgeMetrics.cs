@@ -60,6 +60,10 @@ public sealed class ForgeMetrics
     // Failover: records diverted to JSONL on disk (channel full or circuit open)
     private long _failoverCount;
 
+    // Replay: files and records recovered from failover / dead-letter
+    private long _replayFiles;
+    private long _replayRecords;
+
     // Pipe connections: visibility into Edge↔Forge pipe health
     private long _pipeConnects;
     private long _pipeDisconnects;
@@ -130,6 +134,13 @@ public sealed class ForgeMetrics
     /// <summary>Records a pipe client disconnection.</summary>
     public void RecordPipeDisconnect() => Interlocked.Increment(ref _pipeDisconnects);
 
+    /// <summary>Records a replayed failover file and the number of records recovered.</summary>
+    public void RecordReplay(int recordCount)
+    {
+        Interlocked.Increment(ref _replayFiles);
+        Interlocked.Add(ref _replayRecords, recordCount);
+    }
+
     /// <summary>Updates the sampled channel depths (called periodically).</summary>
     public void SampleChannelDepths(int enrichmentDepth, int sqlWriterDepth)
     {
@@ -173,6 +184,10 @@ public sealed class ForgeMetrics
             // Batch fill
             BatchFillSum = Interlocked.Exchange(ref _batchFillSum, 0),
             BatchFillCount = Interlocked.Exchange(ref _batchFillCount, 0),
+
+            // Replay
+            ReplayFiles = Interlocked.Exchange(ref _replayFiles, 0),
+            ReplayRecords = Interlocked.Exchange(ref _replayRecords, 0),
 
             // Pipe connections
             PipeConnects = Interlocked.Exchange(ref _pipeConnects, 0),
@@ -255,6 +270,10 @@ public readonly record struct MetricsSnapshot
     // ── Failover ──
     public long FailoverCount { get; init; }
 
+    // ── Replay ──
+    public long ReplayFiles { get; init; }
+    public long ReplayRecords { get; init; }
+
     // ── Batch fill ──
     public long BatchFillSum { get; init; }
     public long BatchFillCount { get; init; }
@@ -299,6 +318,7 @@ public readonly record struct MetricsSnapshot
             $"  SQL→DB     {SqlCount,8:N0} rec  {sqlRps,8:N1}/s  avg {SqlAvgMs,8:N1}ms  min {SqlMinMs,8:N1}ms  max {SqlMaxMs,8:N1}ms  batches {SqlBatchCount}  avg/rec {SqlAvgPerRecordUs,8:N1}μs  ~{SqlAvgBatchSize:N1}rec/batch  fill {BatchFillPct:N0}%  fails {SqlFailures}\n" +
             $"  CHANNELS   enrich={EnrichmentChannelDepth:N0}  sqlWriter={SqlWriterChannelDepth:N0}" +
             (PipeConnects > 0 || PipeDisconnects > 0 ? $"  PIPE conn={PipeConnects} disconn={PipeDisconnects}" : "") +
-            (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "");
+            (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "") +
+            (ReplayFiles > 0 ? $"  REPLAY {ReplayFiles} file(s) {ReplayRecords:N0} rec" : "");
     }
 }

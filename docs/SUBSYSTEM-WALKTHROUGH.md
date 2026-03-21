@@ -381,7 +381,7 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F1 | **Ingest & Channels** | PipeListenerService, ForgeChannels | **DONE** | FD5–FD8 |
 | F2 | Enrichment Engine | EnrichmentPipelineService + 17 services | **DONE** | FD9–FD15 |
 | F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **DONE** | FD16–FD22 |
-| F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **REVIEW** | See below |
+| F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **DONE** | FD23 |
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | not started | — |
 | F6 | Background IP | BackgroundIpEnrichmentService | not started | — |
 | F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
@@ -811,3 +811,27 @@ REPLAY (unified background service, every 60s):
 **Q3.** O6 — Should ForgeMetrics track replay counts (files processed, records replayed per cycle)? This would let the Pipeline Explorer show recovery progress during/after outages.
 
 **Q4.** O7 — Consolidate the directory resolution to use `_resolvedDirectory` everywhere in JsonlFailoverService? Trivial cleanup.
+
+#### Observation Severity
+
+| # | Severity | Summary |
+|---|----------|----------|
+| O1 | Nitpick | No idempotency on partial replay — duplicates possible but failover is rare and non-destructive |
+| O2 | Nitpick | Edge failover uses indented JSON — 2× bytes, but pipe outages are infrequent |
+| O3 | Nitpick | Emergency write returns true on failure — acceptable trade-off, prevents tight retry loops |
+| O4 | Nitpick | Partial sub-batch orphan records — related to O1, same low-risk assessment |
+| O5 | Nitpick | Dead-letter raw lines — `//`-prefixed comment lines are skipped on replay anyway |
+| O6 | **Minor** | No replay metrics in ForgeMetrics — fixed (FD23) |
+| O7 | Nitpick | Redundant directory resolution — trivial cleanup, deferred |
+
+#### Owner Decisions
+
+**FD23 — Fix O6: Add replay metrics to ForgeMetrics.** Owner: "Keep the observations and questions you found and just fix O6 for now." Severity assessment: 1 minor real issue (O6), 6 nitpicks. All observations remain documented for future reference.
+
+**Implementation:** Added `RecordReplay(int recordCount)` to `ForgeMetrics` with `_replayFiles` and `_replayRecords` counters. Added `ReplayFiles` and `ReplayRecords` to `MetricsSnapshot`. Updated `Format()` to show `REPLAY {n} file(s) {n} rec` when replay activity occurs. Updated `ForgeReplayService.ReplayDirectoryToSqlAsync` and `ReplayDirectoryToEnrichmentAsync` to call `_metrics.RecordReplay()` after each successful file replay.
+
+**Answers to Questions:**
+- Q1 (progress tracking): Deferred. Current "retry entire file" is acceptable — failover is rare, duplicates are non-destructive.
+- Q2 (indented JSON): Deferred. Low-impact optimization for rare event.
+- Q3 (replay metrics): **Yes — implemented as FD23.**
+- Q4 (directory consolidation): Deferred. Trivial cleanup, not urgent.

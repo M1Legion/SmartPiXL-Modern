@@ -165,6 +165,7 @@ public sealed class ForgeReplayService : BackgroundService
             if (await WriteBatchesToSqlAsync(records, ct))
             {
                 MarkProcessed(file);
+                _metrics.RecordReplay(records.Count);
                 _logger.Info($"ForgeReplay: wrote {records.Count:N0} enriched records from {Path.GetFileName(file)}");
             }
             // else: SQL write failed — file stays for next scan cycle
@@ -196,7 +197,10 @@ public sealed class ForgeReplayService : BackgroundService
             {
                 MarkProcessed(file);
                 if (enqueued > 0)
+                {
+                    _metrics.RecordReplay(enqueued);
                     _logger.Info($"ForgeReplay: enqueued {enqueued:N0} un-enriched records from {Path.GetFileName(file)}");
+                }
             }
             // enqueued == -1: channel full timeout — file stays for next cycle
         }
