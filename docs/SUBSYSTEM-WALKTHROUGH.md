@@ -378,10 +378,10 @@ These fields always return the same value in every browser. Removed to reduce pa
 
 | # | Sub-system | Files | Status | Decision |
 |---|-----------|-------|--------|----------|
-| F1 | **Ingest & Channels** | PipeListenerService, ForgeChannels | **REVIEW** | See below |
-| F2 | Enrichment Engine | EnrichmentPipelineService + 17 services | **REVIEW** | See below |
-| F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **REVIEW** | See below |
-| F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService | not started | — |
+| F1 | **Ingest & Channels** | PipeListenerService, ForgeChannels | **DONE** | FD5–FD8 |
+| F2 | Enrichment Engine | EnrichmentPipelineService + 17 services | **DONE** | FD9–FD15 |
+| F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **DONE** | FD16–FD22 |
+| F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **REVIEW** | See below |
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | not started | — |
 | F6 | Background IP | BackgroundIpEnrichmentService | not started | — |
 | F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
@@ -679,3 +679,135 @@ ForgeChannels.SqlWriter (50K bounded, SingleReader=true)
 **Q4.** O6 — The deadlock classification code in `ClassifyAndTrip` is unreachable. Should I (a) remove it (simplify), or (b) restructure the catch clauses so deadlocks are actually retried without incrementing the consecutive failure counter?
 
 **Q5.** O1/D14 — The PiXL.Raw → PiXL.Parsed two-step load is the major architecture decision. When you're ready to implement D14 (merge into single table), the change touches `SqlBulkCopyWriterService` (use `ParsedRecordParser` instead of 9-column write), `ParsedBulkInsertService` (eliminated entirely), ETL watermarks, and the SQL schema. Flagging for awareness — not asking for a decision now.
+
+#### F3 Owner Decisions
+
+| ID | Question | Decision | Implementation |
+|----|----------|----------|----------------|
+| FD16 | Q5/O1: Merge PiXL.Raw into single table | **DONE.** Implemented D14 fully. PiXL.Raw eliminated; SqlBulkCopyWriterService now parses inline via `ParsedRecordParser.Parse()` and writes directly to PiXL.Parsed (230 BulkCopy columns, SourceId via SEQUENCE DEFAULT). Old table renamed to PiXL.Parsed_Archive (137M rows). | 58_FreshParsedTable.sql: DROP old constraints/indexes → RENAME to Parsed_Archive → CREATE fresh PiXL.Parsed (231 cols, 4 indexes) → RESET HitSequence to 1 → ZERO all watermarks. SqlBulkCopyWriterService completely rewritten. ParsedBulkInsertService disabled. |
+| FD17 | Q1/O2: Forge batch size | **Separate ForgeBatchSize in ForgeSettings, default 500.** 100 was Edge-appropriate; 500 balances throughput with memory. | Added `ForgeBatchSize` to ForgeSettings (default 500). SqlBulkCopyWriterService reads from ForgeSettings. appsettings.json updated. |
+| FD18 | Q2/O4: DrainChannelToFailover allocation | **Fixed.** Drain batch allocated once and reused with Clear(). | Drain list allocated in `ExecuteAsync` scope, passed to `DrainChannelToFailover(batch)`. |
+| FD19 | O3: Batch fill metric | **Added.** ForgeMetrics now tracks batch fill stats per snapshot window. | Added `RecordBatchFill(int actual, int max)` to ForgeMetrics. SqlBulkCopyWriterService calls it after each batch. Pipeline Explorer displays fill %. |
+| FD20 | Q3/O5: Dead-letter directory | **Consolidated to absolute path.** Dead-letter now goes to ForgeSettings.DeadLetterDirectory alongside other failover. | Added `DeadLetterDirectory` to ForgeSettings (absolute path). All three preservation directories now configurable via appsettings.json. |
+| FD21 | Q4/O6: Deadlock classification | **Restructured.** Error 1205 (deadlock) now retries without incrementing consecutive failure counter. Circuit breaker only trips on 1105/9002 or 2+ consecutive non-deadlock failures. | Catch clauses reordered: 1205 caught separately, retried with continue. ClassifyAndTrip only called for non-deadlock errors. |
+| FD22 | O7: Connection reuse | **Implemented.** Single SqlConnection opened at service start, reused across batches, reconnected on failure. Eliminates per-batch pool churn. | SqlBulkCopyWriterService maintains a `_connection` field. `EnsureConnectionAsync()` opens/reconnects as needed. `using var bulkCopy = new SqlBulkCopy(_connection)` reuses the connection. |
+
+---
+
+### F4 — Failover & Replay
+
+**Scope:** `ForgeFailoverWriter.cs` (258 lines) + `ForgeReplayService.cs` (399 lines) + `JsonlFailoverService.cs` (145 lines)
+
+**What it does:** Three-tier failover hierarchy ensuring zero data loss across the entire pipeline. When any downstream component is unavailable (named pipe, enrichment channel, SQL), records are persisted to JSONL files on disk and automatically replayed when the component recovers.
+
+#### Architecture
+
+```
+EDGE (pipe unavailable):
+  PipeClientService ──fail──→ JsonlFailoverService.TryEnqueue()
+                                    │
+                                    ├─ lock-free Channel<T> (bounded, DropWrite)
+                                    │     └─→ Background writer → failover_{yyyy_MM_dd}.jsonl
+                                    │
+                                    └─ channel full → EmergencyWriteToDisk() (sync, locked)
+                                          └─→ failover_emergency_{yyyy_MM_dd}.jsonl
+
+FORGE (SQL unavailable / channel full):
+  EnrichmentPipelineService ──TryWrite fails──→ ForgeFailoverWriter.Append()
+  SqlBulkCopyWriterService  ──circuit open───→ ForgeFailoverWriter.AppendBatch()
+                                                    │
+                                                    └─→ failover_{yyyyMMdd_HHmmss}_{guid}.jsonl
+                                                         (rotates every 10K records)
+
+  SqlBulkCopyWriterService  ──retries exhausted──→ DeadLetter/
+                                                       └─→ dead_letter_{yyyy_MM_dd}.jsonl
+
+REPLAY (unified background service, every 60s):
+  ForgeReplayService.ScanAndReplayAsync():
+    1. Forge failover dir → enriched → SqlBulkCopy direct (bypass enrichment)
+    2. Dead-letter dir    → enriched → SqlBulkCopy direct (bypass enrichment)
+    3. Edge failover dir  → un-enriched → Enrichment channel (full Tier 1-3)
+    4. Cleanup .processed files > 7 days across all directories
+```
+
+#### File Inventory
+
+| File | Lines | Purpose | Process | Dependencies |
+|------|-------|---------|---------|--------------|
+| `ForgeFailoverWriter.cs` | 258 | Thread-safe JSONL writer for enriched records | Forge | ForgeMetrics, ITrackingLogger |
+| `ForgeReplayService.cs` | 399 | Unified replay orchestrator — 3 directories, 2 paths | Forge | ForgeChannels, ForgeSettings, TrackingSettings, ForgeFailoverWriter, ForgeMetrics |
+| `JsonlFailoverService.cs` | 145 | Edge-side failover when named pipe unavailable | Edge | TrackingSettings, ITrackingLogger |
+
+**Total: 802 lines across 3 files.**
+
+#### Failover Tier Comparison
+
+| Tier | Trigger | Writer | Records Are | File Pattern | Replay Path |
+|------|---------|--------|-------------|--------------|-------------|
+| Edge failover | Pipe to Forge unavailable | `JsonlFailoverService` | **Un-enriched** (raw request data) | `failover_{yyyy_MM_dd}.jsonl` | → Enrichment channel (full Tier 1-3) |
+| Forge failover | SQL circuit open or enrichment channel full | `ForgeFailoverWriter` | **Enriched** (all `_srv_*` params) | `failover_{yyyyMMdd_HHmmss}_{guid}.jsonl` | → SqlBulkCopy direct (no re-enrichment) |
+| Dead-letter | Batch retry exhaustion (3 attempts failed) | `SqlBulkCopyWriterService` | **Enriched** | `dead_letter_{yyyy_MM_dd}.jsonl` | → SqlBulkCopy direct |
+
+#### ForgeFailoverWriter — Key Design Points
+
+**Thread safety:** `lock (_gate)` on all write operations. Acceptable because failover is exceptional (SQL outage), not hot-path. JSON serialization happens *outside* the lock for `Append()` (one record at a time), minimizing lock hold time.
+
+**File rotation:** After every write, checks `_recordsInCurrentFile >= MaxRecordsPerFile` (10K). If exceeded, closes current writer and next write opens a new file. GUIDs in filename prevent collisions on rapid rotation.
+
+**AutoFlush:** `StreamWriter.AutoFlush = true` — every line is flushed to disk immediately. Costs throughput but guarantees no data loss on process crash during failover.
+
+**Metrics integration:** Every record appended calls `_metrics.RecordFailover()`. Operators see failover count in the Pipeline Explorer immediately during outages.
+
+**Dead-letter preservation:** When `ReadFile()` encounters malformed JSON lines, they're written to `dead_letter_{date}.jsonl` with a `// Source:` comment tracking the origin file and timestamp — malformed data is never silently dropped.
+
+#### ForgeReplayService — Key Design Points
+
+**Smart routing:** The critical design choice — based on which directory a file came from, the service knows whether records need enrichment or not:
+- Forge failover / dead-letter → already enriched → direct SqlBulkCopy (fast)
+- Edge failover → raw request data → enrichment channel (full pipeline processing)
+
+**Format detection:** `ReadFileAdaptive()` tries JSONL first, falls back to JSON array for legacy dead-letter files created before the format unification (FD2).
+
+**Graceful retry:** SQL write failures leave the file untouched for the next 60s scan cycle. No in-memory retry loop — the scan interval provides natural backoff.
+
+**Channel timeout:** When enqueuing un-enriched records to the enrichment channel, each record has a 30s timeout. If the channel stays full for 30s, the file is left for the next cycle. This prevents replay from blocking indefinitely when the pipeline is saturated.
+
+**File lifecycle:** `.jsonl` → replay → `.jsonl.processed` → cleanup after 7 days. The 7-day retention preserves source data for debugging while preventing unbounded disk growth.
+
+**Batch sub-splitting:** Large files are sub-batched to `ForgeSettings.ForgeBatchSize` (500) for SqlBulkCopy. Each sub-batch gets 3 retry attempts with 1s/2s/4s delays.
+
+#### JsonlFailoverService — Key Design Points
+
+**Two-path write model:**
+1. **Normal path:** `TryWrite` to bounded channel → single background writer consumes → daily rolling JSONL file. Lock-free, no contention.
+2. **Emergency path:** When channel is full (`TryWrite` fails), synchronous `EmergencyWriteToDisk()` under `_emergencyWriteLock` writes directly to `failover_emergency_{date}.jsonl`. This is the absolute last safety net — accepts lock cost because it only fires under extreme backpressure.
+
+**Daily rolling:** New file at midnight UTC. `_currentDate` tracks the active day; when the date string changes, the current writer is disposed and a new file is opened.
+
+**Drain on shutdown:** After the channel reader completes, `while (TryRead)` drains any remaining records before disposing the writer. No data left in the channel at shutdown.
+
+#### Observations
+
+**O1. No idempotency tracking on replay.** `WriteBatchesToSqlAsync` sub-batches a file into ForgeBatchSize chunks. If sub-batch 2 of 5 fails, the method returns `false` and the entire file is retried next cycle. Sub-batch 1 was already written to SQL — those records will be duplicated on the next replay. For enriched records, there's no dedup key or upsert logic. At current traffic volumes (~60 rec/s), this is low-risk (failover is rare), but under a scenario where SQL flaps (circuit open → half-open → writes partially → fails again), it could produce duplicates.
+
+**O2. Edge failover uses indented JSON.** `JsonlFailoverService.WriteRecordAsync` uses default `JsonSerializer.Serialize()` which produces indented JSON. ForgeFailoverWriter correctly uses `WriteIndented = false` (compact). During an extended pipe outage at 60 rec/s, Edge failover writes ~2× the bytes it needs to per record. At scale this wastes disk I/O and storage.
+
+**O3. Emergency write returns true even on failure.** `EmergencyWriteToDisk` catches exceptions and logs "CRITICAL" but `TryEnqueue` always returns `true` regardless. The caller (`PipeClientService`) thinks the record was saved, but it may have been lost if the disk write failed. In practice, disk failure during emergency write is extremely unlikely (the system has bigger problems if the disk is failing), and always returning `true` prevents the caller from retrying in a tight loop. Acceptable trade-off, but worth documenting.
+
+**O4. Partial sub-batch failure leaves orphan records.** Related to O1 — when a partial replay writes some sub-batches to SQL then fails, the file stays for retry. On retry, all sub-batches (including already-written ones) are replayed again. A simple fix would be per-file progress tracking (e.g., write a `.progress` file with the last successful batch offset), but this adds complexity. Alternative: SourceId SEQUENCE + `IGNORE_DUP_KEY` index on SourceId could silently absorb duplicates at the SQL level.
+
+**O5. ForgeReplayService scans dead-letter to SQL without re-enrichment.** Dead-letter files are assumed to contain enriched records. This is correct for the normal flow (batch retry exhaustion after enrichment). However, if `ForgeFailoverWriter.ReadFile()` encounters a malformed line, it dead-letters the raw line text — which may be un-enriched data from a different failure path. On the next scan, this dead-lettered line would be replayed directly to SQL without enrichment. Low risk because dead-letter files from ReadFile() contain JSON comment lines (prefixed with `//`) which `ReadAsJsonl` skips.
+
+**O6. No file-level metrics in ForgeReplayService.** The service logs file-level replay counts but doesn't record them in ForgeMetrics. Operators can see failover write counts (via `RecordFailover()`) but have no metric for "how many files are pending replay" or "how many records were replayed this cycle." The Pipeline Explorer shows failover count but not replay recovery.
+
+**O7. JsonlFailoverService has redundant directory resolution.** The directory path is resolved twice — once in the constructor (stored as `_resolvedDirectory` for emergency writes) and again at the top of `ExecuteAsync`. Both paths use the same `Path.IsPathRooted` logic. Should consolidate to use `_resolvedDirectory` in both places.
+
+#### Questions
+
+**Q1.** O1/O4 — Should we add a simple progress-tracking mechanism (`.progress` sidecar file) to avoid duplicate writes on partial replay? Or is the current "retry entire file" approach acceptable given that failover is rare and duplicates are non-destructive (same data, same enrichment)?
+
+**Q2.** O2 — Quick fix: pass `JsonSerializerOptions { WriteIndented = false }` in JsonlFailoverService to match ForgeFailoverWriter. Worth doing?
+
+**Q3.** O6 — Should ForgeMetrics track replay counts (files processed, records replayed per cycle)? This would let the Pipeline Explorer show recovery progress during/after outages.
+
+**Q4.** O7 — Consolidate the directory resolution to use `_resolvedDirectory` everywhere in JsonlFailoverService? Trivial cleanup.
