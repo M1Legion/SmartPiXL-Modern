@@ -383,7 +383,7 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **DONE** | FD16–FD22 |
 | F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **DONE** | FD23 |
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | **DONE** | FD24–FD32 |
-| F6 | Background IP | BackgroundIpEnrichmentService | not started | — |
+| F6 | Background IP | BackgroundIpEnrichmentService | **complete** | 2 minor (nuclear Clear), 5 nitpick |
 | F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
 | F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | not started | — |
 | F9 | Infrastructure | ForgeSettings, ForgeMetrics, MetricsReporter, NumaHelper, Program.cs | not started | — |
@@ -943,3 +943,155 @@ DISABLED — ParsedBulkInsertService (commented out in Program.cs):
 **Answers to Questions:**
 - Q1 (stale ParsedBulkInsertService comment): Deferred as a nitpick. Will fix when next touching the file.
 - Q2 (ExecuteNonQueryAsync → ExecuteReaderAsync): Deferred. Good improvement but not urgent — dimension counts are logged at the proc level anyway.
+
+---
+
+### F6 — Background IP Enrichment (Lane 3)
+
+**Scope:** `BackgroundIpEnrichmentService.cs` (219 lines) + `DnsLookupService.cs` (176 lines) + `WhoisAsnService.cs` (151 lines) + `BoundedCache.cs` (151 lines)
+
+**What it does:** Lane 3 of the three-lane enrichment architecture. DNS reverse lookups and WHOIS ASN queries run in background I/O workers, off the enrichment hot path. The pipeline calls `Enqueue(ip)` fire-and-forget; background workers populate per-service caches asynchronously. Subsequent records for the same IP hit the cache inline at zero latency via `TryGetCached()`.
+
+#### Architecture
+
+```
+PIPELINE HOT PATH (per record, Lane 1):
+  1. MaxMind geo/ASN lookup (in-memory, ~1μs)
+  2. _backgroundIp.Enqueue(ip)           ← fire-and-forget
+  3. _dnsLookup.TryGetCached(ip)         ← 0μs cache read (null on miss)
+  4. _whoisAsn.TryGetCached(ip)          ← 0μs cache read (null on miss)
+
+BACKGROUND (Lane 3):
+  Channel<string> _ipChannel (50K bounded, DropOldest)
+  └─ N workers (default 8, configurable via ForgeSettings.BackgroundIpWorkerCount)
+      ├─ DnsLookupService.LookupAsync(ip)     → populates DNS cache (2s timeout)
+      └─ WhoisAsnService.LookupAsync(ip)      → populates WHOIS cache (5s timeout)
+                                                 (only when MaxMind has CC but no ASN)
+
+CACHE-AHEAD PATTERN:
+  1st hit for IP:  cache miss → no _srv_* params → background starts lookup
+  2nd+ hit for IP: cache hit  → _srv_* params appended inline at 0 latency
+  IP cardinality ~38% unique per 100K → 62% inline cache hit rate from start
+```
+
+#### File Inventory
+
+| File | Lines | Purpose | Dependencies |
+|------|-------|---------|--------------|
+| `BackgroundIpEnrichmentService.cs` | 219 | Lane 3 coordinator: dedup, channel, N workers | ForgeSettings, DnsLookupService?, WhoisAsnService?, MaxMindGeoService?, ITrackingLogger |
+| `DnsLookupService.cs` | 176 | Reverse DNS (PTR) + cloud provider pattern detection | DnsClient (NuGet), ITrackingLogger |
+| `WhoisAsnService.cs` | 151 | WHOIS ASN/org lookup (supplementary to MaxMind) | Whois (NuGet), ITrackingLogger |
+| `BoundedCache.cs` | 151 | Hybrid time+count eviction cache (replaces nuclear Clear()) | None |
+
+**Total: 697 lines across 4 files.**
+
+#### BackgroundIpEnrichmentService — Key Design Points
+
+**Deduplication:** `BoundedCache<string, byte>` (500K max, 250K evict target, 30min age) tracks all IPs already enqueued. Only genuinely new IPs trigger background lookups. Dedup skips are counted via `_duplicatesSkipped` for metrics.
+
+**Channel design:** `Channel.CreateBounded<string>(50_000)` with `DropOldest`. Never blocks the pipeline — if the channel is full, oldest IPs are silently dropped. Tradeoff: dropped IPs won't get cache-warmed, but they'll be looked up next time they appear.
+
+**Private IP filtering:** Enqueue skips `10.*`, `192.168.*`, `127.*`, `172.*` — no external enrichment possible for private IPs.
+
+**Worker model:** N concurrent `Task.Run` workers (default 8, configurable). Each worker reads from the channel via `ReadAllAsync`, performs DNS then conditional WHOIS, and logs progress every 1,000 IPs. Exceptions per-IP are caught and logged as Debug (non-fatal, service continues).
+
+**Conditional WHOIS:** Workers only call WhoisAsnService when MaxMind has a country code but no ASN for that IP. This avoids expensive 5s WHOIS queries for IPs that MaxMind already fully covers.
+
+**Periodic eviction:** 5-minute Timer checks `_seen.Count > MaxEntries` and calls `_seen.Evict()`. BoundedCache uses hybrid strategy: Phase 1 removes entries older than 30min, Phase 2 caps at 250K by timestamp if still over.
+
+**Graceful shutdown:** Workers exit cleanly on cancellation. Shutdown log reports total enqueued/processed/dedup-skipped counts.
+
+#### DnsLookupService — Key Design Points
+
+**Two-tier caching:** Application-level `ConcurrentDictionary<string, DnsLookupResult>` (200K max) + DnsClient internal TTL-based cache. Application cache stores both hits and misses (NXDOMAIN/timeout = default) to prevent repeated 2s DNS timeouts for the same IP.
+
+**Cloud detection:** 7 `[GeneratedRegex]` patterns match cloud provider hostnames: AWS (ec2-*, compute.amazonaws.com), GCP (googleusercontent.com), Azure (cloudapp.azure.com), DigitalOcean, Akamai/Linode, Cloudflare, OVH/Hetzner/Scaleway.
+
+**Params appended:** `_srv_rdns={hostname}`, `_srv_rdnsCloud=1` (if cloud pattern matches).
+
+**Nuclear eviction (open issue):** Still uses `_cache.Clear()` at 200K entries instead of BoundedCache. Causes full cache miss storm across all workers.
+
+#### WhoisAsnService — Key Design Points
+
+**Supplementary enrichment:** Only called when MaxMind has country code but no ASN — the background worker checks `!mmResult.Asn.HasValue && mmResult.CountryCode is not null` before calling WHOIS.
+
+**WHOIS parsing:** `ExtractField()` scans raw WHOIS text for field names (OriginAS, origin, OrgName, org-name, descr) with case-insensitive matching.
+
+**Params appended:** `_srv_whoisASN={as_number}`, `_srv_whoisOrg={organization}`.
+
+**Nuclear eviction (open issue):** Same as DnsLookupService — `_cache.Clear()` at 200K instead of BoundedCache.
+
+#### BoundedCache — Key Design Points
+
+**Purpose:** Replaces nuclear `Clear()` with intelligent eviction. Introduced for BackgroundIpEnrichmentService's dedup cache, but DnsLookupService and WhoisAsnService haven't been migrated yet.
+
+**Hybrid eviction strategy:**
+- Phase 1: Remove entries older than `MaxAge` (stale data no longer relevant)
+- Phase 2: If still over `MaxEntries`, keep only newest `EvictTarget` entries by timestamp
+
+**Thread-safety:** All operations lock-free via `ConcurrentDictionary`. Concurrent reads/writes continue during eviction. Multiple simultaneous `Evict()` calls are harmless.
+
+**Timestamp mechanism:** `Environment.TickCount64` — monotonic, no DateTime allocation, ~100ns resolution. Stored per entry in the dictionary value tuple.
+
+#### Integration with Enrichment Pipeline
+
+The pipeline integration happens in `EnrichmentPipelineService.EnrichRecord()`:
+
+1. **Line ~360:** `_dnsLookup.TryGetCached(ip)` — cache-only read, appends `_srv_rdns*` on hit
+2. **Line ~399:** `_backgroundIp.Enqueue(ip)` — fire-and-forget to Lane 3 channel
+3. **Line ~413:** `_whoisAsn.TryGetCached(ip)` — cache-only read, appends `_srv_whois*` on hit (only when MaxMind lacks ASN)
+
+The key design insight: the pipeline **never waits** for DNS/WHOIS results. First record for a new IP gets no `_srv_rdns*`/`_srv_whois*` params. Background workers populate caches asynchronously. Second+ records for the same IP get the params via zero-latency cache hits.
+
+#### Data Flow
+
+**No database interaction.** This subsystem is purely in-memory:
+- **Inputs:** External DNS servers (2s timeout), WHOIS servers (5s timeout), MaxMind .mmdb files (in-memory trie)
+- **Outputs:** In-memory ConcurrentDictionary caches in DnsLookupService and WhoisAsnService
+- **Pipeline reads:** `TryGetCached()` calls during Lane 1 enrichment
+
+#### Observations
+
+| # | Severity | Summary |
+|---|----------|---------|
+| O1 | **Minor** | DnsLookupService still uses nuclear `Clear()` instead of BoundedCache |
+| O2 | **Minor** | WhoisAsnService still uses nuclear `Clear()` instead of BoundedCache |
+| O3 | Nitpick | MaxMindGeoService also uses nuclear `Clear()` at 200K |
+| O4 | Nitpick | BackgroundIpEnrichmentService dedup cache and service caches have separate eviction |
+| O5 | Nitpick | 172.* filter is overly broad — catches non-private 172.0-15.* and 172.32-255.* |
+| O6 | Nitpick | No metrics exposed to ForgeMetrics or Pipeline Explorer |
+| O7 | Nitpick | WHOIS uses `Task.Run(() => whois.Lookup(...))` — sync-over-async wrapping |
+
+**O1. DnsLookupService nuclear `Clear()`.** [Severity: Minor] At 200K entries, `_cache.Clear()` wipes the entire DNS cache. All workers simultaneously experience cache misses and fire 2s DNS queries. With 8 workers processing at ~0.6 IPs/sec, refilling 200K entries takes hours. The BoundedCache hybrid eviction pattern already exists in the codebase and was built exactly for this scenario. DnsLookupService should use it.
+
+**O2. WhoisAsnService nuclear `Clear()`.** [Severity: Minor] Same issue as O1. At 200K entries, entire WHOIS cache is wiped. WHOIS queries are even slower (5s) so the refill storm is worse than DNS.
+
+**O3. MaxMindGeoService nuclear `Clear()`.** [Severity: Nitpick] Same pattern but lower severity — MaxMind lookups are in-memory trie traversals (~1μs), so the cache miss storm after Clear() costs microseconds per miss rather than seconds. Still, BoundedCache would be a cleaner approach.
+
+**O4. Disconnect between dedup and service caches.** [Severity: Nitpick] The dedup cache (`_seen` in BackgroundIpEnrichmentService) evicts every 5 minutes with BoundedCache hybrid strategy. But DnsLookupService and WhoisAsnService caches use independent nuclear Clear() at 200K. After dedup eviction, an IP might be re-enqueued and the background worker re-queries DNS/WHOIS only to find the result already in the service cache. Or conversely, after a service cache nuke, the dedup cache still considers the IP "seen" and won't re-queue it. In practice this causes no data loss — LookupAsync re-queries on cache miss regardless of dedup state — but it means some IPs that were recently dedup-evicted won't get their DNS/WHOIS refreshed until the dedup cache evicts them.
+
+**O5. Overly broad 172.* private IP filter.** [Severity: Nitpick] `ip.StartsWith("172.")` skips all 172.x.x.x addresses. RFC 1918 private range is only 172.16.0.0–172.31.255.255. IPs like 172.0.0.1 through 172.15.255.255 and 172.32.0.0+ are public and would be incorrectly skipped. At typical traffic volumes this affects a small fraction of IPs. Correct check would be: parse the second octet and only skip if 16–31.
+
+**O6. No ForgeMetrics integration.** [Severity: Nitpick] The service logs progress to ITrackingLogger but doesn't record metrics in ForgeMetrics. Pipeline Explorer has no visibility into Lane 3 queue depth, hit/miss rates, or throughput. The internal `_enqueued`, `_processed`, `_duplicatesSkipped` counters exist but aren't exposed.
+
+**O7. WHOIS sync-over-async.** [Severity: Nitpick] `WhoisAsnService.LookupCoreAsync` wraps the synchronous `whois.Lookup()` in `Task.Run()`. This works (offloads to thread pool) but consumes a thread pool thread per concurrent WHOIS query. With 8 workers each potentially running a 5s WHOIS query, that's 8 thread pool threads blocked. Acceptable given the server has 144 logical processors, but a native async WHOIS library would be cleaner.
+
+#### Questions
+
+**Q1.** O1/O2 — Should we migrate DnsLookupService and WhoisAsnService caches to BoundedCache? The pattern is already proven in BackgroundIpEnrichmentService's dedup cache. This would eliminate nuclear Clear() storms. Straightforward refactor — replace `ConcurrentDictionary` with `BoundedCache`, remove the `if (Count >= Max) Clear()` check, add periodic `Evict()` call.
+
+**Q2.** O5 — Fix the 172.* filter to properly check the RFC 1918 range (172.16.0.0–172.31.255.255)? The same overly broad filter exists in both BackgroundIpEnrichmentService.Enqueue() and WhoisAsnService.LookupAsync().
+
+**Q3.** O6 — Should ForgeMetrics track Lane 3 metrics (queue depth, enqueued, processed, dedup skips)? This would give Pipeline Explorer visibility into background enrichment health.
+
+#### Observation Severity
+
+| # | Severity | Summary |
+|---|----------|---------|
+| O1 | **Minor** | DNS cache nuclear Clear() — migrate to BoundedCache |
+| O2 | **Minor** | WHOIS cache nuclear Clear() — migrate to BoundedCache |
+| O3 | Nitpick | MaxMind cache nuclear Clear() — low impact (μs lookups) |
+| O4 | Nitpick | Dedup vs service cache eviction disconnect — no data loss |
+| O5 | Nitpick | 172.* filter too broad — small fraction of IPs affected |
+| O6 | Nitpick | No ForgeMetrics integration — internal counters exist but unexposed |
+| O7 | Nitpick | WHOIS sync-over-async — acceptable given server resources |
