@@ -180,11 +180,11 @@ public sealed class InfraHealthService : IDisposable
             cmd.CommandText = @"
                 SELECT 
                     (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
-                     WHERE object_id = OBJECT_ID('PiXL.Raw') AND index_id IN (0,1)) AS TestRows,
+                     WHERE object_id = OBJECT_ID('PiXL.Parsed') AND index_id IN (0,1)) AS TestRows,
                     (SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats 
                      WHERE object_id = OBJECT_ID('PiXL.Parsed') AND index_id IN (0,1)) AS ParsedRows,
-                    (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS Watermark,
-                    (SELECT LastRunAt FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS LastEtlRun,
+                    (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions') AS Watermark,
+                    (SELECT LastRunAt FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions') AS LastEtlRun,
                     @@VERSION AS ServerVersion";
             cmd.CommandTimeout = 10;
 
@@ -304,6 +304,7 @@ public sealed class InfraHealthService : IDisposable
 
     // ========================================================================
     // DATA FLOW PROBE — Is data actually making it into the database?
+    // Uses watermark-delta estimation instead of COUNT(*) for hit rates.
     // ========================================================================
     private async Task<DataFlowHealthItem> ProbeDataFlowAsync()
     {
@@ -315,13 +316,25 @@ public sealed class InfraHealthService : IDisposable
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                SELECT 
-                    (SELECT MAX(ReceivedAt) FROM PiXL.Raw) AS LastInsert,
-                    (SELECT COUNT(*) FROM PiXL.Raw WHERE ReceivedAt >= DATEADD(HOUR, -1, GETUTCDATE())) AS HitsLastHour,
-                    (SELECT COUNT(*) FROM PiXL.Raw WHERE ReceivedAt >= DATEADD(MINUTE, -5, GETUTCDATE())) AS HitsLast5Min,
-                    (SELECT MAX(Id) FROM PiXL.Raw) AS MaxTestId,
-                    (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits') AS WatermarkId,
-                    (SELECT MAX(SourceId) FROM PiXL.Parsed) AS MaxParsedId";
+                DECLARE @MaxParsedId BIGINT = (SELECT MAX(SourceId) FROM PiXL.Parsed);
+                DECLARE @WatermarkId BIGINT = (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions');
+                DECLARE @LastInsert DATETIME2(3) = (SELECT MAX(ReceivedAt) FROM PiXL.Parsed);
+
+                -- Estimate hit rates from latest snapshot (pre-computed by Forge every 60s)
+                DECLARE @HitsLastHour INT = 0, @HitsLast5Min INT = 0;
+                SELECT TOP 1
+                    @HitsLastHour = HitsLastHour,
+                    @HitsLast5Min = HitsLast5Min
+                FROM Ops.DashboardSnapshot
+                ORDER BY SnapshotId DESC;
+
+                SELECT
+                    @LastInsert AS LastInsert,
+                    ISNULL(@HitsLastHour, 0) AS HitsLastHour,
+                    ISNULL(@HitsLast5Min, 0) AS HitsLast5Min,
+                    ISNULL(@MaxParsedId, 0) AS MaxTestId,
+                    ISNULL(@WatermarkId, 0) AS WatermarkId,
+                    ISNULL(@MaxParsedId, 0) AS MaxParsedId";
             cmd.CommandTimeout = 5;
 
             await using var reader = await cmd.ExecuteReaderAsync();

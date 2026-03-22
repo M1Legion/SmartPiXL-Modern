@@ -1,23 +1,17 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SmartPiXL // TRON</title>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
-  }
-}
-</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* ============================================================================
-   TRON AESTHETIC â€” Single-Page App: Operations + Analytics
+   TRON AESTHETIC -- Single-Page App: Operations + Analytics
    Canvas, header, nav, and modal persist across view switches.
    ============================================================================ */
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Share+Tech+Mono&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -39,14 +33,15 @@
   --yellow: #ffe14d;
   --text: #d4eeff;
   --text-dim: rgba(160, 200, 230, 0.7);
-  --mono: 'Share Tech Mono', 'Consolas', monospace;
-  --display: 'Orbitron', sans-serif;
+  --mono: 'JetBrains Mono', 'Consolas', monospace;
+  --display: 'Rajdhani', 'Segoe UI', sans-serif;
 }
 
-html { font-size: 16px; }
+html { font-size: 16px; scroll-behavior: smooth; }
 
 body {
-  font-family: var(--mono);
+  font-family: var(--display);
+  font-weight: 500;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -54,7 +49,13 @@ body {
   position: relative;
 }
 
-/* Scan lines â€” animated CRT drift */
+/* Keyboard focus ring */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Scan lines -- animated CRT drift */
 body::after {
   content: '';
   position: fixed;
@@ -85,7 +86,7 @@ body::before {
   will-change: transform;
 }
 
-#grid-canvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+#grid-canvas { display: none; /* 3D arena disabled */ }
 
 .vignette {
   position: fixed;
@@ -137,7 +138,7 @@ body::before {
 .view-content { display: none; }
 .view-content.active { display: block; }
 
-/* â”€â”€â”€ LANDING OVERLAY â”€â”€â”€ */
+/* --- LANDING OVERLAY --- */
 .landing-overlay {
   position: fixed;
   inset: 0;
@@ -160,7 +161,7 @@ body::before {
 .landing-logo {
   font-family: var(--display);
   font-size: 3.5rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 14px;
   text-transform: uppercase;
   color: var(--cyan);
@@ -176,7 +177,7 @@ body::before {
   letter-spacing: 6px;
   text-transform: uppercase;
   text-align: center;
-  margin-top: -28px;
+  margin-top: -12px;
 }
 
 .landing-buttons {
@@ -254,7 +255,7 @@ body::before {
   50% { opacity: 0.6; }
 }
 
-/* â”€â”€â”€ HEADER â”€â”€â”€ */
+/* --- HEADER --- */
 .header {
   display: flex;
   justify-content: space-between;
@@ -269,7 +270,7 @@ body::before {
 .logo {
   font-family: var(--display);
   font-size: 1.6rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 6px;
   text-transform: uppercase;
   color: var(--cyan);
@@ -320,27 +321,28 @@ body::before {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
   font-size: 0.78rem;
   color: var(--text-dim);
+  font-family: var(--mono);
 }
 
-.refresh-timer { font-family: var(--mono); color: var(--cyan-dim); }
+.refresh-timer { color: var(--cyan-dim); }
 
-/* â”€â”€â”€ NAV â”€â”€â”€ */
+/* --- NAV --- */
 .nav-bar {
   display: flex;
   gap: 2px;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .nav-tab {
   font-family: var(--display);
-  font-size: 0.72rem;
-  font-weight: 500;
+  font-size: 0.82rem;
+  font-weight: 600;
   letter-spacing: 3px;
   text-transform: uppercase;
-  padding: 10px 24px;
+  padding: 12px 32px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   color: var(--text-dim);
@@ -366,8 +368,8 @@ body::before {
   box-shadow: 0 0 20px rgba(0,243,255,0.1), 0 0 40px rgba(0,243,255,0.05), inset 0 0 20px rgba(0,243,255,0.03);
 }
 
-/* â”€â”€â”€ PANELS â”€â”€â”€ */
-/* ═══ PANELS - Holographic Tron Data Tiles ═══ */
+/* --- PANELS --- */
+/*  PANELS - Holographic Tron Data Tiles  */
 /* Every panel is a holographic tile: scanlines + inner circuit grid +
    animated edge sweep + corner energy dots. The 3D background scene
    shows through the glass-dark base. */
@@ -469,9 +471,9 @@ body::before {
 
 .panel-title {
   font-family: var(--display);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  letter-spacing: 5px;
+  letter-spacing: 4px;
   text-transform: uppercase;
   color: var(--cyan);
   margin-bottom: 16px;
@@ -489,7 +491,7 @@ body::before {
   font-size: 0.65rem;
 }
 
-/* â”€â”€â”€ PIPELINE (shared) â”€â”€â”€ */
+/* --- PIPELINE (shared) --- */
 .pipeline {
   display: flex;
   align-items: center;
@@ -554,8 +556,8 @@ body::before {
 
 .pipe-node-label {
   font-family: var(--display);
-  font-size: 0.6rem;
-  font-weight: 500;
+  font-size: 0.68rem;
+  font-weight: 600;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--cyan);
@@ -568,7 +570,7 @@ body::before {
   font-weight: 700;
   text-shadow: 0 0 10px rgba(192, 232, 255, 0.15);
 }
-.pipe-node-sub { font-size: 0.65rem; color: var(--text-dim); }
+.pipe-node-sub { font-size: 0.68rem; color: var(--text-dim); font-family: var(--mono); }
 
 .pipe-arrow {
   width: 36px;
@@ -640,29 +642,31 @@ body::before {
   100% { opacity: 0.35; }
 }
 
-/* â”€â”€â”€ FEED TABLE (shared) â”€â”€â”€ */
-.feed-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+/* --- FEED TABLE (shared) --- */
+.feed-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: var(--mono); }
 
 .feed-table th {
   font-family: var(--display);
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--cyan);
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid rgba(0,243,255,0.15);
   text-shadow: 0 0 8px rgba(0,243,255,0.2);
 }
 
 .feed-table td {
-  padding: 6px 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(0,243,255,0.04);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
 }
 
 .feed-table tr { transition: background 0.2s, box-shadow 0.2s; cursor: pointer; position: relative; }
@@ -676,7 +680,7 @@ body::before {
   100% { background: transparent; box-shadow: none; }
 }
 
-/* â”€â”€â”€ BADGE (shared) â”€â”€â”€ */
+/* --- BADGE (shared) --- */
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -714,15 +718,17 @@ body::before {
   box-shadow: 0 0 8px rgba(0,255,136,0.08), inset 0 0 6px rgba(0,255,136,0.03);
 }
 
-/* â”€â”€â”€ LOADING (shared) â”€â”€â”€ */
-/* ═══ LOADING - Data acquisition spinner ═══ */
+/* --- LOADING (shared) --- */
+/*  LOADING - Data acquisition spinner  */
 .loading {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
   color: var(--text-dim);
+  font-family: var(--display);
   font-size: 0.78rem;
+  font-weight: 500;
   letter-spacing: 3px;
   text-shadow: 0 0 8px rgba(0,243,255,0.1);
 }
@@ -741,7 +747,7 @@ body::before {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* â”€â”€â”€ MODAL (shared) â”€â”€â”€ */
+/* --- MODAL (shared) --- */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -811,8 +817,8 @@ body::before {
 
 .modal-title {
   font-family: var(--display);
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.90rem;
+  font-weight: 700;
   letter-spacing: 4px;
   text-transform: uppercase;
   color: var(--cyan);
@@ -822,7 +828,7 @@ body::before {
 
 .modal-title::before { content: '// '; color: var(--text-dim); }
 
-.modal-body { font-size: 0.82rem; line-height: 1.6; }
+.modal-body { font-size: 0.85rem; line-height: 1.6; }
 
 .modal-body .detail-grid {
   display: grid;
@@ -840,8 +846,8 @@ body::before {
 
 .modal-body .detail-label {
   font-family: var(--display);
-  font-size: 0.65rem;
-  font-weight: 500;
+  font-size: 0.70rem;
+  font-weight: 600;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -850,7 +856,7 @@ body::before {
 
 .modal-body .detail-value {
   font-family: var(--mono);
-  font-size: 0.88rem;
+  font-size: 0.90rem;
   color: var(--text);
 }
 
@@ -894,11 +900,11 @@ body::before {
 }
 
 /* ============================================================================
-   OPERATIONS VIEW â€” Critical Zone, Status Strip, Infra, Error Log, ETL
+   OPERATIONS VIEW -- Critical Zone, Status Strip, Infra, Error Log, ETL
    ============================================================================ */
 
 /* Critical Issues Zone */
-/* ═══ Critical Zone - Holographic threat alert tile ═══ */
+/*  Critical Zone - Holographic threat alert tile  */
 #critical-zone { margin-bottom: 24px; }
 #critical-zone.slide-in { animation: criticalSlideIn 0.4s ease-out; }
 
@@ -955,8 +961,8 @@ body::before {
 
 .critical-title {
   font-family: var(--display);
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.88rem;
+  font-weight: 700;
   letter-spacing: 4px;
   text-transform: uppercase;
   color: var(--red);
@@ -967,8 +973,8 @@ body::before {
 .critical-count {
   margin-left: auto;
   font-family: var(--display);
-  font-size: 0.72rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
   letter-spacing: 2px;
   color: var(--text-dim);
 }
@@ -992,10 +998,10 @@ body::before {
 
 .issue-severity {
   font-family: var(--display);
-  font-size: 0.65rem;
-  font-weight: 600;
+  font-size: 0.68rem;
+  font-weight: 700;
   letter-spacing: 1px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 2px;
   flex-shrink: 0;
   margin-top: 1px;
@@ -1005,12 +1011,12 @@ body::before {
 .issue-severity.warning { background: rgba(255,225,77,0.15); color: var(--yellow); border: 1px solid rgba(255,225,77,0.2); }
 
 .issue-body { flex: 1; min-width: 0; }
-.issue-title { font-size: 0.88rem; font-weight: bold; color: var(--text); margin-bottom: 3px; }
-.issue-detail { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
+.issue-title { font-size: 0.90rem; font-weight: bold; color: var(--text); margin-bottom: 3px; }
+.issue-detail { font-size: 0.80rem; color: var(--text-dim); line-height: 1.5; }
 .issue-time { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; text-align: right; }
 
-/* ═══ Status Strip - Holographic KPI tiles ═══ */
-.status-strip { display: flex; gap: 4px; margin-bottom: 24px; flex-wrap: wrap; }
+/*  Status Strip - Holographic KPI tiles  */
+.status-strip { display: flex; gap: 8px; margin-bottom: 28px; flex-wrap: wrap; }
 
 .status-chip {
   display: flex;
@@ -1090,8 +1096,8 @@ body::before {
 
 .chip-label {
   font-family: var(--display);
-  font-size: 0.62rem;
-  font-weight: 500;
+  font-size: 0.70rem;
+  font-weight: 600;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -1100,7 +1106,8 @@ body::before {
 .chip-value {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: 0.80rem;
+  font-weight: 500;
   color: var(--text);
   text-shadow: 0 0 8px rgba(192, 232, 255, 0.1);
 }
@@ -1108,7 +1115,7 @@ body::before {
 .chip-value.bad { color: var(--red); text-shadow: 0 0 8px rgba(255, 45, 85, 0.2); }
 .chip-value.warn { color: var(--yellow); text-shadow: 0 0 8px rgba(255, 225, 77, 0.15); }
 
-/* ═══ Xavier Sync Panel ═══ */
+/*  Xavier Sync Panel  */
 .sync-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 @media (max-width: 900px) { .sync-cards { grid-template-columns: 1fr; } }
 
@@ -1173,7 +1180,7 @@ body::before {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;
 }
 .sync-stat-label {
-  font-family: var(--display); font-size: 0.58rem; font-weight: 500;
+  font-family: var(--display); font-size: 0.65rem; font-weight: 600;
   letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase;
 }
 .sync-stat-value {
@@ -1190,7 +1197,7 @@ body::before {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* ═══ Error Log - Threat telemetry feed ═══ */
+/*  Error Log - Threat telemetry feed  */
 .error-log { font-size: 0.82rem; }
 
 .error-entry {
@@ -1228,8 +1235,8 @@ body::before {
 
 .error-source {
   font-family: var(--display);
-  font-size: 0.65rem;
-  font-weight: 500;
+  font-size: 0.70rem;
+  font-weight: 600;
   letter-spacing: 1px;
   color: var(--text-dim);
   width: 80px;
@@ -1250,7 +1257,7 @@ body::before {
 }
 .error-age { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; width: 60px; text-align: right; }
 
-/* ═══ ETL Grid - Pipeline metric holotiles ═══ */
+/*  ETL Grid - Pipeline metric holotiles  */
 .etl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 
 .etl-stat {
@@ -1291,21 +1298,21 @@ body::before {
 .etl-val.warn { color: var(--yellow); text-shadow: 0 0 12px rgba(255,225,77,0.3), 0 0 30px rgba(255,225,77,0.1); }
 .etl-val.bad { color: var(--red); text-shadow: 0 0 12px rgba(255,45,85,0.3), 0 0 30px rgba(255,45,85,0.1); }
 .etl-lbl {
-  font-size: 0.62rem;
-  font-weight: 500;
+  font-size: 0.68rem;
+  font-weight: 600;
   color: var(--text-dim);
   letter-spacing: 1.5px;
   text-transform: uppercase;
   margin-top: 6px;
 }
 
-/* ═══ Infra Grid - System topology holograph ═══ */
+/*  Infra Grid - System topology holograph  */
 .infra-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 .infra-group-title {
   font-family: var(--display);
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 700;
   letter-spacing: 3px;
   text-transform: uppercase;
   color: var(--cyan);
@@ -1341,7 +1348,7 @@ body::before {
 .infra-dot.warn { background: var(--yellow); box-shadow: 0 0 6px rgba(255,225,77,0.3), 0 0 14px rgba(255,225,77,0.1); }
 
 .infra-item-name { flex: 1; }
-.infra-item-detail { font-size: 0.72rem; color: var(--text-dim); text-align: right; }
+.infra-item-detail { font-size: 0.75rem; color: var(--text-dim); text-align: right; font-family: var(--mono); }
 .infra-item-ms {
   font-family: var(--display);
   font-size: 0.72rem;
@@ -1380,9 +1387,143 @@ body::before {
   color: var(--cyan);
   text-shadow: 0 0 10px rgba(0,243,255,0.25);
 }
-.infra-app-lbl { font-size: 0.62rem; font-weight: 500; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px; }
+.infra-app-lbl { font-size: 0.68rem; font-weight: 600; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px; }
 
-/* ═══ All-Clear Banner - System nominal beacon ═══ */
+/*  System Health Boxes  At-a-glance subsystem grouping  */
+.system-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.system-box {
+  background: var(--panel);
+  border: 2px solid rgba(0,243,255,0.15);
+  border-radius: 4px;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.6s ease, box-shadow 0.6s ease;
+}
+
+.system-box::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.3;
+  transition: opacity 0.6s;
+}
+
+.system-box.sys-healthy {
+  border-color: rgba(0,255,136,0.35);
+  box-shadow: 0 0 20px rgba(0,255,136,0.06), inset 0 0 30px rgba(0,255,136,0.015);
+}
+.system-box.sys-healthy::before { background: linear-gradient(90deg, transparent, var(--green), transparent); opacity: 0.5; }
+
+.system-box.sys-degraded {
+  border-color: rgba(255,225,77,0.45);
+  box-shadow: 0 0 20px rgba(255,225,77,0.08), inset 0 0 30px rgba(255,225,77,0.02);
+}
+.system-box.sys-degraded::before { background: linear-gradient(90deg, transparent, var(--yellow), transparent); opacity: 0.6; }
+
+.system-box.sys-critical {
+  border-color: rgba(255,45,85,0.5);
+  box-shadow: 0 0 25px rgba(255,45,85,0.1), inset 0 0 30px rgba(255,45,85,0.025);
+  animation: sysBoxPulse 2s ease-in-out infinite;
+}
+.system-box.sys-critical::before { background: linear-gradient(90deg, transparent, var(--red), transparent); opacity: 0.7; }
+
+@keyframes sysBoxPulse {
+  0%, 100% { box-shadow: 0 0 25px rgba(255,45,85,0.1), inset 0 0 30px rgba(255,45,85,0.025); }
+  50% { box-shadow: 0 0 35px rgba(255,45,85,0.18), inset 0 0 40px rgba(255,45,85,0.04); }
+}
+
+.system-box-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid rgba(0,243,255,0.08);
+}
+
+.system-box-icon {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.4s;
+}
+.system-box-icon.up { background: var(--green); box-shadow: 0 0 8px var(--green-dim); }
+.system-box-icon.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(255,225,77,0.3); }
+.system-box-icon.down { background: var(--red); box-shadow: 0 0 8px var(--red-dim); animation: pulse 0.8s ease-in-out infinite; }
+
+.system-box-name {
+  font-family: var(--display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text);
+  flex: 1;
+}
+
+.system-box-badge {
+  font-family: var(--display);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  padding: 3px 10px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+.system-box-badge.ok { color: var(--green); background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); }
+.system-box-badge.warn { color: var(--yellow); background: rgba(255,225,77,0.08); border: 1px solid rgba(255,225,77,0.2); }
+.system-box-badge.bad { color: var(--red); background: rgba(255,45,85,0.1); border: 1px solid rgba(255,45,85,0.25); }
+
+.subsystem-list { padding: 8px 12px 12px; }
+
+.subsystem-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  font-size: 0.82rem;
+  border-radius: 2px;
+  transition: all 0.2s;
+  border-left: 2px solid transparent;
+}
+
+.subsystem-item:hover {
+  background: rgba(0,243,255,0.03);
+  border-left-color: rgba(0,243,255,0.3);
+}
+
+.sub-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  transition: all 0.3s;
+}
+.sub-dot.up { background: var(--green); box-shadow: 0 0 5px var(--green-dim); }
+.sub-dot.warn { background: var(--yellow); box-shadow: 0 0 5px rgba(255,225,77,0.3); }
+.sub-dot.down { background: var(--red); box-shadow: 0 0 5px var(--red-dim); }
+.sub-dot.idle { background: rgba(160,200,230,0.3); }
+
+.sub-name { flex: 1; color: var(--text); font-size: 0.82rem; }
+
+.sub-value {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: right;
+  white-space: nowrap;
+}
+.sub-value.ok { color: var(--green); }
+.sub-value.warn { color: var(--yellow); }
+.sub-value.bad { color: var(--red); }
+
+/*  All-Clear Banner - System nominal beacon  */
 .all-clear {
   display: flex;
   align-items: center;
@@ -1422,8 +1563,8 @@ body::before {
 
 .all-clear-text {
   font-family: var(--display);
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.90rem;
+  font-weight: 700;
   letter-spacing: 3px;
   text-transform: uppercase;
   color: var(--green);
@@ -1433,10 +1574,10 @@ body::before {
 .all-clear-sub { margin-left: auto; font-size: 0.72rem; color: var(--text-dim); }
 
 /* ============================================================================
-   ANALYTICS VIEW â€” Hero Cards, Charts, Signals, Evasion, Behavior, FP, Devices
+   ANALYTICS VIEW -- Hero Cards, Charts, Signals, Evasion, Behavior, FP, Devices
    ============================================================================ */
 
-/* ═══ Hero Cards - Primary KPI holotiles ═══ */
+/*  Hero Cards - Primary KPI holotiles  */
 .hero-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
 
 .hero-card {
@@ -1495,8 +1636,8 @@ body::before {
 
 .hero-label {
   font-family: var(--display);
-  font-size: 0.65rem;
-  font-weight: 500;
+  font-size: 0.72rem;
+  font-weight: 600;
   letter-spacing: 3px;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -1609,7 +1750,7 @@ body::before {
 
 .evasion-val { font-family: var(--display); font-size: 1.4rem; font-weight: 700; color: var(--cyan); text-shadow: 0 0 10px rgba(0,243,255,0.2); }
 .evasion-val.alert { color: var(--red); text-shadow: 0 0 12px var(--red-dim); }
-.evasion-lbl { font-size: 0.65rem; font-weight: 500; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+.evasion-lbl { font-size: 0.70rem; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
 
 /* Behavior */
 .behavior-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -1651,7 +1792,7 @@ body::before {
 .fp-meta { flex: 1; color: var(--text-dim); }
 .fp-hits { font-family: var(--display); font-weight: 700; color: var(--text); }
 
-/* â”€â”€â”€ RESPONSIVE â”€â”€â”€ */
+/* --- RESPONSIVE --- */
 @media (max-width: 1400px) {
   .hero-grid { grid-template-columns: repeat(3, 1fr); }
 }
@@ -1665,6 +1806,7 @@ body::before {
   .hero-grid { grid-template-columns: repeat(2, 1fr); }
   .panel-grid, .panel-grid.triple, .panel-grid.half { grid-template-columns: 1fr; }
   .infra-grid { grid-template-columns: 1fr; }
+  .system-grid { grid-template-columns: 1fr; }
   .infra-app-grid { grid-template-columns: repeat(2, 1fr); }
   .etl-grid { grid-template-columns: repeat(2, 1fr); }
   .evasion-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1674,6 +1816,16 @@ body::before {
   .modal-body .detail-grid { grid-template-columns: 1fr; }
 }
 
+/* Section dividers for visual breathing room */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(0,243,255,0.12) 30%, rgba(0,243,255,0.12) 70%, transparent 95%);
+  margin: 28px 0;
+}
+
+/* Ensure data values always use mono */
+.data-mono { font-family: var(--mono); }
+
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; box-shadow: 0 0 6px rgba(0,243,255,0.1); }
@@ -1682,10 +1834,10 @@ body::before {
 </head>
 <body>
 
-<canvas id="grid-canvas"></canvas>
+<canvas id="grid-canvas" style="display:none"></canvas>
 <div class="vignette"></div>
 
-<!-- LANDING OVERLAY â€” visible on load, hides when a view activates -->
+<!-- LANDING OVERLAY -- visible on load, hides when a view activates -->
 <div class="landing-overlay" id="landing-overlay">
   <div class="landing-logo">SMARTPIXL</div>
   <div class="landing-sub">DevOps Command Center</div>
@@ -1697,9 +1849,7 @@ body::before {
 </div>
 
 <div class="dashboard hidden" id="dashboard">
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       SHARED HEADER (persists across views)
-       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- SHARED HEADER (persists across views) -->
   <div class="header">
     <div class="header-left">
       <div>
@@ -1724,9 +1874,7 @@ body::before {
     <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">ANALYTICS</a>
   </div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       OPERATIONS VIEW
-       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- OPERATIONS VIEW -->
   <div id="view-ops" class="view-content">
     <!-- Critical Issues -->
     <div id="critical-zone"></div>
@@ -1742,6 +1890,16 @@ body::before {
       <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">LAST HIT</div><div class="chip-value">--</div></div>
       <div class="status-chip" id="xavier-chip"><div class="chip-dot idle"></div><div class="chip-label">XAVIER</div><div class="chip-value">--</div></div>
     </div>
+
+    <!-- System Health Boxes -->
+    <div class="system-grid" id="system-boxes">
+      <div class="system-box" id="sysbox-edge"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">PiXL Edge</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
+      <div class="system-box" id="sysbox-forge"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">Forge</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
+      <div class="system-box" id="sysbox-sql"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">SQL Server</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
+      <div class="system-box" id="sysbox-sentinel"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">Sentinel</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
+    </div>
+
+    <div class="section-divider"></div>
 
     <!-- Data Flow Pipeline -->
     <div class="pipeline-section" style="margin-bottom:24px;">
@@ -1769,7 +1927,7 @@ body::before {
           <div class="pipe-node" id="pipe-dim" onclick="drillPipeline('dim')">
             <div class="pipe-node-label">DIMENSIONS</div>
             <div class="pipe-node-value" id="pipe-dim-val">--</div>
-            <div class="pipe-node-sub" id="pipe-dim-sub">Device Â· IP</div>
+            <div class="pipe-node-sub" id="pipe-dim-sub">Device · IP</div>
           </div>
           <div class="pipe-arrow" id="pipe-arrow-4"></div>
           <div class="pipe-node" id="pipe-visit" onclick="drillPipeline('visit')">
@@ -1792,6 +1950,8 @@ body::before {
       </div>
     </div>
 
+    <div class="section-divider"></div>
+
     <!-- Errors + ETL + Pipeline -->
     <div class="panel-grid triple">
       <div class="panel">
@@ -1808,11 +1968,15 @@ body::before {
       </div>
     </div>
 
+    <div class="section-divider"></div>
+
     <!-- Xavier Sync Health -->
     <div class="panel" style="margin-bottom:24px;">
       <div class="panel-title">XAVIER DATA SYNC</div>
       <div id="xavier-sync-panel"><div class="loading">LOADING</div></div>
     </div>
+
+    <div class="section-divider"></div>
 
     <!-- Infrastructure -->
     <div class="panel" style="margin-bottom:24px;">
@@ -1834,7 +1998,7 @@ body::before {
 
     <!-- Live Feed (compact, 15 hits) -->
     <div class="panel" style="margin-bottom:24px;">
-      <div class="panel-title">LIVE FEED â€” LAST 15 HITS</div>
+      <div class="panel-title">LIVE FEED -- LAST 15 HITS</div>
       <div style="overflow-x:auto;">
         <table class="feed-table">
           <thead><tr><th>TIME</th><th>IP</th><th>THREAT</th><th>SCORE</th><th>PLATFORM</th><th>BROWSER</th><th>FINGERPRINT</th></tr></thead>
@@ -1844,11 +2008,9 @@ body::before {
     </div>
   </div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       ANALYTICS VIEW
-       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ANALYTICS VIEW -->
   <div id="view-analytics" class="view-content">
-    <!-- Hero Cards — Pipeline Metrics -->
+    <!-- Hero Cards  Pipeline Metrics -->
     <div class="hero-grid" id="hero-grid">
       <div class="hero-card"><div class="hero-label">RAW HITS</div><div class="hero-value" id="h-raw">--</div><div class="hero-sub" id="h-raw-sub"></div></div>
       <div class="hero-card"><div class="hero-label">PARSED</div><div class="hero-value" id="h-parsed">--</div><div class="hero-sub" id="h-parsed-sub"></div></div>
@@ -1895,7 +2057,7 @@ body::before {
       </div>
     </div>
 
-    <!-- Company Match Breakdown — per-company match-type counts + entitlements -->
+    <!-- Company Match Breakdown  per-company match-type counts + entitlements -->
     <div class="panel" style="margin-top:24px;">
       <div class="panel-title">COMPANY MATCH BREAKDOWN <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; current: IP only &middot; uplift available: Email + Geo</span></div>
       <div id="a-company-matches" style="font-size:0.78rem;max-height:400px;overflow-y:auto;"><div class="loading">LOADING</div></div>
@@ -1940,6 +2102,8 @@ const API = {
   pipeline:     () => fetchJson('/api/dash/pipeline'),
   matchBreakdown: () => fetchJson('/api/dash/match-breakdown'),
   remediations: () => fetchJson('/api/dash/remediations'),
+  snapshot:     () => fetchJson('/api/dash/snapshot'),
+  hourlyStats:  (h=48) => fetchJson(`/api/dash/hourly-stats?hours=${h}`),
 };
 
 let lastData = {};
@@ -1958,7 +2122,7 @@ async function fetchJson(url) {
 }
 
 // ============================================================================
-// GRID â€” Three.js Tron Arena (WebGL + Bloom)
+// GRID -- Three.js Tron Arena (WebGL + Bloom)
 // Loaded via ES module below. Stub API until module initializes.
 // Contestant light-cycles race the grid, bounded by arena walls.
 // ============================================================================
@@ -1996,7 +2160,7 @@ function sug(text) {
 }
 
 // ============================================================================
-// VIEW SWITCHING â€” Three states: 'landing', 'ops', 'analytics'
+// VIEW SWITCHING -- Three states: 'landing', 'ops', 'analytics'
 // Landing = background only + two buttons. Clicking active tab derezzes back.
 // ============================================================================
 let currentView = 'landing';  // start on landing
@@ -2011,8 +2175,8 @@ function setViewClasses(view) {
   document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
   document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : view === 'analytics' ? 'Analytics & Intelligence' : '';
   document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
-  document.title = view === 'ops' ? 'SmartPiXL // TRON â€” Operations'
-                 : view === 'analytics' ? 'SmartPiXL // TRON â€” Analytics'
+  document.title = view === 'ops' ? 'SmartPiXL // TRON | Operations'
+                 : view === 'analytics' ? 'SmartPiXL // TRON | Analytics'
                  : 'SmartPiXL // TRON';
 }
 
@@ -2065,7 +2229,7 @@ function renderCachedData(view) {
   }
 }
 
-// Called from nav tabs â€” toggle: same tab = derezz to landing, diff tab = switch
+// Called from nav tabs -- toggle: same tab = derezz to landing, diff tab = switch
 function toggleView(view) {
   if (currentView === view) {
     // Derezz back to landing
@@ -2073,7 +2237,7 @@ function toggleView(view) {
   } else if (currentView === 'landing') {
     enterView(view);
   } else {
-    // Switch between views (ops â†” analytics)
+    // Switch between views (ops  analytics)
     closeModal();
     refreshAbort = true;
     currentView = view;
@@ -2091,7 +2255,7 @@ function derezToLanding() {
   refreshAbort = true;
   currentView = 'landing';
 
-  // Derezz animation on dashboard (cycles keep running â€” they track API health)
+  // Derezz animation on dashboard (cycles keep running -- they track API health)
   dashEl.classList.add('derezzing');
   dashEl.addEventListener('animationend', function onDerez() {
     dashEl.classList.remove('derezzing');
@@ -2099,7 +2263,7 @@ function derezToLanding() {
     dashEl.removeEventListener('animationend', onDerez);
   });
 
-  // Update nav â€” no active tab
+  // Update nav -- no active tab
   document.getElementById('nav-ops').className = 'nav-tab';
   document.getElementById('nav-analytics').className = 'nav-tab';
 
@@ -2156,10 +2320,10 @@ function timeAgo(dt) {
 }
 
 // ============================================================================
-// â-ˆâ-ˆâ-ˆâ-ˆâ-ˆâ-ˆ  OPERATIONS RENDERERS & DRILL-DOWNS
+// ------  OPERATIONS RENDERERS & DRILL-DOWNS
 // ============================================================================
 
-// â”€â”€â”€ Drill-Down: Pipeline Nodes â”€â”€â”€
+//  Drill-Down: Pipeline Nodes 
 function drillPipeline(stage) {
   const infra = lastData.infra;
   const health = lastData.health;
@@ -2200,16 +2364,16 @@ function drillPipeline(stage) {
     html += di('Watermark', num(sql?.watermark ?? health?.etL_Watermark));
     html += di('Total Processed', num(health?.etL_TotalProcessed));
     html += di('Parsed Rows', num(sql?.parsedRows ?? health?.totalHits));
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
     html += di('Last ETL Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
     html += di('Synthetic Hits', num(health?.syntheticHits));
     html += '</div>';
-    html += sug('ETL runs every 60 seconds via EtlBackgroundService, calling ETL.usp_ParseNewHits. If lag is high, run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_ParseNewHits</code><br>If watermark is ahead of max Test ID, reset with:<br><code style="color:var(--cyan)">UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = \'ParseNewHits\'</code>');
+    html += sug('ETL runs every 60 seconds via EtlBackgroundService calling ETL.usp_ProcessDimensions. Normal lag is 0-5000 rows (one cycle). If lag exceeds 50K, ETL may be stuck.');
     openModal('ETL PARSE STAGE', html);
   }
   else if (stage === 'dash') {
     html += di('Status', df?.isFlowing ? 'LIVE' : 'STALE', df?.isFlowing ? 'ok' : 'bad');
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
     html += di('Data Freshness', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) + ' ago' : '--');
     html += di('24h Hits', num(health?.hits_24h));
     html += di('Total Hits', num(health?.totalHits));
@@ -2227,7 +2391,7 @@ function drillPipeline(stage) {
     html += di('Last Device Activity', pipe?.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
     html += di('Last IP Activity', pipe?.ipLatest ? timeAgo(pipe.ipLatest) : '--');
     html += '</div>';
-    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by usp_ParseNewHits (Phases 9-10). Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
+    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by ProcessDimensions. Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
     openModal('DIMENSION TABLES', html);
   }
   else if (stage === 'visit') {
@@ -2236,7 +2400,7 @@ function drillPipeline(stage) {
     html += di('With Email', num(pipe?.visitsWithEmail), pipe?.visitsWithEmail > 0 ? 'ok' : '');
     html += di('Max Visit ID', num(pipe?.maxVisitId));
     html += di('Last Visit', pipe?.visitLatest ? timeAgo(pipe.visitLatest) : '--');
-    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 10000 ? 'warn' : 'ok');
     html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
     html += '</div>';
     html += sug('PiXL.Visit is the fact table linking Device + IP per parsed hit. Visits with a MatchEmail are eligible for identity resolution via usp_MatchVisits. Match lag shows how many visits haven\'t been checked yet.');
@@ -2258,7 +2422,7 @@ function drillPipeline(stage) {
   }
 }
 
-// â”€â”€â”€ Drill-Down: Pipeline Table cell â”€â”€â”€
+//  Drill-Down: Pipeline Table cell 
 function drillPipelineTable(table) {
   const pipe = lastData.infra?.pipeline;
   if (!pipe) return;
@@ -2272,7 +2436,7 @@ function drillPipelineTable(table) {
     openModal('PiXL.Test', html);
   } else if (table === 'parsed') {
     html += di('Rows', num(pipe.parsedRows));
-    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 10000 ? 'warn' : 'ok');
     html += di('Latest', pipe.parsedLatest ? timeAgo(pipe.parsedLatest) : '--');
     html += di('Total Processed', num(pipe.parseTotalProcessed));
     html += '</div>';
@@ -2306,7 +2470,7 @@ function drillPipelineTable(table) {
   }
 }
 
-// â”€â”€â”€ Drill-Down: Status Chips â”€â”€â”€
+//  Drill-Down: Status Chips 
 function drillStatus(type) {
   const infra = lastData.infra;
   const health = lastData.health;
@@ -2405,7 +2569,7 @@ function drillStatus(type) {
   }
 }
 
-// â”€â”€â”€ Drill-Down: Error Entry â”€â”€â”€
+//  Drill-Down: Error Entry 
 function drillError(idx) {
   const errors = lastData.infra?.recentErrors?.errors;
   if (!errors || !errors[idx]) return;
@@ -2420,7 +2584,7 @@ function drillError(idx) {
   openModal('ERROR DETAIL', html);
 }
 
-// â”€â”€â”€ Drill-Down: Critical Issue â”€â”€â”€
+//  Drill-Down: Critical Issue 
 function drillIssue(idx) {
   const issues = lastData._issues;
   if (!issues || !issues[idx]) return;
@@ -2442,9 +2606,9 @@ function getFixSuggestion(issue) {
   if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
   if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
   if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
-  if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('etl lag')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
   if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
-  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('parse lag') && t.includes('pipeline')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
   if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
   if (t.includes('xavier') && t.includes('failed')) return 'Check Xavier connectivity and Windows Auth trust:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL login on Xavier.';
   if (t.includes('xavier') && t.includes('never')) return 'The sync service may not have run yet. Restart the app to trigger it:<br><code style="color:var(--cyan)">Stop-WebAppPool "Smartpixl.info"; Start-WebAppPool "Smartpixl.info"</code>';
@@ -2452,7 +2616,7 @@ function getFixSuggestion(issue) {
   return null;
 }
 
-// â”€â”€â”€ Critical Issues Engine â”€â”€â”€
+//  Critical Issues Engine 
 function buildIssues(health, infra) {
   const issues = [];
   if (infra) {
@@ -2474,19 +2638,19 @@ function buildIssues(health, infra) {
       const re = infra.recentErrors;
       issues.push({ severity: 'warning', title: `${re.recentErrorCount} Active Error${re.recentErrorCount > 1 ? 's' : ''} in Log`, detail: `Most recent: ${re.errors[0]?.message?.substring(0,100) || 'Unknown'}`, time: re.lastErrorUtc });
     }
-    if (infra.dataFlow && infra.dataFlow.etlLag > 100)
+    if (infra.dataFlow && infra.dataFlow.etlLag > 50000)
       issues.push({ severity: 'warning', title: 'ETL Lag High', detail: `Watermark is ${infra.dataFlow.etlLag} rows behind. Parsed data may be stale.`, time: infra.checkedAt });
     if (infra.dataFlow && infra.dataFlow.queueDepth > 100)
       issues.push({ severity: 'warning', title: 'Write Queue Backing Up', detail: `Queue depth: ${infra.dataFlow.queueDepth}. Writes may be slow.`, time: infra.checkedAt });
     if (infra.pipeline && infra.pipeline.isAvailable) {
       if (infra.pipeline.matchLag > 100)
         issues.push({ severity: 'warning', title: 'Match Lag High', detail: `Match watermark is ${infra.pipeline.matchLag} visits behind. Identity resolution may be delayed.`, time: infra.checkedAt });
-      if (infra.pipeline.parseLag > 100)
+      if (infra.pipeline.parseLag > 50000)
         issues.push({ severity: 'warning', title: 'Parse Lag High (Pipeline)', detail: `Parse watermark is ${infra.pipeline.parseLag} rows behind. Device/IP/Visit tables may be stale.`, time: infra.checkedAt });
     }
   }
   if (health) {
-    const secSince = health.secondsSinceLastHit || 9999;
+    const secSince = health.secondsSinceLastHit ?? 9999;
     if (secSince > 3600)
       issues.push({ severity: 'warning', title: 'No Recent Hits', detail: `Last hit ${formatDuration(secSince)} ago. Traffic may have stopped or ingestion is broken.`, time: null });
   }
@@ -2531,7 +2695,7 @@ function renderCriticalZone(issues) {
   const iconClass = hasCritical ? '' : 'warning';
   const titleClass = hasCritical ? '' : 'warning';
   const titleText = hasCritical ? 'CRITICAL ISSUES DETECTED' : 'WARNINGS';
-  const countText = `${critCount ? critCount + ' CRITICAL' : ''}${critCount && warnCount ? ' Â· ' : ''}${warnCount ? warnCount + ' WARNING' : ''}`;
+  const countText = `${critCount ? critCount + ' CRITICAL' : ''}${critCount && warnCount ? ' · ' : ''}${warnCount ? warnCount + ' WARNING' : ''}`;
   const shouldAnimate = previousIssueCount !== issues.length;
   zone.className = shouldAnimate ? 'slide-in' : '';
 
@@ -2557,7 +2721,282 @@ function renderCriticalZone(issues) {
   previousIssueCount = issues.length;
 }
 
-// â”€â”€â”€ Ops: Status Strip â”€â”€â”€
+//  System Health Boxes 
+function renderSystemBoxes(health, infra) {
+  renderSystemBox('sysbox-edge', computeEdgeSubsystems(health, infra));
+  renderSystemBox('sysbox-forge', computeForgeSubsystems(health, infra));
+  renderSystemBox('sysbox-sql', computeSqlSubsystems(infra));
+  renderSystemBox('sysbox-sentinel', computeSentinelSubsystems(health, infra));
+}
+
+function renderSystemBox(boxId, data) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+
+  const statuses = data.items.map(i => i.status);
+  const hasCritical = statuses.includes('down');
+  const hasWarn = statuses.includes('warn');
+  const overall = hasCritical ? 'critical' : hasWarn ? 'degraded' : 'healthy';
+
+  box.className = `system-box sys-${overall}`;
+
+  const iconCls = overall === 'healthy' ? 'up' : overall === 'degraded' ? 'warn' : 'down';
+  const badgeCls = overall === 'healthy' ? 'ok' : overall === 'degraded' ? 'warn' : 'bad';
+  const badgeText = overall === 'healthy' ? 'NOMINAL' : overall === 'degraded' ? 'DEGRADED' : 'CRITICAL';
+
+  const header = box.querySelector('.system-box-header');
+  header.innerHTML = `
+    <div class="system-box-icon ${iconCls}"></div>
+    <div class="system-box-name">${data.name}</div>
+    <div class="system-box-badge ${badgeCls}">${badgeText}</div>
+  `;
+
+  const list = box.querySelector('.subsystem-list');
+  list.innerHTML = data.items.map(item => `
+    <div class="subsystem-item">
+      <div class="sub-dot ${item.status}"></div>
+      <div class="sub-name">${item.name}</div>
+      <div class="sub-value ${item.valueCls || ''}">${item.value}</div>
+    </div>
+  `).join('');
+}
+
+function computeEdgeSubsystems(health, infra) {
+  const items = [];
+
+  const iisSvc = infra?.services?.find(s => s.serviceName === 'W3SVC');
+  items.push({
+    name: 'IIS App Pool',
+    status: iisSvc?.isRunning ? 'up' : iisSvc ? 'down' : 'idle',
+    value: iisSvc?.isRunning ? 'Running' : iisSvc?.status || '--',
+    valueCls: iisSvc?.isRunning ? 'ok' : iisSvc ? 'bad' : ''
+  });
+
+  const httpSite = infra?.websites?.find(w => w.name?.includes('HTTP'));
+  items.push({
+    name: 'HTTP Health',
+    status: httpSite?.isHealthy ? 'up' : httpSite ? 'down' : 'idle',
+    value: httpSite?.isHealthy ? `${httpSite.statusCode} \u00b7 ${httpSite.responseMs}ms` : httpSite?.error || '--',
+    valueCls: httpSite?.isHealthy ? 'ok' : httpSite ? 'bad' : ''
+  });
+
+  const pixelSite = infra?.websites?.find(w => w.name?.includes('Pixel'));
+  items.push({
+    name: 'Pixel Endpoint',
+    status: pixelSite?.isHealthy ? 'up' : pixelSite ? 'down' : 'idle',
+    value: pixelSite?.isHealthy ? `${pixelSite.statusCode} \u00b7 ${pixelSite.responseMs}ms` : pixelSite?.error || '--',
+    valueCls: pixelSite?.isHealthy ? 'ok' : pixelSite ? 'bad' : ''
+  });
+
+  const qd = infra?.dataFlow?.queueDepth ?? infra?.app?.queueDepth ?? null;
+  const qdWarn = qd !== null && qd > 100;
+  const qdCrit = qd !== null && qd > 5000;
+  items.push({
+    name: 'Write Queue',
+    status: qd === null ? 'idle' : qdCrit ? 'down' : qdWarn ? 'warn' : 'up',
+    value: qd !== null ? num(qd) + ' queued' : '--',
+    valueCls: qdCrit ? 'bad' : qdWarn ? 'warn' : qd !== null ? 'ok' : ''
+  });
+
+  const pipeOk = infra?.dataFlow?.isFlowing;
+  items.push({
+    name: 'Named Pipe',
+    status: pipeOk === true ? 'up' : pipeOk === false ? 'down' : 'idle',
+    value: pipeOk === true ? 'Connected' : pipeOk === false ? 'Disconnected' : '--',
+    valueCls: pipeOk === true ? 'ok' : pipeOk === false ? 'bad' : ''
+  });
+
+  const df = infra?.dataFlow;
+  const h5m = df?.hitsLast5Min ?? null;
+  items.push({
+    name: 'Data Ingest',
+    status: h5m === null ? 'idle' : h5m > 0 ? 'up' : 'warn',
+    value: h5m !== null ? `${h5m}/5m \u00b7 ${df.hitsLastHour ?? 0}/hr` : '--',
+    valueCls: h5m === null ? '' : h5m > 0 ? 'ok' : 'warn'
+  });
+
+  return { name: 'PiXL Edge', items };
+}
+
+function computeForgeSubsystems(health, infra) {
+  const items = [];
+
+  const forgeSvc = infra?.services?.find(s => s.serviceName === 'SmartPiXL-Forge');
+  items.push({
+    name: 'Windows Service',
+    status: forgeSvc?.isRunning ? 'up' : forgeSvc ? 'down' : 'idle',
+    value: forgeSvc?.isRunning ? 'Running' : forgeSvc?.status || '--',
+    valueCls: forgeSvc?.isRunning ? 'ok' : forgeSvc ? 'bad' : ''
+  });
+
+  const pipe = infra?.pipeline;
+  const parseLag = pipe?.parseLag ?? null;
+  items.push({
+    name: 'ETL Parse',
+    status: parseLag === null ? 'idle' : parseLag > 50000 ? 'down' : parseLag > 10000 ? 'warn' : 'up',
+    value: parseLag !== null ? `lag ${parseLag}` + (pipe?.parseLastRunAt ? ' \u00b7 ' + timeAgo(pipe.parseLastRunAt) : '') : '--',
+    valueCls: parseLag === null ? '' : parseLag > 50000 ? 'bad' : parseLag > 10000 ? 'warn' : 'ok'
+  });
+
+  const matchLag = pipe?.matchLag ?? null;
+  items.push({
+    name: 'ETL Match',
+    status: matchLag === null ? 'idle' : matchLag > 100 ? 'down' : matchLag > 50 ? 'warn' : 'up',
+    value: matchLag !== null ? `lag ${matchLag}` + (pipe?.matchLastRunAt ? ' \u00b7 ' + timeAgo(pipe.matchLastRunAt) : '') : '--',
+    valueCls: matchLag === null ? '' : matchLag > 100 ? 'bad' : matchLag > 50 ? 'warn' : 'ok'
+  });
+
+  const df = infra?.dataFlow;
+  const secSince = df?.secondsSinceLastInsert ?? null;
+  items.push({
+    name: 'SQL Writer',
+    status: secSince === null ? 'idle' : secSince > 1800 ? 'down' : secSince > 300 ? 'warn' : 'up',
+    value: secSince !== null ? (secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago') : '--',
+    valueCls: secSince === null ? '' : secSince > 1800 ? 'bad' : secSince > 300 ? 'warn' : 'ok'
+  });
+
+  const devRows = pipe?.deviceRows ?? null;
+  const ipRows = pipe?.ipRows ?? null;
+  items.push({
+    name: 'Dimensions',
+    status: pipe?.isAvailable ? 'up' : devRows !== null ? 'warn' : 'idle',
+    value: devRows !== null ? `${num(devRows)} dev \u00b7 ${num(ipRows || 0)} ip` : '--',
+    valueCls: pipe?.isAvailable ? 'ok' : ''
+  });
+
+  const resolved = pipe?.matchesResolved ?? 0;
+  const matchRows = pipe?.matchRows ?? 0;
+  items.push({
+    name: 'Match Resolution',
+    status: !pipe?.isAvailable ? 'idle' : resolved > 0 ? 'up' : matchRows > 0 ? 'warn' : 'idle',
+    value: pipe?.isAvailable ? `${num(resolved)}/${num(matchRows)} resolved` : '--',
+    valueCls: resolved > 0 ? 'ok' : matchRows > 0 ? 'warn' : ''
+  });
+
+  return { name: 'Forge', items };
+}
+
+function computeSqlSubsystems(infra) {
+  const items = [];
+
+  const sqlSvc = infra?.services?.find(s => s.serviceName === 'MSSQL$SQL2025');
+  items.push({
+    name: 'SQL Server Service',
+    status: sqlSvc?.isRunning ? 'up' : sqlSvc ? 'down' : 'idle',
+    value: sqlSvc?.isRunning ? 'Running' : sqlSvc?.status || '--',
+    valueCls: sqlSvc?.isRunning ? 'ok' : sqlSvc ? 'bad' : ''
+  });
+
+  const agentSvc = infra?.services?.find(s => s.serviceName === 'SQLAgent$SQL2025');
+  items.push({
+    name: 'SQL Agent',
+    status: agentSvc?.isRunning ? 'up' : agentSvc ? 'warn' : 'idle',
+    value: agentSvc?.isRunning ? 'Running' : agentSvc?.status || '--',
+    valueCls: agentSvc?.isRunning ? 'ok' : agentSvc ? 'warn' : ''
+  });
+
+  const sql = infra?.sql;
+  const ms = sql?.responseMs;
+  items.push({
+    name: 'Connectivity',
+    status: sql?.isConnected ? 'up' : sql ? 'down' : 'idle',
+    value: sql?.isConnected ? `${ms}ms \u00b7 ${sql.dataSource}` : sql?.error?.substring(0, 60) || '--',
+    valueCls: sql?.isConnected ? (ms > 200 ? 'warn' : 'ok') : sql ? 'bad' : ''
+  });
+
+  items.push({
+    name: 'PiXL.Raw',
+    status: sql?.isConnected ? 'up' : 'idle',
+    value: sql?.testRows != null ? num(sql.testRows) + ' rows' : '--',
+    valueCls: sql?.isConnected ? 'ok' : ''
+  });
+
+  items.push({
+    name: 'PiXL.Parsed',
+    status: sql?.isConnected ? 'up' : 'idle',
+    value: sql?.parsedRows != null ? num(sql.parsedRows) + ' rows' : '--',
+    valueCls: sql?.isConnected ? 'ok' : ''
+  });
+
+  items.push({
+    name: 'ETL Watermark',
+    status: sql?.isConnected ? 'up' : 'idle',
+    value: sql?.watermark != null ? '#' + num(sql.watermark) : '--',
+    valueCls: sql?.isConnected ? 'ok' : ''
+  });
+
+  return { name: 'SQL Server', items };
+}
+
+function computeSentinelSubsystems(health, infra) {
+  const items = [];
+
+  const app = infra?.app;
+  if (app) {
+    const uptimeSec = app.uptime ? (app.uptime.totalSeconds || (app.uptime.hours * 3600 + app.uptime.minutes * 60 + app.uptime.seconds) || 0) : 0;
+    const uptimeStr = uptimeSec > 86400 ? Math.floor(uptimeSec/86400) + 'd ' + Math.floor((uptimeSec%86400)/3600) + 'h' :
+                      uptimeSec > 3600 ? Math.floor(uptimeSec/3600) + 'h ' + Math.floor((uptimeSec%3600)/60) + 'm' :
+                      Math.floor(uptimeSec/60) + 'm';
+    items.push({
+      name: 'App Runtime',
+      status: 'up',
+      value: `PID ${app.processId} \u00b7 ${uptimeStr}`,
+      valueCls: 'ok'
+    });
+
+    items.push({
+      name: 'Memory',
+      status: app.workingSetMB > 1024 ? 'warn' : 'up',
+      value: `${app.workingSetMB} MB \u00b7 GC ${app.gcHeapMB} MB`,
+      valueCls: app.workingSetMB > 1024 ? 'warn' : 'ok'
+    });
+
+    items.push({
+      name: 'Threads',
+      status: app.threadCount > 200 ? 'warn' : 'up',
+      value: `${app.threadCount} threads`,
+      valueCls: app.threadCount > 200 ? 'warn' : 'ok'
+    });
+  } else {
+    items.push({ name: 'App Runtime', status: 'idle', value: '--', valueCls: '' });
+  }
+
+  if (app?.dotNetVersion) {
+    items.push({
+      name: '.NET Runtime',
+      status: 'up',
+      value: `v${app.dotNetVersion}`,
+      valueCls: 'ok'
+    });
+  }
+
+  const xSync = lastData.xavierSync;
+  if (xSync && Array.isArray(xSync)) {
+    const failedCount = xSync.filter(s => s.lastStatus === 'Error').length;
+    const staleCount = xSync.filter(s => !s.lastSyncStarted || s.secondsSinceLastRun > 90000).length;
+    const totalSyncs = xSync.length;
+    items.push({
+      name: 'Xavier Sync',
+      status: failedCount > 0 ? 'down' : staleCount > 0 ? 'warn' : totalSyncs > 0 ? 'up' : 'idle',
+      value: failedCount > 0 ? `${failedCount}/${totalSyncs} failed` : staleCount > 0 ? `${staleCount}/${totalSyncs} stale` : `${totalSyncs}/${totalSyncs} synced`,
+      valueCls: failedCount > 0 ? 'bad' : staleCount > 0 ? 'warn' : totalSyncs > 0 ? 'ok' : ''
+    });
+  } else {
+    items.push({ name: 'Xavier Sync', status: 'idle', value: '--', valueCls: '' });
+  }
+
+  const secSince = health?.secondsSinceLastHit ?? null;
+  items.push({
+    name: 'Last Hit',
+    status: secSince === null ? 'idle' : secSince < 300 ? 'up' : secSince < 3600 ? 'warn' : 'down',
+    value: secSince === null ? '--' : secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago',
+    valueCls: secSince === null ? '' : secSince < 300 ? 'ok' : secSince < 3600 ? 'warn' : 'bad'
+  });
+
+  return { name: 'Sentinel', items };
+}
+
+//  Ops: Status Strip 
 function renderStatusStrip(health, infra) {
   const strip = document.getElementById('status-strip');
   const chips = [];
@@ -2580,9 +3019,9 @@ function renderStatusStrip(health, infra) {
   chips.push(`<div class="status-chip ${iisDown.length ? 'critical' : sites.length ? 'healthy' : ''}" onclick="drillStatus('iis')"><div class="chip-dot ${sites.length === 0 ? 'idle' : iisDown.length === 0 ? 'up' : 'down'}"></div><div class="chip-label">IIS</div><div class="chip-value ${sites.length === 0 ? '' : iisDown.length === 0 ? 'ok' : 'bad'}">${sites.length === 0 ? '--' : iisDown.length === 0 ? `${sites.length}/${sites.length} UP` : `${iisDown.length} DOWN`}</div></div>`);
 
   const etlLag = df?.etlLag ?? null;
-  chips.push(`<div class="status-chip ${etlLag > 50 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 50 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 50 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
+  chips.push(`<div class="status-chip ${etlLag > 10000 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 10000 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 10000 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
 
-  // Match chip â€” shows resolved/total
+  // Match chip -- shows resolved/total
   const pipe = infra?.pipeline;
   const matchOk = pipe?.isAvailable && pipe?.matchRows > 0;
   const matchResolved = pipe?.matchesResolved ?? 0;
@@ -2604,7 +3043,7 @@ function renderStatusStrip(health, infra) {
   strip.innerHTML = chips.join('');
 }
 
-// â”€â”€â”€ Ops: Pipeline â”€â”€â”€
+//  Ops: Pipeline 
 function renderPipeline(health, infra) {
   const df = infra?.dataFlow;
   const sql = infra?.sql;
@@ -2628,14 +3067,14 @@ function renderPipeline(health, infra) {
   document.getElementById('pipe-etl-val').textContent = typeof parsedRows === 'number' ? num(parsedRows) : parsedRows;
   document.getElementById('pipe-etl-sub').textContent = pipe ? `lag ${pipe.parseLag}` : 'PiXL.Parsed';
   const parseLag = pipe?.parseLag ?? (df?.etlLag ?? null);
-  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 50 ? ' stale' : parseLag !== null ? ' healthy' : '');
-  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 50 ? ' dead' : '');
+  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 10000 ? ' stale' : parseLag !== null ? ' healthy' : '');
+  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 10000 ? ' dead' : '');
 
   // Node 4: DIMENSIONS (Device + IP)
   const devCount = pipe?.deviceRows ?? '--';
   const ipCount = pipe?.ipRows ?? '--';
   document.getElementById('pipe-dim-val').textContent = typeof devCount === 'number' ? `${num(devCount)}+${num(ipCount)}` : '--';
-  document.getElementById('pipe-dim-sub').textContent = 'Device Â· IP';
+  document.getElementById('pipe-dim-sub').textContent = 'Device · IP';
   document.getElementById('pipe-dim').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
   document.getElementById('pipe-arrow-3').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
 
@@ -2669,7 +3108,7 @@ function renderPipeline(health, infra) {
   }
 }
 
-// â”€â”€â”€ Ops: Error Log â”€â”€â”€
+//  Ops: Error Log 
 function renderErrorLog(infra) {
   const el = document.getElementById('error-log');
   const re = infra?.recentErrors;
@@ -2690,7 +3129,7 @@ function renderErrorLog(infra) {
   }).join('');
 }
 
-// â”€â”€â”€ Ops: ETL Health â”€â”€â”€
+//  Ops: ETL Health 
 function renderOpsETL(health, infra) {
   const el = document.getElementById('etl-details');
   const pipe = infra?.pipeline;
@@ -2698,11 +3137,11 @@ function renderOpsETL(health, infra) {
 
   const parseLag = pipe?.parseLag ?? 0;
   const matchLag = pipe?.matchLag ?? 0;
-  const parseLagCls = parseLag > 50 ? ' warn' : parseLag > 100 ? ' bad' : '';
+  const parseLagCls = parseLag > 50000 ? ' bad' : parseLag > 10000 ? ' warn' : '';
   const matchLagCls = matchLag > 50 ? ' warn' : matchLag > 100 ? ' bad' : '';
 
   el.innerHTML = `
-    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ParseNewHits)</div>
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ProcessDimensions)</div>
     <div class="etl-grid">
       <div class="etl-stat"><div class="etl-val">${num(pipe?.parseTotalProcessed || health?.etL_TotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
       <div class="etl-stat"><div class="etl-val">${num(pipe?.parseWatermark || health?.etL_Watermark || 0)}</div><div class="etl-lbl">WATERMARK</div></div>
@@ -2719,7 +3158,7 @@ function renderOpsETL(health, infra) {
   `;
 }
 
-// â”€â”€â”€ Ops: Pipeline Tables â”€â”€â”€
+//  Ops: Pipeline Tables 
 function renderPipelineTables(infra) {
   const el = document.getElementById('pipeline-tables');
   const pipe = infra?.pipeline;
@@ -2757,7 +3196,7 @@ function renderPipelineTables(infra) {
         <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">W/ EMAIL</div>
       </div>
     </div>
-    <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:6px;">${num(pipe.uniqueDevicesInVisits)} unique devices Â· ${num(pipe.uniqueIpsInVisits)} unique IPs in visits</div>
+    <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:6px;">${num(pipe.uniqueDevicesInVisits)} unique devices · ${num(pipe.uniqueIpsInVisits)} unique IPs in visits</div>
   `;
 }
 
@@ -2912,7 +3351,7 @@ function drillXavierSync(idx) {
   openModal(name, html);
 }
 
-// â”€â”€â”€ Ops: Infrastructure Detail â”€â”€â”€
+//  Ops: Infrastructure Detail 
 function renderInfraDetail(infra) {
   const el = document.getElementById('infra-detail');
   if (!infra) { el.innerHTML = '<div style="color:var(--text-dim)">Infrastructure probe unavailable</div>'; return; }
@@ -2948,7 +3387,7 @@ function renderInfraDetail(infra) {
     const s = infra.sql;
     html += `<div class="infra-item"><div class="infra-dot ${s.isConnected ? 'up' : 'down'}"></div><div class="infra-item-name">${s.dataSource || 'SQL Server'} / ${s.database || '?'}</div><div class="infra-item-ms">${s.responseMs}ms</div></div>`;
     if (s.isConnected) {
-      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Test: ${num(s.testRows)} Â· PiXL.Parsed: ${num(s.parsedRows)} Â· Watermark: ${num(s.watermark)}</div>`;
+      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Test: ${num(s.testRows)} · PiXL.Parsed: ${num(s.parsedRows)} · Watermark: ${num(s.watermark)}</div>`;
       if (s.lastEtlRun) html += `<div style="font-size:0.72rem;color:var(--text-dim);padding:2px 0 0 18px;">Last ETL: ${timeAgo(s.lastEtlRun)}</div>`;
     } else {
       html += `<div style="font-size:0.78rem;color:var(--red);padding:4px 0 0 18px;">${s.error || 'Connection failed'}</div>`;
@@ -2972,17 +3411,17 @@ function renderInfraDetail(infra) {
       <div class="infra-app-stat"><div class="infra-app-val">${a.gcHeapMB}</div><div class="infra-app-lbl">GC HEAP</div></div>
       <div class="infra-app-stat"><div class="infra-app-val" style="${a.queueDepth > 100 ? 'color:var(--yellow)' : ''}">${a.queueDepth}</div><div class="infra-app-lbl">WRITE QUEUE</div></div>
     </div>`;
-    html += `<div style="font-size:0.68rem;color:var(--text-dim);margin-top:6px;">${a.machineName} Â· .NET ${a.dotNetVersion}</div>`;
+    html += `<div style="font-size:0.68rem;color:var(--text-dim);margin-top:6px;">${a.machineName} · .NET ${a.dotNetVersion}</div>`;
   }
   html += '</div>';
   html += '</div>';
 
   const checkedAt = infra.checkedAt ? new Date(infra.checkedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) + ' UTC' : '--';
-  html += `<div style="text-align:right;font-size:0.68rem;color:var(--text-dim);margin-top:12px;letter-spacing:1px;">Probed in ${infra.probeTimeMs || 0}ms Â· ${checkedAt}</div>`;
+  html += `<div style="text-align:right;font-size:0.68rem;color:var(--text-dim);margin-top:12px;letter-spacing:1px;">Probed in ${infra.probeTimeMs || 0}ms · ${checkedAt}</div>`;
   el.innerHTML = html;
 }
 
-// â”€â”€â”€ Ops: Compact Live Feed â”€â”€â”€
+//  Ops: Compact Live Feed 
 function renderOpsFeed(data) {
   const tbody = document.getElementById('ops-feed-body');
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">No recent hits</td></tr>'; return; }
@@ -3002,7 +3441,7 @@ function renderOpsFeed(data) {
   }).join('');
 }
 
-// â”€â”€â”€ Ops: Header Beacon â”€â”€â”€
+//  Ops: Header Beacon 
 function updateOpsBeacon(health, infra) {
   const beacon = document.getElementById('beacon');
   const statusEl = document.getElementById('system-status');
@@ -3016,18 +3455,18 @@ function updateOpsBeacon(health, infra) {
     statusEl.textContent = 'DEGRADED';
     statusEl.style.color = 'var(--yellow)';
   } else if (health) {
-    const secSince = health.secondsSinceLastHit || 9999;
+    const secSince = health.secondsSinceLastHit ?? 9999;
     if (secSince < 300) {
       beacon.className = 'beacon-dot';
       statusEl.textContent = 'ONLINE';
       statusEl.style.color = '';
     } else if (secSince < 3600) {
       beacon.className = 'beacon-dot warn';
-      statusEl.textContent = 'IDLE â€” ' + formatDuration(secSince);
+      statusEl.textContent = 'IDLE -- ' + formatDuration(secSince);
       statusEl.style.color = 'var(--yellow)';
     } else {
       beacon.className = 'beacon-dot danger';
-      statusEl.textContent = 'STALE â€” ' + formatDuration(secSince);
+      statusEl.textContent = 'STALE -- ' + formatDuration(secSince);
       statusEl.style.color = 'var(--red)';
     }
   }
@@ -3039,10 +3478,10 @@ function updateOpsBeacon(health, infra) {
 }
 
 // ============================================================================
-// â-ˆâ-ˆâ-ˆâ-ˆâ-ˆâ-ˆ  ANALYTICS RENDERERS & DRILL-DOWNS
+// ------  ANALYTICS RENDERERS & DRILL-DOWNS
 // ============================================================================
 
-// â”€â”€â”€ Drill-Down: Hit (shared by both views) â”€â”€â”€
+//  Drill-Down: Hit (shared by both views) 
 function drillHit(idx) {
   const hits = lastData.recent;
   if (!hits || !hits[idx]) return;
@@ -3064,7 +3503,7 @@ function drillHit(idx) {
   openModal('HIT DETAIL', html);
 }
 
-// â”€â”€â”€ Drill-Down: Hero Cards â”€â”€â”€
+//  Drill-Down: Hero Cards 
 function drillHero(type) {
   const h = lastData.health;
   if (!h) return;
@@ -3110,7 +3549,7 @@ function drillHero(type) {
   openModal(type.toUpperCase() + ' DETAIL', html);
 }
 
-// â”€â”€â”€ Drill-Down: Risk Row â”€â”€â”€
+//  Drill-Down: Risk Row 
 function drillRisk(idx) {
   const bots = lastData.bots;
   if (!bots || !bots[idx]) return;
@@ -3124,7 +3563,7 @@ function drillRisk(idx) {
   openModal(b.riskBucket.toUpperCase(), html);
 }
 
-// â”€â”€â”€ Drill-Down: Fingerprint â”€â”€â”€
+//  Drill-Down: Fingerprint 
 function drillFP(idx) {
   const fps = lastData.fingerprints;
   if (!fps || !fps[idx]) return;
@@ -3140,7 +3579,7 @@ function drillFP(idx) {
   openModal('FINGERPRINT CLUSTER', html);
 }
 
-// â”€â”€â”€ Drill-Down: Signal â”€â”€â”€
+//  Drill-Down: Signal 
 function drillSignal(idx) {
   const signals = lastData.signals;
   if (!signals || !signals[idx]) return;
@@ -3153,7 +3592,7 @@ function drillSignal(idx) {
   openModal('SIGNAL DETAIL', html);
 }
 
-// â”€â”€â”€ Drill-Down: Hourly â”€â”€â”€
+//  Drill-Down: Hourly 
 function drillHour(idx) {
   const rows = lastData._hourlyRows;
   if (!rows || !rows[idx]) return;
@@ -3167,7 +3606,7 @@ function drillHour(idx) {
   openModal('HOURLY DETAIL', html);
 }
 
-// â”€â”€â”€ Analytics: Hero â”€â”€â”€
+//  Analytics: Hero 
 function renderAnalyticsPipeline(p) {
   if (!p) return;
   const set = (id, val, sub) => {
@@ -3229,7 +3668,7 @@ function updateAnalyticsBeacon(h) {
   if (!h) return;
   const beacon = document.getElementById('beacon');
   const statusEl = document.getElementById('system-status');
-  const secSince = h.secondsSinceLastHit || 9999;
+  const secSince = h.secondsSinceLastHit ?? 9999;
   if (secSince < 300) {
     beacon.className = 'beacon-dot';
     statusEl.textContent = 'SYSTEM ONLINE';
@@ -3262,7 +3701,7 @@ function renderWatermarks(p) {
   el.innerHTML = `<table class="feed-table" style="font-size:0.78rem;">
     <thead><tr><th>PROCESS</th><th>WATERMARK</th><th>PROCESSED</th><th>MATCHED</th><th>LAST RUN</th><th>LAG</th></tr></thead>
     <tbody>
-      ${wmRow('ParseNewHits', p.parseWatermark, p.parseTotalProcessed, null, p.parseLastRunAt, p.parseLag)}
+      ${wmRow('ProcessDimensions', p.parseWatermark, p.parseTotalProcessed, null, p.parseLastRunAt, p.parseLag)}
       ${wmRow('MatchVisits', p.emailMatchWatermark, p.emailMatchProcessed, p.emailMatchMatched, p.emailMatchLastRunAt, p.emailMatchLag)}
       ${wmRow('MatchLegacyVisits', p.legacyMatchWatermark, p.legacyMatchProcessed, p.legacyMatchMatched, p.legacyMatchLastRunAt, p.legacyMatchLag)}
       ${wmRow('MatchGeoVisits', p.geoMatchWatermark, p.geoMatchProcessed, p.geoMatchMatched, p.geoMatchLastRunAt, p.geoMatchLag)}
@@ -3353,7 +3792,7 @@ function renderCompanyMatches(data) {
 }
 
 
-// â”€â”€â”€ Analytics: Hourly Chart â”€â”€â”€
+//  Analytics: Hourly Chart 
 function renderHourlyChart(data) {
   const container = document.getElementById('hourly-chart');
   if (!data || !data.length) { container.innerHTML = '<div class="loading">NO DATA</div>'; return; }
@@ -3377,7 +3816,7 @@ function renderHourlyChart(data) {
   lastData._hourlyRows = rows;
 }
 
-// â”€â”€â”€ Analytics: Risk List â”€â”€â”€
+//  Analytics: Risk List 
 function renderRiskList(data) {
   const el = document.getElementById('risk-list');
   if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;">No data</div>'; return; }
@@ -3392,14 +3831,14 @@ function renderRiskList(data) {
       <div class="risk-indicator ${indicatorClass(b)}"></div>
       <div class="risk-info">
         <div class="risk-label">${b.riskBucket}</div>
-        <div class="risk-meta">${num(b.uniqueDevices)} devices Â· ${num(b.uniqueIPs)} IPs</div>
+        <div class="risk-meta">${num(b.uniqueDevices)} devices · ${num(b.uniqueIPs)} IPs</div>
       </div>
       <div class="risk-count">${num(b.hitCount)}</div>
     </div>
   `).join('');
 }
 
-// â”€â”€â”€ Analytics: Live Feed (full, 30 hits) â”€â”€â”€
+//  Analytics: Live Feed (full, 30 hits) 
 function renderAnalyticsFeed(data) {
   const tbody = document.getElementById('a-feed-body');
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim)">No recent hits</td></tr>'; return; }
@@ -3421,7 +3860,7 @@ function renderAnalyticsFeed(data) {
   }).join('');
 }
 
-// â”€â”€â”€ Analytics: Signals â”€â”€â”€
+//  Analytics: Signals 
 function renderSignals(data) {
   const el = document.getElementById('signal-list');
   if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No signals</div>'; return; }
@@ -3436,7 +3875,7 @@ function renderSignals(data) {
   }).join('');
 }
 
-// â”€â”€â”€ Analytics: Evasion â”€â”€â”€
+//  Analytics: Evasion 
 function renderEvasion(data) {
   const el = document.getElementById('evasion-grid');
   if (!data) { el.innerHTML = '<div>No data</div>'; return; }
@@ -3453,7 +3892,7 @@ function renderEvasion(data) {
   }).join('');
 }
 
-// â”€â”€â”€ Analytics: Behavior â”€â”€â”€
+//  Analytics: Behavior 
 function renderBehavior(data) {
   const el = document.getElementById('behavior-compare');
   if (!data || !data.length) { el.innerHTML = '<div>No data</div>'; return; }
@@ -3476,7 +3915,7 @@ function renderBehavior(data) {
   el.innerHTML = col('HUMAN', 'human', human) + col('BOT', 'bot', bot);
 }
 
-// â”€â”€â”€ Analytics: Fingerprints â”€â”€â”€
+//  Analytics: Fingerprints 
 function renderFingerprints(data) {
   const el = document.getElementById('fp-clusters');
   if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No clusters</div>'; return; }
@@ -3486,13 +3925,13 @@ function renderFingerprints(data) {
     const scoreColor = score >= 50 ? 'var(--red)' : score >= 20 ? 'var(--yellow)' : 'var(--green)';
     return `<div class="fp-row" onclick="drillFP(${i})">
       <div class="fp-hash">${hash}</div>
-      <div class="fp-meta">${num(fp.uniqueIPs)} IPs Â· ${fp.primaryPlatform||'?'} Â· <span style="color:${scoreColor}">score ${score}</span></div>
+      <div class="fp-meta">${num(fp.uniqueIPs)} IPs · ${fp.primaryPlatform||'?'} · <span style="color:${scoreColor}">score ${score}</span></div>
       <div class="fp-hits">${num(fp.hitCount)}</div>
     </div>`;
   }).join('');
 }
 
-// â”€â”€â”€ Analytics: Devices â”€â”€â”€
+//  Analytics: Devices 
 function renderDevices(data) {
   const el = document.getElementById('device-breakdown');
   if (!data || !data.length) { el.innerHTML = '<div style="color:var(--text-dim)">No data</div>'; return; }
@@ -3653,10 +4092,10 @@ function renderRemediations(rows) {
 }
 
 // ============================================================================
-// REFRESH LOOP â€” Only active view fetches & renders
+// REFRESH LOOP -- Only active view fetches & renders
 // ============================================================================
 // ============================================================================
-// STAGGERED API ORCHESTRA â€” Sequential calls, progressive rendering, grid orbs
+// STAGGERED API ORCHESTRA -- Sequential calls, progressive rendering, grid orbs
 // Each API call fires in sequence. On completion its data renders immediately
 // and a named Tron light-cycle orb spawns on the grid background.
 // ============================================================================
@@ -3675,6 +4114,7 @@ const OPS_STEPS = [
       const { health, infra } = lastData;
       renderCriticalZone(buildIssues(health, infra));
       renderStatusStrip(health, infra);
+      renderSystemBoxes(health, infra);
       renderPipeline(health, infra);
       renderErrorLog(infra);
     }},
@@ -3704,7 +4144,7 @@ const OPS_STEPS = [
     render() { renderRemediations(lastData.remediations); }},
 ];
 
-// Analytics view: 10 sequential calls â€” each section pops in as data arrives
+// Analytics view: 10 sequential calls -- each section pops in as data arrives
 const ANALYTICS_STEPS = [
   { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
     render() { updateAnalyticsBeacon(lastData.health); }},
@@ -3719,24 +4159,28 @@ const ANALYTICS_STEPS = [
 async function runPipeline(steps) {
   isRefreshing = true;
   refreshAbort = false;
-  Grid.derezzAll();
   const countdownEl = document.getElementById('countdown');
-  for (let i = 0; i < steps.length; i++) {
-    if (refreshAbort) break;
-    countdownEl.textContent = `${i + 1}/${steps.length}`;
-    countdownEl.style.color = 'var(--cyan)';
-    const step = steps[i];
-    try {
-      const data = await step.fn();
-      if (refreshAbort) break;
+  countdownEl.textContent = '...';
+  countdownEl.style.color = 'var(--cyan)';
+
+  // Fire ALL API calls in parallel  no sequential waterfall
+  const results = await Promise.allSettled(
+    steps.map(step => step.fn().then(data => ({ step, data })))
+  );
+
+  if (refreshAbort) { isRefreshing = false; return; }
+
+  // Apply results and render
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value) {
+      const { step, data } = result.value;
       lastData[step.key] = data;
-      Grid.spawnOrb(step.name, step.contestant);
-      // Only render DOM when dashboard is visible (not on landing)
-      if (currentView !== 'landing' && step.render) step.render();
-    } catch (e) {
-      console.warn(`Pipeline step ${step.name} failed:`, e);
+      if (currentView !== 'landing' && step.render) {
+        try { step.render(); } catch (e) { console.warn(`Render ${step.name} failed:`, e); }
+      }
     }
   }
+
   countdownEl.style.color = '';
   isRefreshing = false;
   countdown = REFRESH_INTERVAL;
@@ -3745,7 +4189,7 @@ async function runPipeline(steps) {
 
 async function refreshAll() {
   if (isRefreshing) return;
-  // Always run the pipeline â€” cycles track API health regardless of view.
+  // Always run the pipeline -- cycles track API health regardless of view.
   // On landing or ops, run the ops pipeline (health/infra/recent).
   // On analytics, run the full analytics pipeline.
   if (currentView === 'analytics') await runPipeline(ANALYTICS_STEPS);
@@ -3761,20 +4205,22 @@ setInterval(() => {
   }
 }, 1000);
 
-// Always start the pipeline â€” cycles race from the moment the page loads
+// Always start the pipeline -- cycles race from the moment the page loads
 refreshAll();
 </script>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     THREE.JS 3D TRON ARENA â€” Modular architecture (wwwroot/tron/*.mjs)
-     scene.mjs â†’ arena.mjs, cycles.mjs, trails.mjs, particles.mjs,
+<!-- =
+     THREE.JS 3D TRON ARENA -- Modular architecture (wwwroot/tron/*.mjs)
+     scene.mjs -> arena.mjs, cycles.mjs, trails.mjs, particles.mjs,
                  camera.mjs, api.mjs
      Cinema-fidelity: Reflector floor, wireframe cycles, GLSL trail walls,
      5 camera presets (keys 1-5), enhanced bloom.
-     â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+      -->
+<!-- Three.js 3D arena disabled  light-cycle visuals turned off for performance
 <script type="module">
 import { initScene } from './tron/scene.mjs';
 initScene(document.getElementById('grid-canvas'));
 </script>
+-->
 </body>
 </html>

@@ -61,14 +61,28 @@ public static class DashboardEndpoints
 
     private static ITrackingLogger _logger = null!;
 
-    // â”€â”€ Endpoint-level caches (15 s TTL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(15);
+    // ── General-purpose endpoint cache ──────────────────────────────────
+    // Keys by endpoint path, stores (data, expiry). Thread-safe via ConcurrentDictionary.
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (object? Data, DateTime Expiry)>
+        _cache = new();
 
-    private static volatile Dictionary<string, object?>? _healthCache;
-    private static DateTime _healthExpiry = DateTime.MinValue;
+    /// <summary>Try to serve from cache. Returns true (and writes response) on hit.</summary>
+    private static async Task<bool> TryServeCachedAsync(HttpContext ctx, string cacheKey)
+    {
+        if (_cache.TryGetValue(cacheKey, out var entry) && DateTime.UtcNow < entry.Expiry)
+        {
+            await WriteJsonAsync(ctx, entry.Data);
+            return true;
+        }
+        return false;
+    }
 
-    private static volatile List<Dictionary<string, object?>>? _xavierCache;
-    private static DateTime _xavierExpiry = DateTime.MinValue;
+    /// <summary>Store result in cache.</summary>
+    private static void CacheStore(string cacheKey, object? data)
+    {
+        _cache[cacheKey] = (data, DateTime.UtcNow + CacheDuration);
+    }
 
     public static void MapDashboardEndpoints(this WebApplication app)
     {
@@ -82,19 +96,12 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/health", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            var now = DateTime.UtcNow;
-            var cached = _healthCache;
-            if (cached is not null && now < _healthExpiry)
-            {
-                await WriteJsonAsync(ctx, cached);
-                return;
-            }
+            if (await TryServeCachedAsync(ctx, "health")) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var data = await ExecuteSpSingleRowAsync(settings.ConnectionString,
                     "usp_Dash_SystemHealth");
-                _healthCache = data;
-                _healthExpiry = now + CacheDuration;
+                CacheStore("health", data);
                 await WriteJsonAsync(ctx, data);
             });
         });
@@ -103,60 +110,110 @@ public static class DashboardEndpoints
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 72;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "EXEC usp_Dash_HourlyRollup @Hours = @N",
-                new SqlParameter("@N", hours));
+            var key = $"hourly-{hours}";
+            if (await TryServeCachedAsync(ctx, key)) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "EXEC usp_Dash_HourlyRollup @Hours = @N",
+                    new SqlParameter("@N", hours));
+                CacheStore(key, data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/bots", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_BotBreakdown ORDER BY SortOrder");
+            if (await TryServeCachedAsync(ctx, "bots")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_BotBreakdown ORDER BY SortOrder");
+                CacheStore("bots", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/bot-signals", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 20 * FROM vw_Dash_TopBotSignals ORDER BY TimesTriggered DESC");
+            if (await TryServeCachedAsync(ctx, "bot-signals")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 20 * FROM vw_Dash_TopBotSignals ORDER BY TimesTriggered DESC");
+                CacheStore("bot-signals", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/devices", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 30 * FROM vw_Dash_DeviceBreakdown ORDER BY HitCount DESC");
+            if (await TryServeCachedAsync(ctx, "devices")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 30 * FROM vw_Dash_DeviceBreakdown ORDER BY HitCount DESC");
+                CacheStore("devices", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/evasion", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewSingleRowAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_EvasionSummary");
+            if (await TryServeCachedAsync(ctx, "evasion")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QuerySingleRowAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_EvasionSummary");
+                CacheStore("evasion", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/behavior", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_BehavioralAnalysis");
+            if (await TryServeCachedAsync(ctx, "behavior")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_BehavioralAnalysis");
+                CacheStore("behavior", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/recent", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_RecentHits");
+            if (await TryServeCachedAsync(ctx, "recent")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_RecentHits");
+                CacheStore("recent", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/fingerprints", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var l) ? Math.Clamp(l, 1, 200) : 50;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP (@N) * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC",
-                new SqlParameter("@N", limit));
+            var key = $"fingerprints-{limit}";
+            if (await TryServeCachedAsync(ctx, key)) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP (@N) * FROM vw_Dash_FingerprintClusters ORDER BY HitCount DESC",
+                    new SqlParameter("@N", limit));
+                CacheStore(key, data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         // ====================================================================
@@ -179,19 +236,12 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/xavier-sync", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            var now = DateTime.UtcNow;
-            var cached = _xavierCache;
-            if (cached is not null && now < _xavierExpiry)
-            {
-                await WriteJsonAsync(ctx, cached);
-                return;
-            }
+            if (await TryServeCachedAsync(ctx, "xavier-sync")) return;
             await SafeExecuteAsync(ctx, async () =>
             {
                 var data = await QueryAsync(settings.ConnectionString,
                     "SELECT * FROM vw_Dash_XavierSync");
-                _xavierCache = data;
-                _xavierExpiry = now + CacheDuration;
+                CacheStore("xavier-sync", data);
                 await WriteJsonAsync(ctx, data);
             });
         });
@@ -202,8 +252,14 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/pipeline", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await ExecuteSpSingleRowAsync(ctx, settings.ConnectionString,
-                "usp_Dash_PipelineHealth");
+            if (await TryServeCachedAsync(ctx, "pipeline")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await ExecuteSpSingleRowAsync(settings.ConnectionString,
+                    "usp_Dash_PipelineHealth");
+                CacheStore("pipeline", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         // ====================================================================
@@ -213,64 +269,118 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/sessions", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_SessionSummary");
+            if (await TryServeCachedAsync(ctx, "sessions")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_SessionSummary");
+                CacheStore("sessions", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/dead-internet", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_DeadInternet");
+            if (await TryServeCachedAsync(ctx, "dead-internet")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_DeadInternet");
+                CacheStore("dead-internet", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/customer-quality", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_CustomerQuality");
+            if (await TryServeCachedAsync(ctx, "customer-quality")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_CustomerQuality");
+                CacheStore("customer-quality", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/cross-customer", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_CrossCustomer");
+            if (await TryServeCachedAsync(ctx, "cross-customer")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_CrossCustomer");
+                CacheStore("cross-customer", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/cross-customer/detail", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 100 * FROM vw_Dash_CrossCustomerDetail");
+            if (await TryServeCachedAsync(ctx, "cross-customer-detail")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 100 * FROM vw_Dash_CrossCustomerDetail");
+                CacheStore("cross-customer-detail", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/impossible-travel", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_ImpossibleTravel");
+            if (await TryServeCachedAsync(ctx, "impossible-travel")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_ImpossibleTravel");
+                CacheStore("impossible-travel", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/device-lifecycle", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT * FROM vw_Dash_DeviceLifecycle");
+            if (await TryServeCachedAsync(ctx, "device-lifecycle")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM vw_Dash_DeviceLifecycle");
+                CacheStore("device-lifecycle", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/device-hops", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 100 * FROM vw_Dash_DeviceCustomerHops");
+            if (await TryServeCachedAsync(ctx, "device-hops")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 100 * FROM vw_Dash_DeviceCustomerHops");
+                CacheStore("device-hops", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapGet("/api/dash/subnet-clusters", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 100 * FROM vw_Dash_SubnetClusters");
+            if (await TryServeCachedAsync(ctx, "subnet-clusters")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 100 * FROM vw_Dash_SubnetClusters");
+                CacheStore("subnet-clusters", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         // ====================================================================
@@ -279,8 +389,14 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/match-breakdown", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "EXEC usp_Dash_MatchBreakdown");
+            if (await TryServeCachedAsync(ctx, "match-breakdown")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "EXEC usp_Dash_MatchBreakdown");
+                CacheStore("match-breakdown", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         // ====================================================================
@@ -290,8 +406,14 @@ public static class DashboardEndpoints
         app.MapGet("/api/dash/remediations", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;
-            await QueryViewAsync(ctx, settings.ConnectionString,
-                "SELECT TOP 50 * FROM Ops.RemediationLog ORDER BY DetectedAtUtc DESC");
+            if (await TryServeCachedAsync(ctx, "remediations")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT TOP 50 * FROM Ops.RemediationLog ORDER BY DetectedAtUtc DESC");
+                CacheStore("remediations", data);
+                await WriteJsonAsync(ctx, data);
+            });
         });
 
         app.MapPost("/api/dash/remediation/approve/{id:int}", async (HttpContext ctx, int id) =>
@@ -317,8 +439,43 @@ public static class DashboardEndpoints
         });
 
         // ====================================================================
-        // CIRCUIT BREAKER RESET â€” Proxied to IIS Edge via HTTP
+        // CIRCUIT BREAKER RESET â€” Proxied to IIS Edge via HTTP        // ====================================================================
+
         // ====================================================================
+        // DASHBOARD SNAPSHOT — Instant ops view from Ops.DashboardSnapshot
+        // Written by Forge every 60s. Single-row read = <1ms.
+        // ====================================================================
+        app.MapGet("/api/dash/snapshot", async (HttpContext ctx) =>
+        {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
+            if (await TryServeCachedAsync(ctx, "snapshot")) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QuerySingleRowAsync(settings.ConnectionString,
+                    "SELECT TOP 1 * FROM Ops.DashboardSnapshot ORDER BY SnapshotId DESC");
+                CacheStore("snapshot", data);
+                await WriteJsonAsync(ctx, data);
+            });
+        });
+
+        // ====================================================================
+        // HOURLY STATS — Pre-aggregated hourly data for charts
+        // ====================================================================
+        app.MapGet("/api/dash/hourly-stats", async (HttpContext ctx) =>
+        {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
+            var hours = int.TryParse(ctx.Request.Query["hours"].FirstOrDefault(), out var h) ? Math.Clamp(h, 1, 720) : 48;
+            var key = $"hourly-stats-{hours}";
+            if (await TryServeCachedAsync(ctx, key)) return;
+            await SafeExecuteAsync(ctx, async () =>
+            {
+                var data = await QueryAsync(settings.ConnectionString,
+                    "SELECT * FROM Ops.HourlyStats WHERE HourUtc >= DATEADD(HOUR, -@N, SYSUTCDATETIME()) ORDER BY HourUtc",
+                    new SqlParameter("@N", hours));
+                CacheStore(key, data);
+                await WriteJsonAsync(ctx, data);
+            });
+        });        // ====================================================================
         app.MapPost("/api/dash/circuit-reset", async (HttpContext ctx) =>
         {
             if (!SentinelAccessControl.IsAllowed(ctx)) return;

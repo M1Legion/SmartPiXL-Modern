@@ -494,6 +494,8 @@ GO
 
 -- =========================================================================
 -- PART 10: Update usp_Dash_PipelineHealth to include geo match watermark
+-- PiXL.Raw is DEAD. Forge writes directly to PiXL.Parsed (decision D14/FD16).
+-- All "Raw" references now point to PiXL.Parsed for backward compat.
 -- =========================================================================
 
 CREATE OR ALTER PROCEDURE dbo.usp_Dash_PipelineHealth
@@ -502,20 +504,18 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE
-        @RawRows        bigint,
         @ParsedRows     bigint,
         @DeviceRows     bigint,
         @IpRows         bigint,
         @VisitRows      bigint,
         @MatchRows      bigint,
-        @MaxRawId       bigint,
         @MaxParsedSrcId bigint,
         @MaxVisitId     bigint,
         @MaxMatchId     bigint,
-        -- Parse watermark
-        @ParseWM        bigint,
-        @ParseTotal     bigint,
-        @ParseLastRun   datetime2,
+        -- Dimension watermark (replaces ParseNewHits)
+        @DimWM          bigint,
+        @DimTotal       bigint,
+        @DimLastRun     datetime2,
         -- Email match watermark
         @EmailWM        bigint,
         @EmailTotal     bigint,
@@ -537,13 +537,12 @@ BEGIN
         @UniqueIndiv    bigint,
         @MatchLatest    datetime2,
         -- Timestamps
-        @RawLatest      datetime2,
         @ParsedLatest   datetime2,
         @DeviceLatest   datetime,
         @IpLatest       datetime,
         @VisitLatest    datetime2,
         -- Lag
-        @ParseLag       bigint,
+        @DimLag         bigint,
         @EmailLag       bigint,
         @LegacyLag      bigint,
         @GeoLag         bigint,
@@ -553,22 +552,20 @@ BEGIN
         @IpResolved     bigint,
         @EmailResolved  bigint;
 
-    -- DMV row counts (instant)
-    SELECT @RawRows    = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Raw')    AND index_id IN (0,1);
+    -- DMV row counts (instant) - no PiXL.Raw
     SELECT @ParsedRows = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Parsed') AND index_id IN (0,1);
     SELECT @DeviceRows = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Device') AND index_id IN (0,1);
     SELECT @IpRows     = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.IP')     AND index_id IN (0,1);
     SELECT @VisitRows  = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Visit')  AND index_id IN (0,1);
     SELECT @MatchRows  = ISNULL(SUM(row_count),0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID('PiXL.Match')  AND index_id IN (0,1);
 
-    SELECT @MaxRawId       = MAX(Id)       FROM PiXL.Raw    WITH (NOLOCK);
     SELECT @MaxParsedSrcId = MAX(SourceId) FROM PiXL.Parsed WITH (NOLOCK);
     SELECT @MaxVisitId     = MAX(VisitID)  FROM PiXL.Visit  WITH (NOLOCK);
     SELECT @MaxMatchId     = MAX(MatchId)  FROM PiXL.Match  WITH (NOLOCK);
 
-    -- Parse watermark
-    SELECT @ParseWM = LastProcessedId, @ParseTotal = RowsProcessed, @ParseLastRun = LastRunAt
-    FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits';
+    -- Dimension watermark (ProcessDimensions is active; ParseNewHits is dead)
+    SELECT @DimWM = LastProcessedId, @DimTotal = RowsProcessed, @DimLastRun = LastRunAt
+    FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions';
 
     -- Email match watermark
     SELECT @EmailWM = LastProcessedId, @EmailTotal = RowsProcessed,
@@ -601,33 +598,36 @@ BEGIN
         @EmailResolved = SUM(CASE WHEN MatchType = 'email' AND IndividualKey IS NOT NULL THEN 1 ELSE 0 END)
     FROM PiXL.Match WITH (NOLOCK);
 
-    -- Lag calculations
-    SET @ParseLag  = ISNULL(@MaxRawId - @ParseWM, 0);
+    -- Lag calculations: ParseLag now = MaxParsedSourceId - DimWatermark
+    SET @DimLag    = ISNULL(@MaxParsedSrcId - @DimWM, 0);
     SET @EmailLag  = ISNULL(@MaxVisitId - @EmailWM, 0);
     SET @LegacyLag = ISNULL(@MaxVisitId - @LegacyWM, 0);
     SET @GeoLag    = ISNULL(@MaxMatchId - @GeoWM, 0);
 
-    -- Timestamps
-    SELECT @RawLatest    = MAX(ReceivedAt) FROM PiXL.Raw    WITH (NOLOCK);
+    -- Timestamps - no PiXL.Raw
     SELECT @ParsedLatest = MAX(ReceivedAt) FROM PiXL.Parsed WITH (NOLOCK);
     SELECT @DeviceLatest = MAX(LastSeen)   FROM PiXL.Device WITH (NOLOCK);
     SELECT @IpLatest     = MAX(LastSeen)   FROM PiXL.IP     WITH (NOLOCK);
     SELECT @VisitLatest  = MAX(ReceivedAt) FROM PiXL.Visit  WITH (NOLOCK);
 
+    -- Output: Keep backward-compatible column names for C# code
+    -- RawRows = ParsedRows (merged pipeline), MaxRawId = MaxParsedSourceId
+    -- ParseWatermark = DimWM (only active watermark), ParseLag = DimLag
+    -- RawLatest = ParsedLatest (PiXL.Parsed is the landing table)
     SELECT
-        @RawRows        AS RawRows,
+        @ParsedRows     AS RawRows,          -- backward compat: C# reads "RawRows"
         @ParsedRows     AS ParsedRows,
         @DeviceRows     AS DeviceRows,
         @IpRows         AS IpRows,
         @VisitRows      AS VisitRows,
         @MatchRows      AS MatchRows,
-        @MaxRawId       AS MaxRawId,
+        @MaxParsedSrcId AS MaxRawId,          -- backward compat: C# reads "MaxRawId"
         @MaxParsedSrcId AS MaxParsedSourceId,
         @MaxVisitId     AS MaxVisitId,
         @MaxMatchId     AS MaxMatchId,
-        @ParseWM        AS ParseWatermark,
-        @ParseTotal     AS ParseTotalProcessed,
-        @ParseLastRun   AS ParseLastRunAt,
+        @DimWM          AS ParseWatermark,    -- backward compat: C# reads "ParseWatermark"
+        @DimTotal       AS ParseTotalProcessed,
+        @DimLastRun     AS ParseLastRunAt,
         @EmailWM        AS EmailMatchWatermark,
         @EmailTotal     AS EmailMatchProcessed,
         @EmailMatched   AS EmailMatchMatched,
@@ -647,17 +647,17 @@ BEGIN
         @EmailMatches   AS EmailMatchCount,
         @IpResolved     AS IpResolved,
         @EmailResolved  AS EmailResolved,
-        @ParseLag       AS ParseLag,
+        @DimLag         AS ParseLag,          -- backward compat: C# reads "ParseLag"
         @EmailLag       AS EmailMatchLag,
         @LegacyLag      AS LegacyMatchLag,
         @GeoLag         AS GeoMatchLag,
-        @RawLatest      AS RawLatest,
+        @ParsedLatest   AS RawLatest,         -- backward compat: C# reads "RawLatest"
         @ParsedLatest   AS ParsedLatest,
         @DeviceLatest   AS DeviceLatest,
         @IpLatest       AS IpLatest,
         @VisitLatest    AS VisitLatest,
         @MatchLatest    AS MatchLatest,
-        (SELECT COUNT(DISTINCT IpId) FROM PiXL.Visit WITH (NOLOCK)) AS UniqueDevicesInVisits,
+        (SELECT COUNT(DISTINCT DeviceId) FROM PiXL.Visit WITH (NOLOCK)) AS UniqueDevicesInVisits,
         (SELECT COUNT(DISTINCT IpId) FROM PiXL.Visit WITH (NOLOCK)) AS UniqueIpsInVisits;
 END;
 GO

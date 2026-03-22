@@ -2200,16 +2200,16 @@ function drillPipeline(stage) {
     html += di('Watermark', num(sql?.watermark ?? health?.etL_Watermark));
     html += di('Total Processed', num(health?.etL_TotalProcessed));
     html += di('Parsed Rows', num(sql?.parsedRows ?? health?.totalHits));
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
     html += di('Last ETL Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
     html += di('Synthetic Hits', num(health?.syntheticHits));
     html += '</div>';
-    html += sug('ETL runs every 60 seconds via EtlBackgroundService, calling ETL.usp_ParseNewHits. If lag is high, run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_ParseNewHits</code><br>If watermark is ahead of max Test ID, reset with:<br><code style="color:var(--cyan)">UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = \'ParseNewHits\'</code>');
+    html += sug('ProcessDimensions runs every 60 seconds. If lag is high, check the Forge service is running and the watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>');
     openModal('ETL PARSE STAGE', html);
   }
   else if (stage === 'dash') {
     html += di('Status', df?.isFlowing ? 'LIVE' : 'STALE', df?.isFlowing ? 'ok' : 'bad');
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 50 ? 'warn' : 'ok');
+    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
     html += di('Data Freshness', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) + ' ago' : '--');
     html += di('24h Hits', num(health?.hits_24h));
     html += di('Total Hits', num(health?.totalHits));
@@ -2227,7 +2227,7 @@ function drillPipeline(stage) {
     html += di('Last Device Activity', pipe?.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
     html += di('Last IP Activity', pipe?.ipLatest ? timeAgo(pipe.ipLatest) : '--');
     html += '</div>';
-    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by usp_ParseNewHits (Phases 9-10). Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
+    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by ProcessDimensions. Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
     openModal('DIMENSION TABLES', html);
   }
   else if (stage === 'visit') {
@@ -2236,7 +2236,7 @@ function drillPipeline(stage) {
     html += di('With Email', num(pipe?.visitsWithEmail), pipe?.visitsWithEmail > 0 ? 'ok' : '');
     html += di('Max Visit ID', num(pipe?.maxVisitId));
     html += di('Last Visit', pipe?.visitLatest ? timeAgo(pipe.visitLatest) : '--');
-    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 10000 ? 'warn' : 'ok');
     html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
     html += '</div>';
     html += sug('PiXL.Visit is the fact table linking Device + IP per parsed hit. Visits with a MatchEmail are eligible for identity resolution via usp_MatchVisits. Match lag shows how many visits haven\'t been checked yet.');
@@ -2272,7 +2272,7 @@ function drillPipelineTable(table) {
     openModal('PiXL.Test', html);
   } else if (table === 'parsed') {
     html += di('Rows', num(pipe.parsedRows));
-    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 50 ? 'warn' : 'ok');
+    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 10000 ? 'warn' : 'ok');
     html += di('Latest', pipe.parsedLatest ? timeAgo(pipe.parsedLatest) : '--');
     html += di('Total Processed', num(pipe.parseTotalProcessed));
     html += '</div>';
@@ -2442,9 +2442,9 @@ function getFixSuggestion(issue) {
   if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
   if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
   if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
-  if (t.includes('etl lag')) return 'Run the ETL manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('etl lag')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
   if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
-  if (t.includes('parse lag') && t.includes('pipeline')) return 'Run the parse proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_ParseNewHits"</code>';
+  if (t.includes('parse lag') && t.includes('pipeline')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
   if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
   if (t.includes('xavier') && t.includes('failed')) return 'Check Xavier connectivity and Windows Auth trust:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL login on Xavier.';
   if (t.includes('xavier') && t.includes('never')) return 'The sync service may not have run yet. Restart the app to trigger it:<br><code style="color:var(--cyan)">Stop-WebAppPool "Smartpixl.info"; Start-WebAppPool "Smartpixl.info"</code>';
@@ -2474,19 +2474,19 @@ function buildIssues(health, infra) {
       const re = infra.recentErrors;
       issues.push({ severity: 'warning', title: `${re.recentErrorCount} Active Error${re.recentErrorCount > 1 ? 's' : ''} in Log`, detail: `Most recent: ${re.errors[0]?.message?.substring(0,100) || 'Unknown'}`, time: re.lastErrorUtc });
     }
-    if (infra.dataFlow && infra.dataFlow.etlLag > 100)
+    if (infra.dataFlow && infra.dataFlow.etlLag > 50000)
       issues.push({ severity: 'warning', title: 'ETL Lag High', detail: `Watermark is ${infra.dataFlow.etlLag} rows behind. Parsed data may be stale.`, time: infra.checkedAt });
     if (infra.dataFlow && infra.dataFlow.queueDepth > 100)
       issues.push({ severity: 'warning', title: 'Write Queue Backing Up', detail: `Queue depth: ${infra.dataFlow.queueDepth}. Writes may be slow.`, time: infra.checkedAt });
     if (infra.pipeline && infra.pipeline.isAvailable) {
       if (infra.pipeline.matchLag > 100)
         issues.push({ severity: 'warning', title: 'Match Lag High', detail: `Match watermark is ${infra.pipeline.matchLag} visits behind. Identity resolution may be delayed.`, time: infra.checkedAt });
-      if (infra.pipeline.parseLag > 100)
+      if (infra.pipeline.parseLag > 50000)
         issues.push({ severity: 'warning', title: 'Parse Lag High (Pipeline)', detail: `Parse watermark is ${infra.pipeline.parseLag} rows behind. Device/IP/Visit tables may be stale.`, time: infra.checkedAt });
     }
   }
   if (health) {
-    const secSince = health.secondsSinceLastHit || 9999;
+    const secSince = health.secondsSinceLastHit ?? 9999;
     if (secSince > 3600)
       issues.push({ severity: 'warning', title: 'No Recent Hits', detail: `Last hit ${formatDuration(secSince)} ago. Traffic may have stopped or ingestion is broken.`, time: null });
   }
@@ -2580,7 +2580,7 @@ function renderStatusStrip(health, infra) {
   chips.push(`<div class="status-chip ${iisDown.length ? 'critical' : sites.length ? 'healthy' : ''}" onclick="drillStatus('iis')"><div class="chip-dot ${sites.length === 0 ? 'idle' : iisDown.length === 0 ? 'up' : 'down'}"></div><div class="chip-label">IIS</div><div class="chip-value ${sites.length === 0 ? '' : iisDown.length === 0 ? 'ok' : 'bad'}">${sites.length === 0 ? '--' : iisDown.length === 0 ? `${sites.length}/${sites.length} UP` : `${iisDown.length} DOWN`}</div></div>`);
 
   const etlLag = df?.etlLag ?? null;
-  chips.push(`<div class="status-chip ${etlLag > 50 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 50 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 50 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
+  chips.push(`<div class="status-chip ${etlLag > 10000 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 10000 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 10000 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
 
   // Match chip â€” shows resolved/total
   const pipe = infra?.pipeline;
@@ -2628,8 +2628,8 @@ function renderPipeline(health, infra) {
   document.getElementById('pipe-etl-val').textContent = typeof parsedRows === 'number' ? num(parsedRows) : parsedRows;
   document.getElementById('pipe-etl-sub').textContent = pipe ? `lag ${pipe.parseLag}` : 'PiXL.Parsed';
   const parseLag = pipe?.parseLag ?? (df?.etlLag ?? null);
-  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 50 ? ' stale' : parseLag !== null ? ' healthy' : '');
-  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 50 ? ' dead' : '');
+  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 10000 ? ' stale' : parseLag !== null ? ' healthy' : '');
+  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 10000 ? ' dead' : '');
 
   // Node 4: DIMENSIONS (Device + IP)
   const devCount = pipe?.deviceRows ?? '--';
@@ -2698,11 +2698,11 @@ function renderOpsETL(health, infra) {
 
   const parseLag = pipe?.parseLag ?? 0;
   const matchLag = pipe?.matchLag ?? 0;
-  const parseLagCls = parseLag > 50 ? ' warn' : parseLag > 100 ? ' bad' : '';
+  const parseLagCls = parseLag > 50000 ? ' bad' : parseLag > 10000 ? ' warn' : '';
   const matchLagCls = matchLag > 50 ? ' warn' : matchLag > 100 ? ' bad' : '';
 
   el.innerHTML = `
-    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ParseNewHits)</div>
+    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (ProcessDimensions)</div>
     <div class="etl-grid">
       <div class="etl-stat"><div class="etl-val">${num(pipe?.parseTotalProcessed || health?.etL_TotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
       <div class="etl-stat"><div class="etl-val">${num(pipe?.parseWatermark || health?.etL_Watermark || 0)}</div><div class="etl-lbl">WATERMARK</div></div>
@@ -3016,7 +3016,7 @@ function updateOpsBeacon(health, infra) {
     statusEl.textContent = 'DEGRADED';
     statusEl.style.color = 'var(--yellow)';
   } else if (health) {
-    const secSince = health.secondsSinceLastHit || 9999;
+    const secSince = health.secondsSinceLastHit ?? 9999;
     if (secSince < 300) {
       beacon.className = 'beacon-dot';
       statusEl.textContent = 'ONLINE';
@@ -3229,7 +3229,7 @@ function updateAnalyticsBeacon(h) {
   if (!h) return;
   const beacon = document.getElementById('beacon');
   const statusEl = document.getElementById('system-status');
-  const secSince = h.secondsSinceLastHit || 9999;
+  const secSince = h.secondsSinceLastHit ?? 9999;
   if (secSince < 300) {
     beacon.className = 'beacon-dot';
     statusEl.textContent = 'SYSTEM ONLINE';
@@ -3262,7 +3262,7 @@ function renderWatermarks(p) {
   el.innerHTML = `<table class="feed-table" style="font-size:0.78rem;">
     <thead><tr><th>PROCESS</th><th>WATERMARK</th><th>PROCESSED</th><th>MATCHED</th><th>LAST RUN</th><th>LAG</th></tr></thead>
     <tbody>
-      ${wmRow('ParseNewHits', p.parseWatermark, p.parseTotalProcessed, null, p.parseLastRunAt, p.parseLag)}
+      ${wmRow('ProcessDimensions', p.parseWatermark, p.parseTotalProcessed, null, p.parseLastRunAt, p.parseLag)}
       ${wmRow('MatchVisits', p.emailMatchWatermark, p.emailMatchProcessed, p.emailMatchMatched, p.emailMatchLastRunAt, p.emailMatchLag)}
       ${wmRow('MatchLegacyVisits', p.legacyMatchWatermark, p.legacyMatchProcessed, p.legacyMatchMatched, p.legacyMatchLastRunAt, p.legacyMatchLag)}
       ${wmRow('MatchGeoVisits', p.geoMatchWatermark, p.geoMatchProcessed, p.geoMatchMatched, p.geoMatchLastRunAt, p.geoMatchLag)}

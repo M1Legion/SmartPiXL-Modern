@@ -134,6 +134,35 @@ public sealed class EtlBackgroundService : BackgroundService
                     _logger.Info($"ETL geo match: {rowsProcessed} processed, {rowsMatched} matched by geo proximity");
             }
         }
+
+        // Dashboard snapshot + hourly stats (lightweight SPs, ~200ms total)
+        await WriteDashboardSnapshotAsync(conn, ct);
+    }
+
+    private async Task WriteDashboardSnapshotAsync(SqlConnection conn, CancellationToken ct)
+    {
+        try
+        {
+            await using (var snapCmd = conn.CreateCommand())
+            {
+                snapCmd.CommandText = "usp_Dash_WriteSnapshot";
+                snapCmd.CommandType = System.Data.CommandType.StoredProcedure;
+                snapCmd.CommandTimeout = 30;
+                await snapCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await using (var hourlyCmd = conn.CreateCommand())
+            {
+                hourlyCmd.CommandText = "usp_Dash_WriteHourlyStats";
+                hourlyCmd.CommandType = System.Data.CommandType.StoredProcedure;
+                hourlyCmd.CommandTimeout = 30;
+                await hourlyCmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Dashboard snapshot write failed: {ex.Message}");
+        }
     }
 
     private async Task RunDimensionProcessingAsync(SqlConnection conn, CancellationToken ct)

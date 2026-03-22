@@ -168,9 +168,9 @@ BEGIN
     FROM PiXL.Parsed WITH (NOLOCK)
     WHERE ReceivedAt >= DATEADD(HOUR, -24, SYSUTCDATETIME());
 
-    -- Watermark (tiny table)
+    -- Watermark (ProcessDimensions is the active ETL watermark; ParseNewHits is dead)
     SELECT @ETL_LastRun = LastRunAt, @ETL_Total = RowsProcessed, @ETL_Watermark = LastProcessedId
-    FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits';
+    FROM ETL.Watermark WHERE ProcessName = 'ProcessDimensions';
 
     SELECT
         @TotalHits      AS TotalHits,
