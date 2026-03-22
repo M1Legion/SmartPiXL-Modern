@@ -244,10 +244,139 @@ public sealed class PiXLScriptTests
     {
         var script = PiXLScript.GetScript("https://smartpixl.info/1/1_SMART.GIF");
 
-        // Critical signals must survive minification
+        // Critical field names survive (dot-notation property names, not encrypted)
         script.Should().Contain("sendBeacon", "sendBeacon must survive minification");
         script.Should().Contain("canvasFP", "canvasFP data key must survive minification");
         script.Should().Contain("deviceHash", "deviceHash must survive minification");
-        script.Should().Contain("SHA-256", "SHA-256 digest call must survive minification");
+
+        // SHA-256 is now XOR-encrypted — verify decoder exists instead
+        script.Should().Contain("_$d", "String decoder function must be present");
+        script.Should().Contain("_$e", "Encrypted string table must be present");
+    }
+
+    // ========================================================================
+    // LITE SCRIPT — served when Referer doesn't match expected domain
+    // ========================================================================
+
+    [Fact]
+    public void LiteTemplate_should_containPlaceholder()
+    {
+        PiXLScript.LiteTemplate.Should().Contain("{{PIXL_URL}}");
+    }
+
+    [Fact]
+    public void LiteTemplate_should_notContainFingerprintingLogic()
+    {
+        var lite = PiXLScript.LiteTemplate;
+        lite.Should().NotContain("canvasFP", "Lite script must not contain canvas fingerprinting");
+        lite.Should().NotContain("webglFP", "Lite script must not contain WebGL fingerprinting");
+        lite.Should().NotContain("audioFP", "Lite script must not contain audio fingerprinting");
+        lite.Should().NotContain("botSignals", "Lite script must not contain bot detection");
+        lite.Should().NotContain("mouseEntropy", "Lite script must not contain behavioral biometrics");
+        lite.Should().NotContain("SHA-256", "Lite script must not contain hashing");
+        lite.Should().NotContain("evasionDetected", "Lite script must not contain evasion detection");
+    }
+
+    [Fact]
+    public void LiteTemplate_should_containBasicDataAndLiteFlag()
+    {
+        var lite = PiXLScript.LiteTemplate;
+        lite.Should().Contain("_lite", "Lite flag must be present");
+        lite.Should().Contain("screen.width", "Basic screen data should be collected");
+        lite.Should().Contain("sendBeacon", "Beacon delivery must still work");
+        lite.Should().Contain("_bot_wd", "Lite should include webdriver bot signal");
+        lite.Should().Contain("_bot_plg", "Lite should include plugins bot signal");
+    }
+
+    [Fact]
+    public void LiteTemplate_should_containBotSignals()
+    {
+        var lite = PiXLScript.LiteTemplate;
+        lite.Should().Contain("navigator.webdriver", "webdriver check must be present");
+        lite.Should().Contain("navigator.plugins", "plugins length check must be present");
+        lite.Should().Contain("navigator.languages", "languages length check must be present");
+        lite.Should().Contain("outerWidth", "outer dimension check must be present");
+        lite.Should().Contain("Notification", "Notification permission check must be present");
+    }
+
+    [Fact]
+    public void GetLiteScript_should_returnMinifiedOutput()
+    {
+        var url = "https://smartpixl.info/1/1_test.com_SMART.GIF";
+        var script = PiXLScript.GetLiteScript(url);
+        var unminified = PiXLScript.LiteTemplate.Replace("{{PIXL_URL}}", url);
+
+        script.Length.Should().BeLessThan(unminified.Length,
+            "GetLiteScript should return minified JavaScript");
+        script.Should().NotContain("{{PIXL_URL}}");
+        script.Should().Contain("smartpixl.info");
+        script.Should().NotContain("canvasFP", "Lite script must never expose fingerprinting");
+    }
+
+    // ========================================================================
+    // STRING ENCRYPTION — sensitive strings XOR-encoded per customer
+    // ========================================================================
+
+    [Fact]
+    public void GetScript_should_encryptSensitiveStrings()
+    {
+        var script = PiXLScript.GetScript("https://smartpixl.info/99/99_test.com_SMART.GIF");
+
+        // These detection-revealing strings should NOT appear as quoted literals
+        script.Should().NotContain("\"SHA-256\"", "SHA-256 should be encrypted");
+        script.Should().NotContain("\"webdriver\"", "webdriver should be encrypted");
+        script.Should().NotContain("\"WEBGL_debug_renderer_info\"", "WebGL debug info should be encrypted");
+        script.Should().NotContain("\"experimental-webgl\"", "experimental-webgl should be encrypted");
+        script.Should().NotContain("\"SwiftShader\"", "SwiftShader should be encrypted");
+        script.Should().NotContain("\"selenium\"", "selenium should be encrypted");
+        script.Should().NotContain("\"phantomjs\"", "phantomjs should be encrypted");
+    }
+
+    [Fact]
+    public void GetScript_differentUrls_should_produceDifferentOutput()
+    {
+        var script1 = PiXLScript.GetScript("https://smartpixl.info/1/1_a.com_SMART.GIF");
+        var script2 = PiXLScript.GetScript("https://smartpixl.info/2/2_b.com_SMART.GIF");
+
+        script1.Should().NotBe(script2, "Different customers should get different obfuscated scripts");
+    }
+
+    // ========================================================================
+    // CANARY TOKEN — per-customer leak attribution marker
+    // ========================================================================
+
+    [Fact]
+    public void GetScript_should_containCanaryToken()
+    {
+        var url = "https://smartpixl.info/12345/00053_m1-data.com_SMART.GIF";
+        var script = PiXLScript.GetScript(url);
+
+        script.Should().NotContain("%%CANARY%%", "Canary placeholder must be replaced");
+        // Canary should be decodable back to the customer URL
+        var canary = PiXLScript.DecodeCanary(PiXLScript.DecodeCanary("test") != null ? "" : "");
+    }
+
+    [Fact]
+    public void DecodeCanary_should_roundTrip()
+    {
+        var url = "https://smartpixl.info/12345/00053_m1-data.com_SMART.GIF";
+        // Extract canary: generate it directly and verify round-trip
+        var encoded = Convert.ToBase64String(
+            System.Text.Encoding.UTF8.GetBytes(url).Select(b => (byte)(b ^ 0x5A)).ToArray());
+        var decoded = PiXLScript.DecodeCanary(encoded);
+        decoded.Should().Be(url, "Canary must round-trip to original URL");
+    }
+
+    // ========================================================================
+    // INTEGRITY SENTINEL — bitmask verifying fingerprint functions ran
+    // ========================================================================
+
+    [Fact]
+    public void Template_should_containIntegritySentinel()
+    {
+        PiXLScript.Template.Should().Contain("data._sp",
+            "Integrity sentinel bitmask must be in template");
+        PiXLScript.Template.Should().Contain("data.canvasFP ? 1 : 0",
+            "Sentinel must check canvasFP");
     }
 }

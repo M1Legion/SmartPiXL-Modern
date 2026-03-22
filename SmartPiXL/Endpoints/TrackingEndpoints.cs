@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,8 +15,7 @@ namespace SmartPiXL.Endpoints;
 //   /demo                                                  →  Demo page (wwwroot/demo.html)
 //   /debug/headers                                         →  Diagnostic JSON dump (localhost only)
 //   /health                                                →  Health check for load balancers
-//   /{companyId}/{pixlId}_{domain}_SMART.js  (catch-all)   →  Modern PiXL script endpoint
-//   /js/{clientId}/{pixlId}.js              (catch-all)   →  Legacy script endpoint (serves modern script)
+//   /{companyId}/{pixlId}_{domain}_SMART.js  (catch-all)   →  Modern PiXL script (Sec-Fetch-Dest: script only)
 //   /{companyId}/{pixlId}_{domain}_SMART.DATA (POST)       →  Beacon data endpoint (sendBeacon)
 //   /{companyId}/{pixlId}_{domain}_SMART.GIF (catch-all)   →  Legacy/fallback tracking GIF endpoint
 //   /{**path} (catch-all fallback)                         →  Bot trap — returns GIF, flags record
@@ -190,12 +190,17 @@ public static partial class TrackingEndpoints
             // ── Modern PiXL script: *_SMART.js ──────────────────────────────
             if (path.EndsWith("_SMART.js", StringComparison.OrdinalIgnoreCase))
             {
-                // Block direct browser navigation — only serve when loaded as <script>.
-                // Sec-Fetch-Dest: "document" = browser address bar / link click.
-                // Sec-Fetch-Dest: "script"   = <script src="..."> (legitimate use).
-                // Missing header  = older browsers / curl — allow (obfuscated anyway).
+                // SECURITY: Only serve the fingerprint script when loaded as <script src>.
+                // Sec-Fetch-Dest is sent by all modern browsers (Chrome 80+, Firefox 90+,
+                // Safari 17+, Edge 80+ — universal in 2026). Requiring "script" blocks:
+                //   - "document" = browser address bar / link click
+                //   - missing    = curl, wget, Postman, scrapers, bots
+                //   - anything else = fetch(), XHR, iframe, image, etc.
+                // This prevents competitors/bots from trivially downloading the script.
+                // A determined actor can still view it via DevTools on a customer site,
+                // but we don't need to make it easy.
                 var fetchDest = ctx.Request.Headers["Sec-Fetch-Dest"].FirstOrDefault();
-                if (string.Equals(fetchDest, "document", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(fetchDest, "script", StringComparison.OrdinalIgnoreCase))
                     return Results.StatusCode(403);
 
                 var urlMatch = PiXLUrlPattern().Match(path);
@@ -207,15 +212,22 @@ public static partial class TrackingEndpoints
                     
                     if (SafeRouteParam().IsMatch(companyId) && SafeRouteParam().IsMatch(pixlId))
                     {
-                        // Fallback URL embedded in JS — only used when document.currentScript
-                        // is unavailable (very rare). The JS self-derives its callback URL
-                        // from its own <script src> at runtime, making BaseUrl non-critical.
                         var baseUrl = config["Tracking:BaseUrl"];
                         if (string.IsNullOrEmpty(baseUrl))
                             baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
                         
                         var pixlUrl = $"{baseUrl}/{companyId}/{pixlId}_{domain}_SMART.GIF";
-                        var javascript = PiXLScript.GetScript(pixlUrl);
+                        
+                        // SECURITY: Referer domain gate — only serve the full fingerprint
+                        // script when loaded from the expected customer domain. This prevents
+                        // competitors or scrapers from getting our collection logic even if
+                        // they spoof Sec-Fetch-Dest. If Referer doesn't match, serve a lite
+                        // script that collects basic metrics only (screen, UA, timezone —
+                        // data already available in HTTP headers). We still ingest the hit
+                        // for internal traffic metrics, just don't reveal the secret sauce.
+                        var javascript = RefererMatchesDomain(ctx, domain)
+                            ? PiXLScript.GetScript(pixlUrl)
+                            : PiXLScript.GetLiteScript(pixlUrl);
                         
                         ctx.Response.ContentType = JsContentType;
                         ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -228,31 +240,9 @@ public static partial class TrackingEndpoints
                 return Results.StatusCode(400);
             }
             
-            // ── Legacy script: any .js request that didn't match _SMART.js ─
-            // smartpixl.com (and potentially other legacy installs) use an older
-            // script tag like <script src="/js/CLIENT_ID/PIXL_ID.js">.
-            // Serve the full fingerprint script with a placeholder callback URL
-            // so we still collect all client data — companyId/pixlId stay 0/0
-            // until the customer's tag is updated to the modern _SMART.js format.
-            if (path.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
-            {
-                var fetchDest = ctx.Request.Headers["Sec-Fetch-Dest"].FirstOrDefault();
-                if (string.Equals(fetchDest, "document", StringComparison.OrdinalIgnoreCase))
-                    return Results.StatusCode(403);
-
-                var baseUrl = config["Tracking:BaseUrl"];
-                if (string.IsNullOrEmpty(baseUrl))
-                    baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-
-                var pixlUrl = $"{baseUrl}/0/0_legacy_SMART.GIF";
-                var javascript = PiXLScript.GetScript(pixlUrl);
-
-                ctx.Response.ContentType = JsContentType;
-                ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-                ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
-                ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
-                return Results.Text(javascript, JsContentType);
-            }
+            // ── Non-PiXL .js requests fall through to catch-all bot trap ─
+            // No script is served for unrecognized .js paths. Scanner probes for
+            // /jquery.js, /app.js, etc. get a transparent GIF + _srv_botTrap=1.
             
             // ── Legacy/Modern GIF: *_SMART.GIF ────────────────────────────
             if (path.EndsWith("_SMART.GIF", StringComparison.OrdinalIgnoreCase))
@@ -416,11 +406,11 @@ public static partial class TrackingEndpoints
             }
         }
         
-        // Step 2: Append hit type + bot trap flag to QueryString.
-        // These are the ONLY _srv_* params the Edge adds. All other enrichment
-        // (_srv_fp*, _srv_subnet*, _srv_dc, _srv_ipType, _srv_geo*) is Forge work.
+        // Step 2: Append hit type, bot trap, and server-side signals to QueryString.
+        // All _srv_* params below are extracted from the HTTP context and provide
+        // ground truth that cannot be spoofed by client-side JavaScript.
         {
-            var sb = t_alertSb ??= new StringBuilder(512);
+            var sb = t_alertSb ??= new StringBuilder(2048);
             sb.Clear();
             sb.Append(trackingData.QueryString);
             
@@ -431,6 +421,70 @@ public static partial class TrackingEndpoints
             // Bot trap: URL didn't match /{companyId}/{pixlId}_{domain}_SMART.(GIF|js)
             if (!isValidPiXLUrl)
                 sb.Append("&_srv_botTrap=1");
+            
+            // ── Server-side signal extraction ─────────────────────────────
+            // These provide unforgeable HTTP-level intelligence:
+            //   • Unique signals with no JS equivalent (HTTP version, header order,
+            //     Accept-Encoding, Sec-Fetch-*, Priority)
+            //   • Cross-validation data (Accept-Language vs navigator.language,
+            //     DNT header vs navigator.doNotTrack, Client Hints vs userAgentData)
+            //   • Free coverage for PiXL Lite and legacy hits
+            
+            var headers = ctx.Request.Headers;
+            
+            // HTTP protocol version — bots often use HTTP/1.1; real browsers use HTTP/2+
+            sb.Append("&_srv_httpVer=").Append(ctx.Request.Protocol);
+            
+            // Header count — real browsers send 15-25 headers; curl/bots send 3-5
+            sb.Append("&_srv_hdrCount=").Append(headers.Count);
+            
+            // Header order fingerprint — SHA256 hash of header key ordering.
+            // Each browser engine sends headers in a characteristic, consistent order.
+            // This is one of the hardest signals to spoof because it's set by the
+            // HTTP stack, not by page JavaScript.
+            {
+                var hashSb = t_hashSb ??= new StringBuilder(384);
+                hashSb.Clear();
+                foreach (var h in headers)
+                {
+                    if (hashSb.Length > 0) hashSb.Append('|');
+                    hashSb.Append(h.Key);
+                }
+                Span<byte> hashResult = stackalloc byte[32];
+                SHA256.HashData(Encoding.UTF8.GetBytes(hashSb.ToString()), hashResult);
+                sb.Append("&_srv_hdrOrder=").Append(Convert.ToHexString(hashResult[..8]));
+            }
+            
+            // Standard headers — cross-validation with JS-collected equivalents
+            AppendHeaderIfPresent(sb, headers, "Accept-Language", "_srv_acceptLang");
+            AppendHeaderIfPresent(sb, headers, "Accept-Encoding", "_srv_acceptEnc");
+            AppendHeaderIfPresent(sb, headers, "Accept", "_srv_accept");
+            AppendHeaderIfPresent(sb, headers, "Connection", "_srv_conn");
+            AppendHeaderIfPresent(sb, headers, "DNT", "_srv_dnt");
+            
+            // Fetch Metadata — reveals how the request was initiated (no JS equivalent)
+            AppendHeaderIfPresent(sb, headers, "Sec-Fetch-Site", "_srv_fetchSite");
+            AppendHeaderIfPresent(sb, headers, "Sec-Fetch-Mode", "_srv_fetchMode");
+            AppendHeaderIfPresent(sb, headers, "Sec-Fetch-Dest", "_srv_fetchDest");
+            
+            // Client Hints — low entropy (sent by default in Chrome 89+)
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA", "_srv_chUa");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Platform", "_srv_chPlatform");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Mobile", "_srv_chMobile");
+            
+            // Client Hints — high entropy (only when customer page sets Permissions-Policy)
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Model", "_srv_chModel");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Platform-Version", "_srv_chPlatVer");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Arch", "_srv_chArch");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Bitness", "_srv_chBitness");
+            AppendHeaderIfPresent(sb, headers, "Sec-CH-UA-Full-Version-List", "_srv_chFullVer");
+            
+            // Priority hints — Chrome 124+ (no JS equivalent)
+            AppendHeaderIfPresent(sb, headers, "Priority", "_srv_priority");
+            
+            // TLS fingerprint headers — populated by reverse proxy / Cloudflare when present
+            AppendHeaderIfPresent(sb, headers, "X-TLS-Version", "_srv_tlsVer");
+            AppendHeaderIfPresent(sb, headers, "X-TLS-Cipher", "_srv_tlsCipher");
             
             trackingData = trackingData with { QueryString = sb.ToString() };
         }
@@ -453,4 +507,44 @@ public static partial class TrackingEndpoints
     /// </summary>
     [ThreadStatic]
     private static StringBuilder? t_alertSb;
+    
+    /// <summary>
+    /// Thread-static StringBuilder for computing the header order fingerprint hash.
+    /// Separate from <see cref="t_alertSb"/> because both are used simultaneously.
+    /// </summary>
+    [ThreadStatic]
+    private static StringBuilder? t_hashSb;
+    
+    /// <summary>
+    /// Appends a URL-encoded HTTP header value as a <c>_srv_*</c> query string parameter.
+    /// Skips absent headers (no <c>&amp;paramName=</c> emitted). Values are truncated at
+    /// 500 characters before URL-encoding to prevent bloated query strings.
+    /// </summary>
+    private static void AppendHeaderIfPresent(
+        StringBuilder sb, IHeaderDictionary headers, string headerName, string paramName)
+    {
+        var value = headers[headerName].ToString();
+        if (value.Length > 0)
+        {
+            if (value.Length > 500) value = value[..500];
+            sb.Append('&').Append(paramName).Append('=').Append(Uri.EscapeDataString(value));
+        }
+    }
+    
+    /// <summary>
+    /// Checks whether the request's Referer header originates from the expected customer domain.
+    /// Returns <c>true</c> if the Referer host equals the domain or is a subdomain of it
+    /// (e.g., <c>www.m1-data.com</c> matches domain <c>m1-data.com</c>).
+    /// Returns <c>false</c> for missing, unparseable, or non-matching Referer.
+    /// </summary>
+    private static bool RefererMatchesDomain(HttpContext ctx, string expectedDomain)
+    {
+        var referer = ctx.Request.Headers.Referer.FirstOrDefault();
+        if (string.IsNullOrEmpty(referer) || !Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
+            return false;
+        
+        var host = refUri.Host;
+        return host.Equals(expectedDomain, StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith("." + expectedDomain, StringComparison.OrdinalIgnoreCase);
+    }
 }

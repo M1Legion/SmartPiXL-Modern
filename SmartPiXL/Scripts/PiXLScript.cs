@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Text;
 using NUglify;
 
 namespace SmartPiXL.Scripts;
@@ -24,6 +25,7 @@ public static class PiXLScript
         var d = new Date();
         var perf = w.performance || {};
         var data = {};
+        data._v = '%%CANARY%%';
         
         var safeGet = function(obj, prop, fallback) {
             try {
@@ -1318,6 +1320,9 @@ public static class PiXLScript
         
         var sendPiXL = function() {
             calculateMouseEntropy();
+            // Integrity sentinel: bitmask of which fingerprint functions produced data.
+            // If someone strips sections, this value drops below 15.
+            data._sp = (data.canvasFP ? 1 : 0) | (data.webglFP ? 2 : 0) | (data.audioFP ? 4 : 0) | (data.botSignals !== undefined ? 8 : 0);
             // Client-side DeviceHash from stable fingerprint signals.
             // Forge uses this for real-time session stitching; ETL recomputes SHA-256 server-side.
             var fpParts = [data.canvasFP, data.fonts, data.gpu, data.webglFP, data.audioHash].filter(Boolean);
@@ -1405,31 +1410,211 @@ public static class PiXLScript
 })();
 ";
 
+    /// <summary>
+    /// Stripped-down script served when Referer doesn't match the expected customer domain.
+    /// Collects only basic signals (equivalent to what HTTP headers already expose) plus
+    /// a _lite=1 flag so Forge knows this was a restricted serve. No fingerprinting IP.
+    /// </summary>
+    public const string LiteTemplate = @"
+(function() {
+    try {
+        var d = {};
+        d.sw = screen.width;
+        d.sh = screen.height;
+        d.cd = screen.colorDepth;
+        d.pd = window.devicePixelRatio || 1;
+        d.vw = window.innerWidth;
+        d.vh = window.innerHeight;
+        d.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        d.tzo = new Date().getTimezoneOffset();
+        d.lang = navigator.language || '';
+        d.plt = navigator.platform || '';
+        d.ua = navigator.userAgent || '';
+        d.cores = navigator.hardwareConcurrency || '';
+        d.url = location.href;
+        d.ref = document.referrer;
+        d.title = document.title;
+        d.domain = location.hostname;
+        d.path = location.pathname;
+        d._bot_wd = navigator.webdriver ? 1 : 0;
+        d._bot_plg = navigator.plugins ? navigator.plugins.length : -1;
+        d._bot_lng = navigator.languages ? navigator.languages.length : -1;
+        d._bot_ow = (window.outerWidth === 0 && window.innerWidth > 0) ? 1 : 0;
+        try { d._bot_ntf = typeof Notification !== 'undefined' ? Notification.permission : ''; } catch(e) { d._bot_ntf = ''; }
+        d._lite = 1;
+        var p = [];
+        for (var k in d) {
+            if (d[k] !== '' && d[k] !== null && d[k] !== undefined)
+                p.push(k + '=' + encodeURIComponent(d[k]));
+        }
+        var u = '{{PIXL_URL}}';
+        try {
+            var cs = document.currentScript;
+            if (cs && cs.src) u = cs.src.replace(/_SMART\.js(\?.*)?$/i, '_SMART.GIF');
+        } catch(e) {}
+        var body = p.join('&');
+        var bu = u.replace(/_SMART\.GIF$/i, '_SMART.DATA');
+        var sent = false;
+        if (navigator.sendBeacon) {
+            try { sent = navigator.sendBeacon(bu, new Blob([body], {type: 'application/x-www-form-urlencoded'})); } catch(e) { sent = false; }
+        }
+        if (!sent) { new Image().src = u + '?' + body; }
+    } catch(e) {}
+})();
+";
+
     // Cache per PiXL URL — zero allocation after first hit per companyId/pixlId combo.
     // Capped at 10,000 entries to prevent memory exhaustion from malicious URL generation.
     private static readonly ConcurrentDictionary<string, string> _cache = new();
+    private static readonly ConcurrentDictionary<string, string> _liteCache = new();
     private const int MaxCacheEntries = 10_000;
 
-    // Minified template — computed once at startup, then URL-substituted per request.
-    private static readonly string _minifiedTemplate = MinifyTemplate();
+    // Minified templates — computed once at startup, then per-customer obfuscation at first serve.
+    private static readonly string _minifiedTemplate = MinifyTemplate(Template);
+    private static readonly string _minifiedLiteTemplate = MinifyTemplate(LiteTemplate);
 
-    private static string MinifyTemplate()
+    // ========================================================================
+    // STRING ENCRYPTION — per-customer XOR encoding of sensitive string literals
+    // ========================================================================
+
+    // Strings that reveal detection methodology — encrypted in the served script.
+    // Property-name assignments (dot notation) are NOT encrypted — only quoted literals.
+    private static readonly string[] _encryptStrings =
+    [
+        "canvas",                       // 0
+        "2d",                           // 1
+        "webgl",                        // 2
+        "experimental-webgl",           // 3
+        "WEBGL_debug_renderer_info",    // 4
+        "SHA-256",                      // 5
+        "triangle",                     // 6
+        "webdriver",                    // 7
+        "connection",                   // 8
+        "SwiftShader",                  // 9
+        "llvmpipe",                     // 10
+        "headless-no-chrome-obj",       // 11
+        "selenium",                     // 12
+        "phantomjs",                    // 13
+        "nightmare",                    // 14
+        "cdp",                          // 15
+        "playwright-global",            // 16
+        "dom-automation",               // 17
+        "storage",                      // 18
+        "permissions",                  // 19
+        "mediaDevices",                 // 20
+        "userAgentData",                // 21
+        "keyboard",                     // 22
+        "brave",                        // 23
+        "headless-ua",                  // 24
+    ];
+
+    private static int DeriveXorKey(string pixlUrl)
     {
-        var result = Uglify.Js(Template);
-        return result.HasErrors ? Template : result.Code;
+        int hash = 0;
+        foreach (char c in pixlUrl)
+            hash = ((hash << 5) - hash + c) & 0x7FFFFFFF;
+        return (hash % 254) + 1; // 1–254: avoid 0 (no-op) and retain single-byte range
+    }
+
+    private static string XorEncodeToJsHex(string plaintext, int key)
+    {
+        var sb = new StringBuilder(plaintext.Length * 4);
+        foreach (char ch in plaintext)
+            sb.Append($"\\x{(ch ^ key) & 0xFF:x2}");
+        return sb.ToString();
+    }
+
+    private static string EncryptStrings(string minified, int xorKey)
+    {
+        // Build decoder function + XOR-encoded string table
+        var tableEntries = string.Join(",",
+            _encryptStrings.Select(s => $"\"{XorEncodeToJsHex(s, xorKey)}\""));
+        var decoder = $"var _$e=[{tableEntries}],_$d=function(i){{var s=_$e[i],r=\"\";for(var j=0;j<s.length;j++)r+=String.fromCharCode(s.charCodeAt(j)^{xorKey});return r}};";
+
+        // Replace quoted sensitive strings with decoder calls
+        var result = minified;
+        for (int i = 0; i < _encryptStrings.Length; i++)
+        {
+            result = result.Replace($"\"{_encryptStrings[i]}\"", $"_$d({i})");
+        }
+
+        // Inject decoder after IIFE opening brace: !function(){ or (function(){
+        var insertAt = result.IndexOf("function(){", StringComparison.Ordinal);
+        if (insertAt >= 0)
+        {
+            insertAt += "function(){".Length;
+            result = result.Insert(insertAt, decoder);
+        }
+
+        return result;
+    }
+
+    // ========================================================================
+    // CANARY TOKEN — per-customer marker for leak attribution
+    // ========================================================================
+
+    private static string GenerateCanary(string pixlUrl)
+    {
+        // XOR-encode the PiXL URL → base64. Decodable back to customer identity.
+        const byte key = 0x5A;
+        var bytes = Encoding.UTF8.GetBytes(pixlUrl);
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] ^= key;
+        return Convert.ToBase64String(bytes);
     }
 
     /// <summary>
-    /// Returns minified script with PiXL URL injected. Cached per URL.
-    /// Minification happens once at startup; per-URL substitution is cached.
-    /// Evicts the entire cache if it grows beyond MaxCacheEntries to bound memory.
+    /// Decodes a canary token back to the original PiXL URL for leak attribution.
+    /// </summary>
+    public static string DecodeCanary(string canary)
+    {
+        const byte key = 0x5A;
+        var bytes = Convert.FromBase64String(canary);
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] ^= key;
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    // ========================================================================
+    // TEMPLATE PROCESSING
+    // ========================================================================
+
+    private static string MinifyTemplate(string template)
+    {
+        var result = Uglify.Js(template);
+        return result.HasErrors ? template : result.Code;
+    }
+
+    /// <summary>
+    /// Returns obfuscated, minified PiXL Collector script with per-customer:
+    /// - XOR-encrypted string literals (hides detection methodology)
+    /// - Canary token (enables leak attribution)
+    /// - PiXL URL injection
+    /// Cached per URL — first serve ~100µs, subsequent serves zero-alloc.
     /// </summary>
     public static string GetScript(string pixlUrl)
     {
         if (_cache.Count >= MaxCacheEntries)
+            _cache.Clear();
+        return _cache.GetOrAdd(pixlUrl, url =>
         {
-            _cache.Clear(); // Nuclear eviction — acceptable since warm-up is cheap
-        }
-        return _cache.GetOrAdd(pixlUrl, url => _minifiedTemplate.Replace("{{PIXL_URL}}", url));
+            var result = _minifiedTemplate;
+            result = EncryptStrings(result, DeriveXorKey(url));
+            result = result
+                .Replace("%%CANARY%%", GenerateCanary(url))
+                .Replace("{{PIXL_URL}}", url);
+            return result;
+        });
+    }
+
+    /// <summary>
+    /// Returns minified PiXL Lite script with PiXL URL injected. Cached per URL.
+    /// No obfuscation needed — Lite contains no intellectual property.
+    /// </summary>
+    public static string GetLiteScript(string pixlUrl)
+    {
+        if (_liteCache.Count >= MaxCacheEntries)
+            _liteCache.Clear();
+        return _liteCache.GetOrAdd(pixlUrl, url => _minifiedLiteTemplate.Replace("{{PIXL_URL}}", url));
     }
 }

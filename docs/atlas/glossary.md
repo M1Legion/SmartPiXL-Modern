@@ -31,7 +31,11 @@ related:
 | **Signal** | A named indicator that informs a detection decision. Each signal has a score weight. Example: `webdriver` (+10 points) |
 | **Enrichment** | Data added server-side (not from the browser). Enrichments are prefixed with `_srv_` internally. Example: country code from IP lookup |
 | **Score** | A weighted integer accumulated from individual signals. Not raw data — it's derived. Example: `botScore=35` |
-| **PiXL Script** | JavaScript code that runs in the visitor's browser and collects 159 data fields |
+| **PiXL Tag** | The `<script src="...">` HTML element placed on a customer's website. This is what the customer copies into their page header. |
+| **PiXL Collector** | The full fingerprinting JavaScript served by Edge — the `Template` constant in PiXLScript.cs. This is the intellectual property. Contains canvas/WebGL/audio fingerprinting, bot detection, behavioral biometrics, evasion detection. |
+| **PiXL Lite** | The reduced JavaScript served when the request doesn't match the expected customer domain. Collects only data equivalent to HTTP headers (screen, UA, timezone, page URL) plus a `_lite=1` flag. No fingerprinting IP. |
+| **PiXL Beacon** | The data payload sent from the browser back to Edge (`_SMART.DATA` POST or `_SMART.GIF` query string). Contains the collected signals. |
+| **PiXL URL** | The full resource path pattern: `/{companyId}/{pixlId}_{domain}_SMART.{ext}`. Example: `/12345/00053_m1-data.com_SMART.js` |
 | **Edge** | The web server that receives pixel hits (under 10ms per request) |
 | **Forge** | The enrichment engine that adds intelligence to raw visitor data |
 | **Sentinel** | The dashboard service (under development) |

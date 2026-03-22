@@ -33,7 +33,7 @@ namespace SmartPiXL.Forge.Services;
 internal static class ParsedRecordParser
 {
     /// <summary>Number of columns written to PiXL.Parsed (excludes SourceId which is SEQUENCE-generated).</summary>
-    internal const int ColumnCount = 230;
+    internal const int ColumnCount = 252;
 
     /// <summary>
     /// Column names for <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> mappings.
@@ -305,6 +305,30 @@ internal static class ParsedRecordParser
 
         // ── Raw field: HeadersJson (merged from PiXL.Raw) ──────────────
         "HeadersJson",              // 229 — nvarchar(max) ← TrackingData.HeadersJson
+
+        // ── Phase 8E: Edge HTTP context signals (cols 231–251) ─────────
+        "Srv_HttpVersion",          // 230 — varchar  ← '_srv_httpVer'
+        "Srv_HeaderCount",          // 231 — int      ← '_srv_hdrCount'
+        "Srv_HeaderOrderHash",      // 232 — char(16) ← '_srv_hdrOrder'
+        "Srv_AcceptLanguage",       // 233 — nvarchar ← '_srv_acceptLang'
+        "Srv_AcceptEncoding",       // 234 — nvarchar ← '_srv_acceptEnc'
+        "Srv_Accept",               // 235 — nvarchar ← '_srv_accept'
+        "Srv_Connection",           // 236 — varchar  ← '_srv_conn'
+        "Srv_DNT",                  // 237 — varchar  ← '_srv_dnt'
+        "Srv_FetchSite",            // 238 — varchar  ← '_srv_fetchSite'
+        "Srv_FetchMode",            // 239 — varchar  ← '_srv_fetchMode'
+        "Srv_FetchDest",            // 240 — varchar  ← '_srv_fetchDest'
+        "Srv_CH_UA",                // 241 — nvarchar ← '_srv_chUa'
+        "Srv_CH_Platform",          // 242 — nvarchar ← '_srv_chPlatform'
+        "Srv_CH_Mobile",            // 243 — varchar  ← '_srv_chMobile'
+        "Srv_CH_Model",             // 244 — nvarchar ← '_srv_chModel'
+        "Srv_CH_PlatformVersion",   // 245 — nvarchar ← '_srv_chPlatVer'
+        "Srv_CH_Arch",              // 246 — nvarchar ← '_srv_chArch'
+        "Srv_CH_Bitness",           // 247 — varchar  ← '_srv_chBitness'
+        "Srv_CH_FullVersionList",   // 248 — nvarchar ← '_srv_chFullVer'
+        "Srv_Priority",             // 249 — varchar  ← '_srv_priority'
+        "Srv_TlsVersion",           // 250 — varchar  ← '_srv_tlsVer'  (placeholder — needs reverse proxy)
+        "Srv_TlsCipher",            // 251 — varchar  ← '_srv_tlsCipher' (placeholder — needs reverse proxy)
     ];
 
     /// <summary>
@@ -624,6 +648,32 @@ internal static class ParsedRecordParser
         // RAW FIELD — HeadersJson preserved for re-parse capability
         // ════════════════════════════════════════════════════════════════
         v[229] = (object?)headersJson ?? DBNull.Value;          // HeadersJson
+
+        // ════════════════════════════════════════════════════════════════
+        // PHASE 8E — Edge HTTP context signals (added by CaptureAndEnqueue)
+        // ════════════════════════════════════════════════════════════════
+        v[230] = QsStr(qs, "_srv_httpVer");                     // Srv_HttpVersion
+        v[231] = QsInt(qs, "_srv_hdrCount");                    // Srv_HeaderCount
+        v[232] = QsStr(qs, "_srv_hdrOrder");                    // Srv_HeaderOrderHash
+        v[233] = QsStr(qs, "_srv_acceptLang");                  // Srv_AcceptLanguage
+        v[234] = QsStr(qs, "_srv_acceptEnc");                   // Srv_AcceptEncoding
+        v[235] = QsStr(qs, "_srv_accept");                      // Srv_Accept
+        v[236] = QsStr(qs, "_srv_conn");                        // Srv_Connection
+        v[237] = QsStr(qs, "_srv_dnt");                         // Srv_DNT
+        v[238] = QsStr(qs, "_srv_fetchSite");                   // Srv_FetchSite
+        v[239] = QsStr(qs, "_srv_fetchMode");                   // Srv_FetchMode
+        v[240] = QsStr(qs, "_srv_fetchDest");                   // Srv_FetchDest
+        v[241] = QsStr(qs, "_srv_chUa");                        // Srv_CH_UA
+        v[242] = QsStr(qs, "_srv_chPlatform");                  // Srv_CH_Platform
+        v[243] = QsStr(qs, "_srv_chMobile");                    // Srv_CH_Mobile
+        v[244] = QsStr(qs, "_srv_chModel");                     // Srv_CH_Model
+        v[245] = QsStr(qs, "_srv_chPlatVer");                   // Srv_CH_PlatformVersion
+        v[246] = QsStr(qs, "_srv_chArch");                      // Srv_CH_Arch
+        v[247] = QsStr(qs, "_srv_chBitness");                   // Srv_CH_Bitness
+        v[248] = QsStr(qs, "_srv_chFullVer");                   // Srv_CH_FullVersionList
+        v[249] = QsStr(qs, "_srv_priority");                    // Srv_Priority
+        v[250] = QsStr(qs, "_srv_tlsVer");                      // Srv_TlsVersion
+        v[251] = QsStr(qs, "_srv_tlsCipher");                   // Srv_TlsCipher
 
         return v;
     }
