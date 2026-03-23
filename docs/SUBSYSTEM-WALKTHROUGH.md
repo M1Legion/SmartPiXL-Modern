@@ -56,6 +56,147 @@ Decisions made during walkthroughs that affect architecture.
 | D16 | Enrichments are non-optional (constructor params required) | All 18 enrichment services + BackgroundIpEnrichmentService are required DI registrations. Null-check guards removed from EnrichRecord. EnableEnrichments toggle kept as master kill switch. | 2026-03-19 |
 | D17 | Hybrid dedup eviction (time + count) | BackgroundIpEnrichmentService eviction: every 5min, remove >30min stale entries first, then cap at 500K keeping 250K most recent. Replaces nuclear `Clear()` that killed cache effectiveness during traffic swings. | 2026-03-19 |
 | D18 | Dead-letter format unified to JSONL | All failover/dead-letter persistence uses JSONL (one JSON object per line). Legacy JSON array files handled as fallback in ForgeReplayService. | 2026-03-19 |
+| D19 | **Health Tree — organizing principle for SmartPiXL** | Hierarchical tree: Platform → System → Subsystem → Component → Probe. Probes are leaves (binary health). Parents aggregate as ratios. Metrics are continuous; health is derived boolean. Tree is a living document, defined now, filled by walkthroughs. See Health Tree section. | 2026-03-23 |
+
+---
+
+## Health Tree
+
+The single source of truth for how SmartPiXL is organized, monitored, and explained.
+Every node in this tree is either a **container** (has children, health = ratio) or a **probe** (leaf, health = 1 or 0). Metrics are continuous measurements (counters, timings). Health is a derived binary judgment that consumes metrics. The tree doesn't replace ForgeMetrics — it sits on top of it.
+
+### Design Principles
+
+**Naming taxonomy.** Fixed vocabulary by depth — no "sub-sub-subsystem" language:
+
+| Depth | Term | Example |
+|-------|------|---------|
+| 0 | **Platform** | SmartPiXL |
+| 1 | **System** | Forge, Edge, Sentinel |
+| 2 | **Subsystem** | Data Sync, Enrichment Engine, SQL Writer |
+| 3 | **Component** | IpDataAcquisitionService, CompanyPiXLSyncService |
+| 4 | **Probe** | IPtoASN import, DB-IP import |
+
+Depth varies by branch. The tree is asymmetric and that's correct — depth reflects actual complexity, not a structural requirement. Refer to nodes by name, not by depth. "Bloom," not "the renderer's post-processing subsystem's bloom component."
+
+**Probe definition — the smallest unit worth measuring.** A probe (leaf node) must satisfy ALL four criteria:
+
+1. **Independently failable** — It can break while its siblings stay healthy.
+2. **Independently diagnosable** — When it fails, you know *what* broke without investigating siblings.
+3. **Independently actionable** — There's a specific thing you'd do to fix it.
+4. **Not further decomposable** into meaningfully separate failure modes that you'd act on differently.
+
+Test: *"Would I page myself differently depending on which child failed?"* If yes, decompose further. If no, it's a leaf.
+
+**Health vs. Metrics.** Two layers, not one:
+- **Metrics** = continuous measurements (ForgeMetrics Lanes 1-5). Answer: *"How is it performing?"*
+- **Health** = derived boolean per probe. Each probe has a **health function** — a rule that turns recent metrics into 1 or 0. Answer: *"Is it working?"*
+
+**Ratio aggregation.** Each non-leaf node stores (healthy, total):
+
+    Parent health = Σ(child healthy) / Σ(child total)
+
+This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 5/5 = **16.95/18** platform-wide. One number tells the whole story. Drill down to find what's missing. Display thresholds:
+- 100% = green
+- 50–99% = yellow (degraded)  
+- <50% = red (critical)
+
+### The Tree
+
+Living document. Nodes marked `(?)` have not been walked yet. Each walkthrough fills in its branch. The tree grows with the project.
+
+```
+SmartPiXL (platform)                               16.95/18 (example)
+│
+├── Edge (system)                                   health = 5/5 components
+│   ├── HTTP Listener                               probe: Kestrel responding
+│   ├── Capture Pipeline                            probe: requests → TrackingData succeeding
+│   ├── Pipe Client                                 probe: connected to Forge pipe
+│   ├── JSONL Failover                              probe: writable, not actively failing over
+│   └── Edge Enrichments                            health = 5/5 probes
+│       ├── DatacenterIp                            probe: CIDR ranges loaded
+│       ├── IpClassification                        probe: classifying (stateless → always 1)
+│       ├── IpBehavior                              probe: tracking state
+│       ├── FingerprintStability                    probe: tracking state
+│       └── GeoCache                                probe: cache populated, SQL reachable
+│
+├── Forge (system)                                  health = 9/9 subsystems
+│   ├── F1: Ingest                                  health = 2/2
+│   │   ├── Pipe Listener                           probe: accepting connections
+│   │   └── Enrichment Channel                      probe: not full, consumers alive
+│   │
+│   ├── F2: Enrichment Engine                       health = ?/? (per-service probes)
+│   │   ├── Worker Pool                             probe: workers alive, processing
+│   │   ├── UaParsing                               probe: stateless → always 1
+│   │   ├── BotUaDetection                          probe: stateless → always 1
+│   │   ├── DnsLookup                               probe: recent lookups succeeding
+│   │   ├── WhoisAsn                                probe: recent lookups succeeding
+│   │   ├── MaxMindGeo                              probe: last refresh < 25h
+│   │   ├── IpClassification                        probe: stateless → always 1
+│   │   ├── ContradictionMatrix                     probe: stateless → always 1
+│   │   ├── DeviceAffluence                         probe: stateless → always 1
+│   │   ├── DeviceAgeEstimation                     probe: stateless → always 1
+│   │   ├── DeadInternet                            probe: stateless → always 1
+│   │   ├── GeographicArbitrage                     probe: stateless → always 1
+│   │   ├── BehavioralReplay                        probe: stateless → always 1
+│   │   ├── CrossCustomerIntel                      probe: stateless → always 1
+│   │   ├── SessionStitching                        probe: stateless → always 1
+│   │   ├── GpuTierReference                        probe: stateless → always 1
+│   │   └── LeadQualityScoring                      probe: stateless → always 1
+│   │
+│   ├── F3: SQL Writer                              health = 1/1
+│   │   └── BulkCopy                                probe: batches writing, no failures
+│   │
+│   ├── F4: Failover & Replay                       health = 2/2
+│   │   ├── Failover Writer                         probe: writable (disk ok → always 1)
+│   │   └── Replay Service                          probe: no stuck files > 1h old
+│   │
+│   ├── F5: ETL Pipeline                            health = 2/2
+│   │   ├── MatchVisits                             probe: last run < 2min ago
+│   │   └── MatchLegacyVisits                       probe: last run < 2min ago
+│   │
+│   ├── F6: Background IP                           health = 2/2
+│   │   ├── DNS Enrichment                          probe: lookups processing
+│   │   └── WHOIS Enrichment                        probe: lookups processing
+│   │
+│   ├── F7: Data Sync                               health = 2/2
+│   │   ├── Company/Pixel Sync                      probe: last sync < 7h, 0 failures
+│   │   └── IP Data Acquisition                     health = 2/2
+│   │       ├── IPtoASN                             probe: last import < 26h
+│   │       └── DB-IP                               probe: last import < 35 days
+│   │
+│   ├── F8: Ops & Health (?)                        not walked — structure TBD
+│   │
+│   └── F9: Infrastructure (?)                      not walked — structure TBD
+│
+└── Sentinel (system) (?)                           not walked — structure TBD
+    ├── Tron Dashboard (?)                          probe: responding, data fresh
+    ├── Atlas Docs (?)                              probe: responding
+    └── TrafficAlert API (?)                        probe: responding
+```
+
+### MetricsLane → Tree Mapping
+
+ForgeMetrics lanes map to subtrees. Each lane provides the raw data that probe health functions consume.
+
+| Lane | Counters | Tree Node(s) |
+|------|----------|--------------|
+| 1 — Pipe→Channel | PipeCount, PipeTotalTicks, PipeDrops | F1: Ingest |
+| 2 — Enrichment→Channel | EnrichCount, EnrichTotalTicks, EnrichDrops | F2: Enrichment Engine |
+| 3 — SQL→DB | SqlCount, SqlBatchCount, SqlFailures | F3: SQL Writer |
+| 3b — Background IP | BgIpEnqueued, BgIpProcessed, BgIpDnsLookups, BgIpWhoisLookups | F6: Background IP |
+| 4 — Data Sync | SyncCompanyCycles, SyncPixelCycles, SyncFailures, SyncDurationTicks | F7: Company/Pixel Sync |
+| 5 — IP Acquisition | IpAcqCycles, IpAcqAsnRows, IpAcqGeoRows, IpAcqSkipped, IpAcqFailures | F7: IP Data Acquisition |
+| (future) | F8 Ops counters TBD | F8: Ops & Health |
+| — | Failover/Replay counters | F4: Failover & Replay |
+| — | Pipe connect/disconnect | F1: Ingest |
+
+### Open Questions
+
+- **Stateless enrichments:** 12 of 17 enrichment probes are "stateless → always 1." Should these be individual probes, or collapsed into a single "Stateless Enrichments" probe that checks "did the enrichment pipeline run without exceptions"? Individual probes are more precise but mostly noise (they're always green). Collapsed is cleaner but loses granularity if one is ever made stateful.
+- **Edge enrichments vs. Forge enrichments:** IpClassification exists in both Edge and Forge. Should the tree show it once or twice? Currently shown in both because they're separate service instances with separate failure modes.
+- **SQL schema, CLR, test suite (subsystems 5, 14, 15):** These aren't runtime services — they don't have "health." Should they exist in the tree at all, or is the tree strictly for runtime components? The walkthroughs still cover them, but they might not be tree nodes.
+- **Sentinel structure:** Only sketched with 3 guesses. Actual structure TBD in subsystem 10 walkthrough.
 
 ---
 
@@ -1255,4 +1396,6 @@ The `TrackingSettings.cs` comments document this is needed because Xavier's SQL 
 
 **FD44 (Q4) — CompanyPiXLSyncService timeline.** Months minimum. Owner is sole developer. No formal decommission date; depends on front-end replacement progress.
 
-**FD45 — Hierarchical health tree concept (new).** Owner proposed a composite health check pattern: leaf subsystems report binary 1/0 health, parent nodes aggregate as ratios (e.g., "Data Sync 2/2", "IpDataAcquisition 2/3"). Maps the existing ForgeMetrics + subsystem structure into a standardized tree. Design deferred until F1-F9 walkthroughs complete and the full tree shape is known.
+**FD45 — Hierarchical health tree concept (new).** Owner proposed a composite health check pattern: leaf subsystems report binary 1/0 health, parent nodes aggregate as ratios (e.g., "Data Sync 2/2", "IpDataAcquisition 2/3"). Maps the existing ForgeMetrics + subsystem structure into a standardized tree. ~~Design deferred until F1-F9 walkthroughs complete and the full tree shape is known.~~ → Superseded by FD46.
+
+**FD46 — Health tree is the organizing principle, defined NOW, filled incrementally.** Owner corrected the deferral: "After F8 and F9 there's subsystems 5-15. I don't really get doing this AFTER all that." The tree is a living design document that starts with known structure (F1-F7, Edge, Sentinel surface area) and grows as walkthroughs fill in branches. F8 (Ops & Health) should be *guided by* the tree concept, not walked blind and later restructured. See **Health Tree** section below for the full design.
