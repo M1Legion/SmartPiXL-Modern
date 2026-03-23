@@ -57,6 +57,7 @@ Decisions made during walkthroughs that affect architecture.
 | D17 | Hybrid dedup eviction (time + count) | BackgroundIpEnrichmentService eviction: every 5min, remove >30min stale entries first, then cap at 500K keeping 250K most recent. Replaces nuclear `Clear()` that killed cache effectiveness during traffic swings. | 2026-03-19 |
 | D18 | Dead-letter format unified to JSONL | All failover/dead-letter persistence uses JSONL (one JSON object per line). Legacy JSON array files handled as fallback in ForgeReplayService. | 2026-03-19 |
 | D19 | **Health Tree — organizing principle for SmartPiXL** | Hierarchical tree: Platform → System → Subsystem → Component → Probe. Probes are leaves (binary health). Parents aggregate as ratios. Metrics are continuous; health is derived boolean. Tree is a living document, defined now, filled by walkthroughs. See Health Tree section. | 2026-03-23 |
+| D20 | **Probe audit — 6 enrichments reclassified stateful** | Agent examined every service against probe definition. UaParsing, BotUaDetection, DeadInternet, BehavioralReplay, CrossCustomerIntel, SessionStitching all maintain ConcurrentDictionary/BoundedCache state. Only 7 enrichments are truly stateless. Each enrichment stays an individual probe (owner: "use the rules"). Non-runtime subsystems (SQL schema, CLR, tests) are NOT tree nodes. | 2026-03-23 |
 
 ---
 
@@ -106,41 +107,45 @@ This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 5/5 = **16.95/18**
 Living document. Nodes marked `(?)` have not been walked yet. Each walkthrough fills in its branch. The tree grows with the project.
 
 ```
-SmartPiXL (platform)                               16.95/18 (example)
+SmartPiXL (platform)                               38/38 probes walked (+ F8, F9, Sentinel TBD)
 │
-├── Edge (system)                                   health = 5/5 components
-│   ├── HTTP Listener                               probe: Kestrel responding
+├── Edge (system)                                   health = 9/9 probes
+│   ├── HTTP Listener                               probe: Kestrel responding on port
 │   ├── Capture Pipeline                            probe: requests → TrackingData succeeding
-│   ├── Pipe Client                                 probe: connected to Forge pipe
-│   ├── JSONL Failover                              probe: writable, not actively failing over
+│   ├── Pipe Client                                 probe: connected to Forge pipe, data flowing
+│   ├── JSONL Failover                              probe: disk writable, not accumulating old files
 │   └── Edge Enrichments                            health = 5/5 probes
-│       ├── DatacenterIp                            probe: CIDR ranges loaded
+│       ├── DatacenterIp                            probe: CIDR ranges loaded (HTTP at startup)
 │       ├── IpClassification                        probe: classifying (stateless → always 1)
-│       ├── IpBehavior                              probe: tracking state
-│       ├── FingerprintStability                    probe: tracking state
+│       ├── IpBehavior                              probe: IMemoryCache bounded, tracking
+│       ├── FingerprintStability                    probe: IMemoryCache bounded, tracking
 │       └── GeoCache                                probe: cache populated, SQL reachable
 │
-├── Forge (system)                                  health = 9/9 subsystems
+├── Forge (system)                                  health = 29/29 probes walked (+ F8, F9 TBD)
 │   ├── F1: Ingest                                  health = 2/2
 │   │   ├── Pipe Listener                           probe: accepting connections
 │   │   └── Enrichment Channel                      probe: not full, consumers alive
 │   │
-│   ├── F2: Enrichment Engine                       health = ?/? (per-service probes)
+│   ├── F2: Enrichment Engine                       health = 17/17
 │   │   ├── Worker Pool                             probe: workers alive, processing
-│   │   ├── UaParsing                               probe: stateless → always 1
-│   │   ├── BotUaDetection                          probe: stateless → always 1
-│   │   ├── DnsLookup                               probe: recent lookups succeeding
-│   │   ├── WhoisAsn                                probe: recent lookups succeeding
-│   │   ├── MaxMindGeo                              probe: last refresh < 25h
+│   │   │
+│   │   │  ── Stateful (cache/state that can degrade) ──
+│   │   ├── UaParsing                               probe: BoundedCache ≤50K, parse succeeding
+│   │   ├── BotUaDetection                          probe: BoundedCache ≤50K, detection succeeding
+│   │   ├── DnsLookup                               probe: DNS servers reachable, cache healthy
+│   │   ├── WhoisAsn                                probe: WHOIS servers reachable, cache healthy
+│   │   ├── MaxMindGeo                              probe: .mmdb loaded, cache ≤200K
+│   │   ├── DeadInternet                            probe: memory bounded, eviction running
+│   │   ├── BehavioralReplay                        probe: memory bounded, eviction running
+│   │   ├── CrossCustomerIntel                      probe: memory bounded, tracker count stable
+│   │   ├── SessionStitching                        probe: memory bounded, sessions evicting
+│   │   │
+│   │   │  ── Stateless (pure computation, always 1) ──
 │   │   ├── IpClassification                        probe: stateless → always 1
 │   │   ├── ContradictionMatrix                     probe: stateless → always 1
 │   │   ├── DeviceAffluence                         probe: stateless → always 1
 │   │   ├── DeviceAgeEstimation                     probe: stateless → always 1
-│   │   ├── DeadInternet                            probe: stateless → always 1
 │   │   ├── GeographicArbitrage                     probe: stateless → always 1
-│   │   ├── BehavioralReplay                        probe: stateless → always 1
-│   │   ├── CrossCustomerIntel                      probe: stateless → always 1
-│   │   ├── SessionStitching                        probe: stateless → always 1
 │   │   ├── GpuTierReference                        probe: stateless → always 1
 │   │   └── LeadQualityScoring                      probe: stateless → always 1
 │   │
@@ -148,7 +153,7 @@ SmartPiXL (platform)                               16.95/18 (example)
 │   │   └── BulkCopy                                probe: batches writing, no failures
 │   │
 │   ├── F4: Failover & Replay                       health = 2/2
-│   │   ├── Failover Writer                         probe: writable (disk ok → always 1)
+│   │   ├── Failover Writer                         probe: disk writable (always 1 unless disk fails)
 │   │   └── Replay Service                          probe: no stuck files > 1h old
 │   │
 │   ├── F5: ETL Pipeline                            health = 2/2
@@ -159,7 +164,7 @@ SmartPiXL (platform)                               16.95/18 (example)
 │   │   ├── DNS Enrichment                          probe: lookups processing
 │   │   └── WHOIS Enrichment                        probe: lookups processing
 │   │
-│   ├── F7: Data Sync                               health = 2/2
+│   ├── F7: Data Sync                               health = 3/3
 │   │   ├── Company/Pixel Sync                      probe: last sync < 7h, 0 failures
 │   │   └── IP Data Acquisition                     health = 2/2
 │   │       ├── IPtoASN                             probe: last import < 26h
@@ -170,9 +175,6 @@ SmartPiXL (platform)                               16.95/18 (example)
 │   └── F9: Infrastructure (?)                      not walked — structure TBD
 │
 └── Sentinel (system) (?)                           not walked — structure TBD
-    ├── Tron Dashboard (?)                          probe: responding, data fresh
-    ├── Atlas Docs (?)                              probe: responding
-    └── TrafficAlert API (?)                        probe: responding
 ```
 
 ### MetricsLane → Tree Mapping
@@ -191,12 +193,40 @@ ForgeMetrics lanes map to subtrees. Each lane provides the raw data that probe h
 | — | Failover/Replay counters | F4: Failover & Replay |
 | — | Pipe connect/disconnect | F1: Ingest |
 
-### Open Questions
+### Resolved Questions
 
-- **Stateless enrichments:** 12 of 17 enrichment probes are "stateless → always 1." Should these be individual probes, or collapsed into a single "Stateless Enrichments" probe that checks "did the enrichment pipeline run without exceptions"? Individual probes are more precise but mostly noise (they're always green). Collapsed is cleaner but loses granularity if one is ever made stateful.
-- **Edge enrichments vs. Forge enrichments:** IpClassification exists in both Edge and Forge. Should the tree show it once or twice? Currently shown in both because they're separate service instances with separate failure modes.
-- **SQL schema, CLR, test suite (subsystems 5, 14, 15):** These aren't runtime services — they don't have "health." Should they exist in the tree at all, or is the tree strictly for runtime components? The walkthroughs still cover them, but they might not be tree nodes.
-- **Sentinel structure:** Only sketched with 3 guesses. Actual structure TBD in subsystem 10 walkthrough.
+- **Stateless enrichments → individual probes.** Owner: "Use the rules we wrote." Probe definition applied: each service IS independently failable (code bug could break one while siblings stay healthy), independently diagnosable (you'd look at different code), and independently actionable (fix different service). All 16 enrichments are individual leaf probes. 7 are truly stateless (always 1). 9 are stateful — see Probe Audit below.
+- **Edge enrichments vs. Forge enrichments → separate leaves.** Owner: "The enrichments are not actually the same, they're just all IP related." Edge runs DatacenterIp, IpClassification, IpBehavior, FingerprintStability, GeoCache. Forge runs 16 different enrichments. Different service instances, different failure modes, different trees.
+- **SQL schema, CLR, test suite (subsystems 5, 14, 15) → NOT tree nodes.** Owner: "Not a single thing in SQL is finalized. Having those files makes it look like we have an explicit SQL anything, which we do not." The tree is strictly runtime components. Walkthroughs still cover these subsystems but they don't get health probes.
+- **Sentinel structure → deferred.** Owner has built 5 different test concept pages. Structure TBD when Sentinel stabilizes in subsystem 10 walkthrough. Sentinel placeholder removed from tree until then.
+
+### Probe Audit (2026-03-23)
+
+Agent analysis of every service file against the probe definition. Three sub-agents examined Edge (SmartPiXL/Services/), Forge (SmartPiXL.Forge/Services/), and Shared enrichments (SmartPiXL.Shared/Services/). Key finding: **6 enrichments previously labeled "stateless → always 1" actually maintain mutable state.**
+
+**Corrections from audit:**
+
+| Service | Was | Actually | Why |
+|---------|-----|----------|-----|
+| UaParsing | stateless → always 1 | **stateful** | BoundedCache (50K), UAParser + DeviceDetector regex engines |
+| BotUaDetection | stateless → always 1 | **stateful** | BoundedCache (50K), NetCrawlerDetect regex engine |
+| DeadInternet | stateless → always 1 | **stateful** | ConcurrentDictionary per-customer hour buckets, eviction timer |
+| BehavioralReplay | stateless → always 1 | **stateful** | ConcurrentDictionary path hash cache, eviction timer |
+| CrossCustomerIntel | stateless → always 1 | **stateful** | ConcurrentDictionary per-IP+FP window trackers |
+| SessionStitching | stateless → always 1 | **stateful** | ConcurrentDictionary session state |
+
+**Confirmed stateless (7 services):** IpClassification (static class), ContradictionMatrix, DeviceAffluence, DeviceAgeEstimation, GeographicArbitrage, GpuTierReference (static class), LeadQualityScoring. These are pure computation — no constructors, no mutable state, no external calls. Health = always 1 unless code bug.
+
+**Confirmed stateful (9 services):** The 6 corrected above + DnsLookup (BoundedCache + DNS network calls), WhoisAsn (BoundedCache + WHOIS + SQL), MaxMindGeo (BoundedCache 200K + .mmdb file DB). These can degrade: cache growth, external service timeouts, eviction failures.
+
+**Probe count:**
+
+| System | Walked Probes | TBD |
+|--------|--------------|-----|
+| Edge | 9 | — |
+| Forge F1–F7 | 29 | F8, F9 |
+| Sentinel | — | All |
+| **Total** | **38** | **+ F8 + F9 + Sentinel** |
 
 ---
 
