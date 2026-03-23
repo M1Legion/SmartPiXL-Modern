@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Text.RegularExpressions;
 using DnsClient;
@@ -14,10 +13,10 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 //
 // TIMEOUT: 2 seconds per lookup — will not block the enrichment pipeline.
 // CACHING: Two tiers:
-//   1. Application-level ConcurrentDictionary — caches ALL results (including
-//      NXDOMAIN / timeout = default) for the lifetime of the process. Evicted
-//      when cache exceeds 200K entries. This prevents repeated 2s DNS timeouts
-//      for the same IP across multiple enrichment workers.
+//   1. Application-level BoundedCache — caches ALL results (including
+//      NXDOMAIN / timeout = default) with hybrid time+count eviction.
+//      Eviction called periodically by BackgroundIpEnrichmentService.
+//      This prevents repeated 2s DNS timeouts for the same IP.
 //   2. DnsClient internal cache — TTL-based caching per DNS spec.
 //
 // APPENDED PARAMS:
@@ -38,9 +37,10 @@ public sealed partial class DnsLookupService
 
     // Application-level cache: IP → DnsLookupResult (including "no result" = default).
     // Prevents repeated 2s DNS lookups for the same IP across concurrent workers.
-    // Bounded at 200K entries — cleared entirely when exceeded.
-    private readonly ConcurrentDictionary<string, DnsLookupResult> _cache = new(StringComparer.Ordinal);
+    // Hybrid eviction (time + count) via BoundedCache — no more nuclear Clear().
+    private readonly BoundedCache<string, DnsLookupResult> _cache;
     private const int MaxCacheSize = 200_000;
+    private const int EvictTarget = 100_000;
 
     // Pre-compiled cloud hostname patterns
     [GeneratedRegex(@"(ec2-|\.compute\.amazonaws\.com|\.compute\.internal|\.compute-1\.amazonaws\.com)", RegexOptions.IgnoreCase)]
@@ -78,12 +78,14 @@ public sealed partial class DnsLookupService
     public DnsLookupResult? TryGetCached(string? ipAddress)
     {
         if (ipAddress is null) return null;
-        return _cache.TryGetValue(ipAddress, out var result) ? result : null;
+        return _cache.TryGet(ipAddress, out var result) ? result : null;
     }
 
     public DnsLookupService(ITrackingLogger logger)
     {
         _logger = logger;
+        _cache = new BoundedCache<string, DnsLookupResult>(
+            MaxCacheSize, EvictTarget, TimeSpan.FromMinutes(30), StringComparer.Ordinal);
         var options = new LookupClientOptions
         {
             Timeout = s_timeout,
@@ -106,7 +108,7 @@ public sealed partial class DnsLookupService
             return default;
 
         // Application-level cache hit — includes "no PTR" (default) results
-        if (_cache.TryGetValue(ipAddress, out var cached))
+        if (_cache.TryGet(ipAddress, out var cached))
             return cached;
 
         if (!IPAddress.TryParse(ipAddress, out var ip))
@@ -152,13 +154,16 @@ public sealed partial class DnsLookupService
             // Cache the miss so we don't retry this IP
         }
 
-        // Cache both hits and misses. Evict if over capacity.
-        if (_cache.Count >= MaxCacheSize)
-            _cache.Clear();
-
-        _cache.TryAdd(ipAddress, result);
+        // Cache both hits and misses. Eviction handled by periodic Evict() call.
+        _cache.Set(ipAddress, result);
         return result;
     }
+
+    /// <summary>
+    /// Evicts stale/excess entries from the DNS cache. Called periodically
+    /// by BackgroundIpEnrichmentService.
+    /// </summary>
+    public int EvictCache() => _cache.Evict();
 
     /// <summary>
     /// Checks if the hostname matches known cloud/datacenter provider patterns.

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using MaxMind.Db;
 using MaxMind.GeoIP2;
 using MaxMind.GeoIP2.Exceptions;
@@ -41,8 +40,9 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class MaxMindGeoService : IDisposable
 {
-    private readonly ConcurrentDictionary<string, MaxMindResult> _cache = new(StringComparer.Ordinal);
+    private readonly BoundedCache<string, MaxMindResult> _cache;
     private const int MaxCacheSize = 200_000;
+    private const int EvictTarget = 100_000;
     private readonly DatabaseReader? _cityReader;
     private readonly DatabaseReader? _asnReader;
     private readonly DatabaseReader? _countryReader;
@@ -66,6 +66,8 @@ public sealed class MaxMindGeoService : IDisposable
     public MaxMindGeoService(ITrackingLogger logger, string? databaseDirectory = null)
     {
         _logger = logger;
+        _cache = new BoundedCache<string, MaxMindResult>(
+            MaxCacheSize, EvictTarget, TimeSpan.FromMinutes(30), StringComparer.Ordinal);
 
         var baseDir = databaseDirectory ?? Path.Combine(AppContext.BaseDirectory, "MaxMind");
 
@@ -90,7 +92,7 @@ public sealed class MaxMindGeoService : IDisposable
 
         // Lock-free cache lookup — avoids triple trie traversal on repeat IPs.
         // IP cardinality is ~38% unique per 100K records = ~62% cache hit rate.
-        if (_cache.TryGetValue(ipAddress, out var cached))
+        if (_cache.TryGet(ipAddress, out var cached))
             return cached;
 
         if (!System.Net.IPAddress.TryParse(ipAddress, out var ip))
@@ -163,12 +165,15 @@ public sealed class MaxMindGeoService : IDisposable
 
         var result = new MaxMindResult(countryCode, region, city, lat, lon, asn, asnOrg, postalCode, timeZone);
 
-        if (_cache.Count >= MaxCacheSize)
-            _cache.Clear();
-
-        _cache.TryAdd(ipAddress, result);
+        _cache.Set(ipAddress, result);
         return result;
     }
+
+    /// <summary>
+    /// Evicts stale/excess entries from the MaxMind cache. Called periodically
+    /// by BackgroundIpEnrichmentService.
+    /// </summary>
+    public int EvictCache() => _cache.Evict();
 
     private DatabaseReader? TryLoadDatabase(string directory, string fileName)
     {

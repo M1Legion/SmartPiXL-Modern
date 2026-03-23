@@ -72,6 +72,15 @@ public sealed class ForgeMetrics
     private int _enrichmentChannelDepth;
     private int _sqlWriterChannelDepth;
 
+    // Lane 3: Background IP enrichment
+    private long _bgIpEnqueued;
+    private long _bgIpProcessed;
+    private long _bgIpDupSkipped;
+    private long _bgIpDnsLookups;
+    private long _bgIpWhoisLookups;
+    private int _bgIpChannelDepth;
+    private int _bgIpDedupCacheSize;
+
     /// <summary>Starts a high-resolution timer. Call <see cref="Record"/> with the result.</summary>
     public static long StartTimer() => Stopwatch.GetTimestamp();
 
@@ -148,6 +157,30 @@ public sealed class ForgeMetrics
         Volatile.Write(ref _sqlWriterChannelDepth, sqlWriterDepth);
     }
 
+    // ── Lane 3: Background IP enrichment ──────────────────────────────
+
+    /// <summary>Records an IP enqueued to the background enrichment channel.</summary>
+    public void RecordBgIpEnqueue() => Interlocked.Increment(ref _bgIpEnqueued);
+
+    /// <summary>Records an IP successfully processed by a background worker.</summary>
+    public void RecordBgIpProcessed() => Interlocked.Increment(ref _bgIpProcessed);
+
+    /// <summary>Records an IP skipped due to dedup cache hit.</summary>
+    public void RecordBgIpDupSkip() => Interlocked.Increment(ref _bgIpDupSkipped);
+
+    /// <summary>Records a DNS lookup performed by a background worker.</summary>
+    public void RecordBgIpDnsLookup() => Interlocked.Increment(ref _bgIpDnsLookups);
+
+    /// <summary>Records a WHOIS lookup performed by a background worker.</summary>
+    public void RecordBgIpWhoisLookup() => Interlocked.Increment(ref _bgIpWhoisLookups);
+
+    /// <summary>Updates the sampled Lane 3 depths (called periodically).</summary>
+    public void SampleBgIpDepths(int channelDepth, int dedupCacheSize)
+    {
+        Volatile.Write(ref _bgIpChannelDepth, channelDepth);
+        Volatile.Write(ref _bgIpDedupCacheSize, dedupCacheSize);
+    }
+
     /// <summary>
     /// Takes a frozen snapshot of all counters and atomically resets them.
     /// Returns the metrics for the elapsed window.
@@ -196,6 +229,15 @@ public sealed class ForgeMetrics
             // Channel depths (sampled, not reset)
             EnrichmentChannelDepth = Volatile.Read(ref _enrichmentChannelDepth),
             SqlWriterChannelDepth = Volatile.Read(ref _sqlWriterChannelDepth),
+
+            // Lane 3: Background IP
+            BgIpEnqueued = Interlocked.Exchange(ref _bgIpEnqueued, 0),
+            BgIpProcessed = Interlocked.Exchange(ref _bgIpProcessed, 0),
+            BgIpDupSkipped = Interlocked.Exchange(ref _bgIpDupSkipped, 0),
+            BgIpDnsLookups = Interlocked.Exchange(ref _bgIpDnsLookups, 0),
+            BgIpWhoisLookups = Interlocked.Exchange(ref _bgIpWhoisLookups, 0),
+            BgIpChannelDepth = Volatile.Read(ref _bgIpChannelDepth),
+            BgIpDedupCacheSize = Volatile.Read(ref _bgIpDedupCacheSize),
         };
 
         return snap;
@@ -286,6 +328,15 @@ public readonly record struct MetricsSnapshot
     public int EnrichmentChannelDepth { get; init; }
     public int SqlWriterChannelDepth { get; init; }
 
+    // ── Lane 3: Background IP ──
+    public long BgIpEnqueued { get; init; }
+    public long BgIpProcessed { get; init; }
+    public long BgIpDupSkipped { get; init; }
+    public long BgIpDnsLookups { get; init; }
+    public long BgIpWhoisLookups { get; init; }
+    public int BgIpChannelDepth { get; init; }
+    public int BgIpDedupCacheSize { get; init; }
+
     // ── Derived values (microseconds) ──
     public double PipeAvgUs => PipeCount > 0 ? PipeTotalTicks / (PipeCount * s_ticksPerUs) : 0;
     public double PipeMinUs => PipeMinTicks == long.MaxValue ? 0 : PipeMinTicks / s_ticksPerUs;
@@ -317,6 +368,9 @@ public readonly record struct MetricsSnapshot
             $"  ENRICH→CH  {EnrichCount,8:N0} rec  {enrichRps,8:N1}/s  avg {EnrichAvgUs,8:N1}μs  min {EnrichMinUs,8:N1}μs  max {EnrichMaxUs,8:N1}μs  drops {EnrichDrops}\n" +
             $"  SQL→DB     {SqlCount,8:N0} rec  {sqlRps,8:N1}/s  avg {SqlAvgMs,8:N1}ms  min {SqlMinMs,8:N1}ms  max {SqlMaxMs,8:N1}ms  batches {SqlBatchCount}  avg/rec {SqlAvgPerRecordUs,8:N1}μs  ~{SqlAvgBatchSize:N1}rec/batch  fill {BatchFillPct:N0}%  fails {SqlFailures}\n" +
             $"  CHANNELS   enrich={EnrichmentChannelDepth:N0}  sqlWriter={SqlWriterChannelDepth:N0}" +
+            (BgIpEnqueued > 0 || BgIpProcessed > 0
+                ? $"\n  LANE3-IP   enq={BgIpEnqueued:N0}  proc={BgIpProcessed:N0}  dedup={BgIpDupSkipped:N0}  dns={BgIpDnsLookups:N0}  whois={BgIpWhoisLookups:N0}  ch={BgIpChannelDepth:N0}  seen={BgIpDedupCacheSize:N0}"
+                : "") +
             (PipeConnects > 0 || PipeDisconnects > 0 ? $"  PIPE conn={PipeConnects} disconn={PipeDisconnects}" : "") +
             (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "") +
             (ReplayFiles > 0 ? $"  REPLAY {ReplayFiles} file(s) {ReplayRecords:N0} rec" : "");

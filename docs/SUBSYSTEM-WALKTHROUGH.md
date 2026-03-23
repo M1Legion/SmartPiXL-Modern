@@ -383,7 +383,7 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F3 | SQL Writer | SqlBulkCopyWriterService, ParsedRecordParser | **DONE** | FD16–FD22 |
 | F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **DONE** | FD23 |
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | **DONE** | FD24–FD32 |
-| F6 | Background IP | BackgroundIpEnrichmentService | **complete** | 2 minor (nuclear Clear), 5 nitpick |
+| F6 | Background IP | BackgroundIpEnrichmentService | **complete** | All 7 observations resolved (FD33-FD37) |
 | F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
 | F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | not started | — |
 | F9 | Infrastructure | ForgeSettings, ForgeMetrics, MetricsReporter, NumaHelper, Program.cs | not started | — |
@@ -1095,3 +1095,20 @@ The key design insight: the pipeline **never waits** for DNS/WHOIS results. Firs
 | O5 | Nitpick | 172.* filter too broad — small fraction of IPs affected |
 | O6 | Nitpick | No ForgeMetrics integration — internal counters exist but unexposed |
 | O7 | Nitpick | WHOIS sync-over-async — acceptable given server resources |
+
+#### Owner Decisions
+
+**FD33.** O1/O2/O3 — YES, migrate all enrichment caches to BoundedCache. DnsLookupService, WhoisAsnService, and MaxMindGeoService all converted from nuclear `Clear()` to `BoundedCache<TKey, TValue>` with hybrid eviction (200K max, 100K target, 30min age). BackgroundIpEnrichmentService now orchestrates periodic eviction for all service caches on its 5-minute timer.
+
+**FD34.** O4 — RESOLVED. With all service caches on BoundedCache and eviction coordinated from BackgroundIpEnrichmentService, the dedup/service cache disconnect is eliminated.
+
+**FD35.** O5 — YES, fix the 172.* filter. Both `BackgroundIpEnrichmentService.Enqueue()` and `WhoisAsnService.LookupAsync()` now use `IsPrivate172()` which correctly checks RFC 1918 range 172.16.0.0–172.31.255.255 by parsing the second octet.
+
+**FD36.** O6 — YES, integrate ForgeMetrics. Lane 3 now reports: `BgIpEnqueued`, `BgIpProcessed`, `BgIpDupSkipped`, `BgIpDnsLookups`, `BgIpWhoisLookups`, `BgIpChannelDepth`, `BgIpDedupCacheSize`. MetricsReporterService samples depths and the `LANE3-IP` line appears in the 10s metrics log.
+
+**FD37.** O7 — Addressed via SQL-backed WHOIS cache. Added `IPAPI.WhoisCache` table (73_WhoisCache.sql) with upsert/load/cleanup procs. WhoisAsnService pre-warms from SQL on startup (last 30 days) and persists fresh results fire-and-forget. Service restarts no longer require hours of re-querying external WHOIS servers.
+
+**Answers to Questions:**
+- Q1: YES — all three service caches migrated to BoundedCache (FD33).
+- Q2: YES — 172.* filter corrected to RFC 1918 range (FD35).
+- Q3: YES — ForgeMetrics integration complete (FD36).

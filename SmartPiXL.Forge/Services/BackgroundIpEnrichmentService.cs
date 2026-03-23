@@ -51,6 +51,7 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
     private readonly DnsLookupService? _dns;
     private readonly WhoisAsnService? _whois;
     private readonly MaxMindGeoService? _maxMind;
+    private readonly ForgeMetrics _metrics;
     private readonly ITrackingLogger _logger;
     private readonly int _workerCount;
 
@@ -59,14 +60,22 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
     private long _processed;
     private long _duplicatesSkipped;
 
+    /// <summary>Current channel depth (for external sampling).</summary>
+    public int ChannelDepth => _ipChannel.Reader.Count;
+
+    /// <summary>Current dedup cache size (for external sampling).</summary>
+    public int DedupCacheSize => _seen.Count;
+
     public BackgroundIpEnrichmentService(
         ITrackingLogger logger,
+        ForgeMetrics metrics,
         IOptions<ForgeSettings> forgeSettings,
         DnsLookupService? dns = null,
         WhoisAsnService? whois = null,
         MaxMindGeoService? maxMind = null)
     {
         _logger = logger;
+        _metrics = metrics;
         _dns = dns;
         _whois = whois;
         _maxMind = maxMind;
@@ -96,17 +105,19 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
         if (ip.StartsWith("10.", StringComparison.Ordinal) ||
             ip.StartsWith("192.168.", StringComparison.Ordinal) ||
             ip.StartsWith("127.", StringComparison.Ordinal) ||
-            ip.StartsWith("172.", StringComparison.Ordinal))
+            IsPrivate172(ip))
             return;
 
         // Dedup: only enqueue if this IP hasn't been seen in this process lifetime
         if (!_seen.TryAdd(ip, 0))
         {
             Interlocked.Increment(ref _duplicatesSkipped);
+            _metrics.RecordBgIpDupSkip();
             return;
         }
 
         Interlocked.Increment(ref _enqueued);
+        _metrics.RecordBgIpEnqueue();
 
         // Non-blocking write — drops oldest if channel is full
         _ipChannel.Writer.TryWrite(ip);
@@ -127,7 +138,7 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
                      $"DNS: {(_dns is not null ? "ON" : "OFF")}, " +
                      $"WHOIS: {(_whois is not null ? "ON" : "OFF")}");
 
-        // Periodic cache eviction — delegates to BoundedCache hybrid strategy.
+        // Periodic cache eviction — evicts dedup + all service caches.
         _ = Task.Run(async () =>
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -136,11 +147,22 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
                 {
                     await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
 
-                    if (_seen.Count <= _seen.MaxEntries) continue;
+                    var totalEvicted = 0;
 
-                    var evicted = _seen.Evict();
-                    if (evicted > 0)
-                        _logger.Info($"BackgroundIpEnrichment: Evicted {evicted:N0} IPs (remaining: {_seen.Count:N0})");
+                    // Dedup cache
+                    if (_seen.Count > _seen.MaxEntries)
+                        totalEvicted += _seen.Evict();
+
+                    // Service caches — evict on same schedule
+                    if (_dns is not null)
+                        totalEvicted += _dns.EvictCache();
+                    if (_whois is not null)
+                        totalEvicted += _whois.EvictCache();
+                    if (_maxMind is not null)
+                        totalEvicted += _maxMind.EvictCache();
+
+                    if (totalEvicted > 0)
+                        _logger.Info($"BackgroundIpEnrichment: Evicted {totalEvicted:N0} entries across all caches (dedup: {_seen.Count:N0})");
                 }
                 catch (OperationCanceledException) { break; }
             }
@@ -181,7 +203,10 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
                 {
                     // DNS lookup
                     if (_dns is not null)
+                    {
                         await _dns.LookupAsync(ip, ct);
+                        _metrics.RecordBgIpDnsLookup();
+                    }
 
                     // WHOIS — only when MaxMind has country but no ASN (supplementary)
                     if (_whois is not null && _maxMind is not null)
@@ -190,11 +215,13 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
                         if (!mmResult.Asn.HasValue && mmResult.CountryCode is not null)
                         {
                             await _whois.LookupAsync(ip, ct);
+                            _metrics.RecordBgIpWhoisLookup();
                         }
                     }
 
                     count++;
                     Interlocked.Increment(ref _processed);
+                    _metrics.RecordBgIpProcessed();
 
                     if (count % 1_000 == 0)
                     {
@@ -215,5 +242,16 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
         }
 
         _logger.Info($"BackgroundIpEnrichment worker {workerId} stopped. Processed: {count:N0}");
+    }
+
+    /// <summary>
+    /// Checks if an IP is in the RFC 1918 172.16.0.0–172.31.255.255 private range.
+    /// </summary>
+    private static bool IsPrivate172(string ip)
+    {
+        if (!ip.StartsWith("172.", StringComparison.Ordinal)) return false;
+        var dot2 = ip.IndexOf('.', 4);
+        if (dot2 < 0) return false;
+        return int.TryParse(ip.AsSpan(4, dot2 - 4), out var octet2) && octet2 >= 16 && octet2 <= 31;
     }
 }

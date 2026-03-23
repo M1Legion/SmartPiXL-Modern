@@ -18,6 +18,7 @@ public sealed class MetricsReporterService : BackgroundService
 {
     private readonly ForgeMetrics _metrics;
     private readonly ForgeChannels _channels;
+    private readonly BackgroundIpEnrichmentService? _bgIp;
     private readonly ITrackingLogger _logger;
 
     private const int ReportIntervalSeconds = 10;
@@ -25,11 +26,13 @@ public sealed class MetricsReporterService : BackgroundService
     public MetricsReporterService(
         ForgeMetrics metrics,
         ForgeChannels channels,
-        ITrackingLogger logger)
+        ITrackingLogger logger,
+        BackgroundIpEnrichmentService? bgIp = null)
     {
         _metrics = metrics;
         _channels = channels;
         _logger = logger;
+        _bgIp = bgIp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,6 +52,10 @@ public sealed class MetricsReporterService : BackgroundService
                 _metrics.SampleChannelDepths(
                     _channels.Enrichment.Reader.Count,
                     _channels.SqlWriter.Reader.Count);
+
+                // Sample Lane 3 depths
+                if (_bgIp is not null)
+                    _metrics.SampleBgIpDepths(_bgIp.ChannelDepth, _bgIp.DedupCacheSize);
 
                 var snapshot = _metrics.Snapshot();
 

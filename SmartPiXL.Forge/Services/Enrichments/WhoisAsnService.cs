@@ -1,4 +1,6 @@
-using System.Collections.Concurrent;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
+using SmartPiXL.Configuration;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Forge.Services.Enrichments;
@@ -13,6 +15,11 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 // rate-limit. This service should not block the pipeline — async with
 // graceful timeout and "best effort" semantics.
 //
+// SQL CACHE: Results are persisted to IPAPI.WhoisCache. On startup, the
+// in-memory BoundedCache is pre-warmed from SQL (last 30 days). After each
+// fresh external WHOIS query, the result is written to SQL fire-and-forget.
+// This eliminates hours of re-warming after service restarts.
+//
 // APPENDED PARAMS:
 //   _srv_whoisASN={AS number or name}
 //   _srv_whoisOrg={organization name}
@@ -24,9 +31,11 @@ namespace SmartPiXL.Forge.Services.Enrichments;
 /// </summary>
 public sealed class WhoisAsnService
 {
-    private readonly ConcurrentDictionary<string, WhoisResult> _cache = new(StringComparer.Ordinal);
+    private readonly BoundedCache<string, WhoisResult> _cache;
     private const int MaxCacheSize = 200_000;
+    private const int EvictTarget = 100_000;
     private readonly ITrackingLogger _logger;
+    private readonly string? _connectionString;
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -43,12 +52,58 @@ public sealed class WhoisAsnService
     public WhoisResult? TryGetCached(string? ipAddress)
     {
         if (ipAddress is null) return null;
-        return _cache.TryGetValue(ipAddress, out var result) ? result : null;
+        return _cache.TryGet(ipAddress, out var result) ? result : null;
     }
 
-    public WhoisAsnService(ITrackingLogger logger)
+    public WhoisAsnService(ITrackingLogger logger, IOptions<TrackingSettings>? trackingSettings = null)
     {
         _logger = logger;
+        _connectionString = trackingSettings?.Value.ConnectionString;
+        _cache = new BoundedCache<string, WhoisResult>(
+            MaxCacheSize, EvictTarget, TimeSpan.FromMinutes(30), StringComparer.Ordinal);
+
+        // Pre-warm from SQL cache (fire-and-forget, non-blocking)
+        if (_connectionString is not null)
+            _ = Task.Run(() => PreWarmFromSqlAsync());
+    }
+
+    /// <summary>
+    /// Loads recent WHOIS results from SQL to pre-warm the in-memory cache.
+    /// Runs once at startup. Failures are logged and swallowed.
+    /// </summary>
+    private async Task PreWarmFromSqlAsync()
+    {
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand("IPAPI.usp_WhoisCache_Load", conn)
+            {
+                CommandType = System.Data.CommandType.StoredProcedure
+            };
+            cmd.Parameters.AddWithValue("@MaxAgeDays", 30);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var count = 0;
+            while (await reader.ReadAsync())
+            {
+                var ip = reader.GetString(0);
+                var asn = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var org = reader.IsDBNull(2) ? null : reader.GetString(2);
+
+                if (asn is not null || org is not null)
+                    _cache.Set(ip, new WhoisResult(asn, org));
+
+                count++;
+            }
+
+            _logger.Info($"WhoisAsn: Pre-warmed {count:N0} entries from SQL cache");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning($"WhoisAsn: SQL pre-warm failed — {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -63,22 +118,71 @@ public sealed class WhoisAsnService
         // Skip private/reserved IPs
         if (ipAddress.StartsWith("10.", StringComparison.Ordinal) ||
             ipAddress.StartsWith("192.168.", StringComparison.Ordinal) ||
-            ipAddress.StartsWith("127.", StringComparison.Ordinal))
+            ipAddress.StartsWith("127.", StringComparison.Ordinal) ||
+            IsPrivate172(ipAddress))
             return default;
 
         // Lock-free cache lookup — WHOIS is 1-5s per query, caching is critical.
         // IP cardinality ~38% unique per 100K records = ~62% cache hit rate.
-        if (_cache.TryGetValue(ipAddress, out var cached))
+        if (_cache.TryGet(ipAddress, out var cached))
             return cached;
 
         var result = await LookupCoreAsync(ipAddress, ct);
 
         // Cache both hits and misses (misses = default) to avoid retrying
-        if (_cache.Count >= MaxCacheSize)
-            _cache.Clear();
+        _cache.Set(ipAddress, result);
 
-        _cache.TryAdd(ipAddress, result);
+        // Persist to SQL for cross-restart survival (fire-and-forget)
+        if (result.Asn is not null || result.Organization is not null)
+            _ = Task.Run(() => PersistToSqlAsync(ipAddress, result));
+
         return result;
+    }
+
+    /// <summary>
+    /// Evicts stale/excess entries from the WHOIS cache. Called periodically
+    /// by BackgroundIpEnrichmentService.
+    /// </summary>
+    public int EvictCache() => _cache.Evict();
+
+    /// <summary>
+    /// Persists a WHOIS result to SQL for cross-restart cache survival.
+    /// Fire-and-forget — failures are logged and swallowed.
+    /// </summary>
+    private async Task PersistToSqlAsync(string ipAddress, WhoisResult result)
+    {
+        if (_connectionString is null) return;
+
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            await using var cmd = new SqlCommand("IPAPI.usp_WhoisCache_Upsert", conn)
+            {
+                CommandType = System.Data.CommandType.StoredProcedure
+            };
+            cmd.Parameters.AddWithValue("@IPAddress", ipAddress);
+            cmd.Parameters.AddWithValue("@Asn", (object?)result.Asn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Organization", (object?)result.Organization ?? DBNull.Value);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"WhoisAsn: SQL persist failed for {ipAddress} — {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Checks if an IP is in the RFC 1918 172.16.0.0–172.31.255.255 private range.
+    /// </summary>
+    private static bool IsPrivate172(string ip)
+    {
+        if (!ip.StartsWith("172.", StringComparison.Ordinal)) return false;
+        var dot2 = ip.IndexOf('.', 4);
+        if (dot2 < 0) return false;
+        return int.TryParse(ip.AsSpan(4, dot2 - 4), out var octet2) && octet2 >= 16 && octet2 <= 31;
     }
 
     /// <summary>
