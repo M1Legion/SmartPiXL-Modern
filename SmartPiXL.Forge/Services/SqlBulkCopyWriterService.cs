@@ -78,6 +78,16 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
     // ── Drain buffer (reused to avoid allocation per drain cycle) ──────
     private readonly List<TrackingData> _drainBuffer = new(500);
 
+    // ── Lifetime health counters (cumulative, never reset) ───────────────
+    private long _lifetimeBatches;
+    private long _lifetimeFailures;
+
+    /// <summary>Total successful batch writes since process start.</summary>
+    public long LifetimeBatches => Volatile.Read(ref _lifetimeBatches);
+
+    /// <summary>Total failed batch attempts since process start.</summary>
+    public long LifetimeFailures => Volatile.Read(ref _lifetimeFailures);
+
     /// <summary>Current circuit breaker state.</summary>
     public ForgeCircuitState Circuit => _circuitState;
 
@@ -407,6 +417,7 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
     private void OnBatchFailure()
     {
+        Interlocked.Increment(ref _lifetimeFailures);
         _consecutiveBatchFailures++;
 
         if (_circuitState != ForgeCircuitState.Open && _consecutiveBatchFailures >= 2)
@@ -428,6 +439,8 @@ public sealed class SqlBulkCopyWriterService : BackgroundService
 
     private void OnWriteSuccess()
     {
+        Interlocked.Increment(ref _lifetimeBatches);
+
         if (_circuitState == ForgeCircuitState.HalfOpen)
         {
             _circuitState = ForgeCircuitState.Closed;

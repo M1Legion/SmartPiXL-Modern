@@ -145,7 +145,12 @@ public sealed class IpDataAcquisitionService : BackgroundService
         // Future: import them into SQL tables too for ETL enrichment.
 
         _metrics.RecordIpAcqCycle(cycleStart, asnRows, geoRows, 0, skipped);
-        for (int i = 0; i < failures; i++) _metrics.RecordIpAcqFailure();
+        _metrics.RecordIpAcqRun();
+        for (int i = 0; i < failures; i++)
+        {
+            _metrics.RecordIpAcqFailure();
+            _metrics.RecordIpAcqLifetimeFailure();
+        }
 
         sw.Stop();
         _logger.Info($"IpDataAcquisition: import cycle complete in {sw.Elapsed.TotalSeconds:F1}s");

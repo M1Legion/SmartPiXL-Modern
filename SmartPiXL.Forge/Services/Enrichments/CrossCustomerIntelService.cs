@@ -41,6 +41,9 @@ public sealed class CrossCustomerIntelService
     private readonly ITrackingLogger _logger;
     private DateTime _lastEviction = DateTime.UtcNow;
 
+    /// <summary>Current active tracker count (for health tree sampling).</summary>
+    public int CacheCount => _trackers.Count;
+
     private static readonly TimeSpan s_windowDuration = TimeSpan.FromHours(2);
     private static readonly TimeSpan s_evictionInterval = TimeSpan.FromMinutes(5);
     private const int AlertThreshold = 3;          // 3+ companies = alert

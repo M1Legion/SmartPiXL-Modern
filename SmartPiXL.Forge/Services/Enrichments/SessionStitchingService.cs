@@ -39,6 +39,9 @@ public sealed class SessionStitchingService
     private readonly ITrackingLogger _logger;
     private DateTime _lastEviction = DateTime.UtcNow;
 
+    /// <summary>Current active session count (for health tree sampling).</summary>
+    public int CacheCount => _sessions.Count;
+
     private static readonly TimeSpan s_sessionTimeout = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan s_evictionInterval = TimeSpan.FromMinutes(2);
 

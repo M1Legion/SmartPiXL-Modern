@@ -66,6 +66,12 @@ public sealed class BackgroundIpEnrichmentService : BackgroundService
     /// <summary>Current dedup cache size (for external sampling).</summary>
     public int DedupCacheSize => _seen.Count;
 
+    /// <summary>Whether DNS lookup is enabled (for health tree).</summary>
+    public bool DnsEnabled => _dns is not null;
+
+    /// <summary>Whether WHOIS lookup is enabled (for health tree).</summary>
+    public bool WhoisEnabled => _whois is not null;
+
     public BackgroundIpEnrichmentService(
         ITrackingLogger logger,
         ForgeMetrics metrics,

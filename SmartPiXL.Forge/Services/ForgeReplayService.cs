@@ -129,6 +129,12 @@ public sealed class ForgeReplayService : BackgroundService
     /// </summary>
     private async Task ScanAndReplayAsync(CancellationToken ct)
     {
+        // Sample stuck file counts for health tree (before replay clears them)
+        var stuckFiles = GetReplayableFiles(_forgeFailoverDir).Length
+                       + GetReplayableFiles(_deadLetterDir).Length
+                       + GetReplayableFiles(_edgeFailoverDir).Length;
+        _metrics.SampleReplayStuckFiles(stuckFiles);
+
         // Enriched records first — straight to SQL, fastest path
         await ReplayDirectoryToSqlAsync(_forgeFailoverDir, ct);
         await ReplayDirectoryToSqlAsync(_deadLetterDir, ct);

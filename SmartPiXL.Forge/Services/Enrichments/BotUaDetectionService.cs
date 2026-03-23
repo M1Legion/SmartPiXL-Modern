@@ -36,6 +36,9 @@ public sealed class BotUaDetectionService
         maxEntries: 50_000, evictTarget: 25_000, maxAge: TimeSpan.FromMinutes(30));
     private readonly ITrackingLogger _logger;
 
+    /// <summary>Current cache entry count (for health tree sampling).</summary>
+    public int CacheCount => _cache.Count;
+
     public BotUaDetectionService(ITrackingLogger logger)
     {
         _logger = logger;

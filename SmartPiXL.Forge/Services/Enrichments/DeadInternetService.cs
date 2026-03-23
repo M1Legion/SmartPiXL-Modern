@@ -95,6 +95,9 @@ public sealed class DeadInternetService : IDisposable
     private readonly ConcurrentDictionary<string, CustomerMetrics> _customers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _evictionTimer;
 
+    /// <summary>Current tracked customer count (for health tree sampling).</summary>
+    public int CacheCount => _customers.Count;
+
     // ════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
     // ════════════════════════════════════════════════════════════════════════

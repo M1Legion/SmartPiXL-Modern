@@ -42,6 +42,9 @@ public sealed partial class DnsLookupService
     private const int MaxCacheSize = 200_000;
     private const int EvictTarget = 100_000;
 
+    /// <summary>Current cache entry count (for health tree sampling).</summary>
+    public int CacheCount => _cache?.Count ?? 0;
+
     // Pre-compiled cloud hostname patterns
     [GeneratedRegex(@"(ec2-|\.compute\.amazonaws\.com|\.compute\.internal|\.compute-1\.amazonaws\.com)", RegexOptions.IgnoreCase)]
     private static partial Regex AwsPattern();

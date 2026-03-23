@@ -34,6 +34,9 @@ public sealed class WhoisAsnService
     private readonly BoundedCache<string, WhoisResult> _cache;
     private const int MaxCacheSize = 200_000;
     private const int EvictTarget = 100_000;
+
+    /// <summary>Current cache entry count (for health tree sampling).</summary>
+    public int CacheCount => _cache?.Count ?? 0;
     private readonly ITrackingLogger _logger;
     private readonly string? _connectionString;
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(5);

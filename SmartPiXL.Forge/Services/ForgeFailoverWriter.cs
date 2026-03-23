@@ -63,6 +63,10 @@ public sealed class ForgeFailoverWriter : IDisposable
     /// <summary>Total records written to failover since service start.</summary>
     public long TotalRecordsWritten => Interlocked.Read(ref _totalRecordsWritten);
 
+    /// <summary>Tracks whether the last disk write attempt succeeded (for health tree).</summary>
+    private int _diskHealthy = 1;
+    public bool DiskHealthy => Volatile.Read(ref _diskHealthy) == 1;
+
     public ForgeFailoverWriter(string failoverDir, ITrackingLogger logger, ForgeMetrics metrics)
     {
         _failoverDir = failoverDir;
@@ -88,12 +92,14 @@ public sealed class ForgeFailoverWriter : IDisposable
                 _recordsInCurrentFile++;
                 Interlocked.Increment(ref _totalRecordsWritten);
                 _metrics.RecordFailover();
+                Volatile.Write(ref _diskHealthy, 1);
 
                 if (_recordsInCurrentFile >= MaxRecordsPerFile)
                     RotateFileLocked();
             }
             catch (Exception ex)
             {
+                Volatile.Write(ref _diskHealthy, 0);
                 _logger.Error($"CRITICAL: Forge failover write failed — DATA LOST: {ex.Message}");
             }
         }
@@ -124,9 +130,12 @@ public sealed class ForgeFailoverWriter : IDisposable
                     if (_recordsInCurrentFile >= MaxRecordsPerFile)
                         RotateFileLocked();
                 }
+
+                Volatile.Write(ref _diskHealthy, 1);
             }
             catch (Exception ex)
             {
+                Volatile.Write(ref _diskHealthy, 0);
                 _logger.Error($"CRITICAL: Forge failover batch write failed — DATA LOST: {ex.Message}");
             }
         }

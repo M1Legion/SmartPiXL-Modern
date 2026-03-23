@@ -179,6 +179,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
             : Environment.ProcessorCount;
         _targetWorkerCount = _minWorkers;
 
+        _metrics.SampleEnrichmentChannelAlive(true);
         _logger.Info($"EnrichmentPipelineService started. Workers: {_minWorkers}-{_maxWorkers} (adaptive), Enrichments: {_forgeSettings.EnableEnrichments}");
 
         // Launch max workers (excess ones self-park) + 1 monitor for scaling
@@ -222,6 +223,8 @@ public sealed class EnrichmentPipelineService : BackgroundService
 
                 var depth = _enrichmentChannel.Reader.Count;
                 var current = Volatile.Read(ref _targetWorkerCount);
+
+                _metrics.SampleEnrichmentWorkers(current, true);
 
                 if (depth > scaleUpThreshold && current < _maxWorkers)
                 {

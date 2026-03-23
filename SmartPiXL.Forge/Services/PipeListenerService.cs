@@ -85,6 +85,7 @@ public sealed class PipeListenerService : BackgroundService
         var pipeName = _forgeSettings.PipeName;
         var instanceCount = _forgeSettings.MaxConcurrentPipeInstances;
 
+        _metrics.SamplePipeListenerState(true);
         _logger.Info($"PipeListenerService started. Pipe: {pipeName}, Instances: {instanceCount}");
 
         // Launch N concurrent pipe server instances

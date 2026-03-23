@@ -43,6 +43,9 @@ public sealed class MaxMindGeoService : IDisposable
     private readonly BoundedCache<string, MaxMindResult> _cache;
     private const int MaxCacheSize = 200_000;
     private const int EvictTarget = 100_000;
+
+    /// <summary>Current cache entry count (for health tree sampling).</summary>
+    public int CacheCount => _cache?.Count ?? 0;
     private readonly DatabaseReader? _cityReader;
     private readonly DatabaseReader? _asnReader;
     private readonly DatabaseReader? _countryReader;

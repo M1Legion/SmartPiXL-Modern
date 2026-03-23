@@ -152,12 +152,14 @@ public sealed class CompanyPiXLSyncService : BackgroundService
             var coStart = ForgeMetrics.StartTimer();
             (coIns, coUpd, coDel) = await SyncCompanyAsync(ct);
             _metrics.RecordCompanySync(coStart, coIns, coUpd, coDel);
+            _metrics.RecordCompanySyncRun();
             if (coSyncId > 0)
                 await CompleteSyncLogAsync(coSyncId, coIns, coUpd, coDel, null, ct);
         }
         catch (Exception ex)
         {
             _metrics.RecordSyncFailure();
+            _metrics.RecordSyncLifetimeFailure();
             if (coSyncId > 0)
                 await CompleteSyncLogAsync(coSyncId, coIns, coUpd, coDel, ex.Message, ct);
             throw;
@@ -171,12 +173,14 @@ public sealed class CompanyPiXLSyncService : BackgroundService
             var pxStart = ForgeMetrics.StartTimer();
             (pxIns, pxUpd, pxDel) = await SyncPixelAsync(ct);
             _metrics.RecordPixelSync(pxStart, pxIns, pxUpd, pxDel);
+            _metrics.RecordPixelSyncRun();
             if (pxSyncId > 0)
                 await CompleteSyncLogAsync(pxSyncId, pxIns, pxUpd, pxDel, null, ct);
         }
         catch (Exception ex)
         {
             _metrics.RecordSyncFailure();
+            _metrics.RecordSyncLifetimeFailure();
             if (pxSyncId > 0)
                 await CompleteSyncLogAsync(pxSyncId, pxIns, pxUpd, pxDel, ex.Message, ct);
             throw;

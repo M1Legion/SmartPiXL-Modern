@@ -28,6 +28,8 @@ namespace SmartPiXL.Forge.Services;
 /// </summary>
 public sealed class ForgeMetrics
 {
+    private static readonly long s_startTicks = Stopwatch.GetTimestamp();
+
     // ── Stage counters ────────────────────────────────────────────────
     // Each stage has: record count, total ticks, min ticks, max ticks
 
@@ -101,6 +103,53 @@ public sealed class ForgeMetrics
     private long _ipAcqSkipped;
     private long _ipAcqDurationTicks;
     private long _ipAcqFailures;
+
+    // ══════════════════════════════════════════════════════════════════
+    // CUMULATIVE HEALTH STATE — Non-windowed. NOT reset by Snapshot().
+    // Services push state here; GetHealthReport() reads it.
+    // ══════════════════════════════════════════════════════════════════
+
+    // F1: Ingest — pipe listener accepting connections?
+    private int _pipeListenerActive;         // 1 = accepting, 0 = stopped
+    private int _enrichmentChannelAlive;     // 1 = consumers running
+
+    // F2: Enrichment Engine — worker pool health
+    private int _enrichmentWorkerCount;      // current active workers
+    private int _enrichmentWorkersAlive;     // 1 = at least one worker processing
+
+    // F2: Enrichment cache sizes (sampled by MetricsReporterService)
+    private int _cacheUaParsing;
+    private int _cacheBotUaDetection;
+    private int _cacheDnsLookup;
+    private int _cacheWhoisAsn;
+    private int _cacheMaxMindGeo;
+    private int _cacheDeadInternet;
+    private int _cacheBehavioralReplay;
+    private int _cacheCrossCustomerIntel;
+    private int _cacheSessionStitching;
+
+    // F3: SQL Writer — lifetime failure tracking
+    private long _sqlLifetimeFailures;
+    private long _sqlLifetimeCount;
+
+    // F4: Failover & Replay
+    private int _failoverDiskWritable;       // 1 = last write succeeded
+    private int _replayStuckFiles;           // files > 1h old not replaying
+
+    // F5: ETL — last run timestamps (Stopwatch ticks)
+    private long _etlMatchVisitsLastRun;
+    private long _etlMatchLegacyLastRun;
+
+    // F6: Background IP
+    private int _bgIpDnsProcessing;          // 1 = lookups running
+    private int _bgIpWhoisProcessing;        // 1 = lookups running
+
+    // F7: Data Sync
+    private long _syncLastCompanyRun;        // Stopwatch ticks
+    private long _syncLastPixelRun;          // Stopwatch ticks
+    private long _syncLifetimeFailures;
+    private long _ipAcqLastRun;              // Stopwatch ticks
+    private long _ipAcqLifetimeFailures;
 
     /// <summary>Starts a high-resolution timer. Call <see cref="Record"/> with the result.</summary>
     public static long StartTimer() => Stopwatch.GetTimestamp();
@@ -325,6 +374,230 @@ public sealed class ForgeMetrics
 
         return snap;
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // HEALTH STATE RECORDING
+    // ══════════════════════════════════════════════════════════════════
+
+    // F1
+    public void SamplePipeListenerState(bool active) =>
+        Volatile.Write(ref _pipeListenerActive, active ? 1 : 0);
+    public void SampleEnrichmentChannelAlive(bool alive) =>
+        Volatile.Write(ref _enrichmentChannelAlive, alive ? 1 : 0);
+
+    // F2
+    public void SampleEnrichmentWorkers(int count, bool alive)
+    {
+        Volatile.Write(ref _enrichmentWorkerCount, count);
+        Volatile.Write(ref _enrichmentWorkersAlive, alive ? 1 : 0);
+    }
+
+    /// <summary>Samples enrichment cache sizes (called by MetricsReporterService).</summary>
+    public void SampleEnrichmentCaches(
+        int uaParsing, int botUaDetection, int dnsLookup, int whoisAsn,
+        int maxMindGeo, int deadInternet, int behavioralReplay,
+        int crossCustomerIntel, int sessionStitching)
+    {
+        Volatile.Write(ref _cacheUaParsing, uaParsing);
+        Volatile.Write(ref _cacheBotUaDetection, botUaDetection);
+        Volatile.Write(ref _cacheDnsLookup, dnsLookup);
+        Volatile.Write(ref _cacheWhoisAsn, whoisAsn);
+        Volatile.Write(ref _cacheMaxMindGeo, maxMindGeo);
+        Volatile.Write(ref _cacheDeadInternet, deadInternet);
+        Volatile.Write(ref _cacheBehavioralReplay, behavioralReplay);
+        Volatile.Write(ref _cacheCrossCustomerIntel, crossCustomerIntel);
+        Volatile.Write(ref _cacheSessionStitching, sessionStitching);
+    }
+
+    // F3
+    public void RecordSqlWriteHealth(long batchCount, long failures)
+    {
+        Volatile.Write(ref _sqlLifetimeCount, batchCount);
+        Volatile.Write(ref _sqlLifetimeFailures, failures);
+    }
+
+    // F4
+    public void SampleFailoverDiskWritable(bool writable) =>
+        Volatile.Write(ref _failoverDiskWritable, writable ? 1 : 0);
+    public void SampleReplayStuckFiles(int count) =>
+        Volatile.Write(ref _replayStuckFiles, count);
+
+    // F5
+    public void RecordEtlMatchVisitsRun() =>
+        Volatile.Write(ref _etlMatchVisitsLastRun, Stopwatch.GetTimestamp());
+    public void RecordEtlMatchLegacyRun() =>
+        Volatile.Write(ref _etlMatchLegacyLastRun, Stopwatch.GetTimestamp());
+
+    // F6
+    public void SampleBgIpProcessingState(bool dnsActive, bool whoisActive)
+    {
+        Volatile.Write(ref _bgIpDnsProcessing, dnsActive ? 1 : 0);
+        Volatile.Write(ref _bgIpWhoisProcessing, whoisActive ? 1 : 0);
+    }
+
+    // F7
+    public void RecordCompanySyncRun() =>
+        Volatile.Write(ref _syncLastCompanyRun, Stopwatch.GetTimestamp());
+    public void RecordPixelSyncRun() =>
+        Volatile.Write(ref _syncLastPixelRun, Stopwatch.GetTimestamp());
+    public void RecordSyncLifetimeFailure() =>
+        Interlocked.Increment(ref _syncLifetimeFailures);
+    public void RecordIpAcqRun() =>
+        Volatile.Write(ref _ipAcqLastRun, Stopwatch.GetTimestamp());
+    public void RecordIpAcqLifetimeFailure() =>
+        Interlocked.Increment(ref _ipAcqLifetimeFailures);
+
+    // ══════════════════════════════════════════════════════════════════
+    // HEALTH TREE — Derives all 29 probes from cumulative state.
+    // ══════════════════════════════════════════════════════════════════
+
+    public ForgeHealthReport GetHealthReport()
+    {
+        var uptimeSeconds = Stopwatch.GetElapsedTime(s_startTicks).TotalSeconds;
+
+        // ── F1: Ingest (2 probes) ─────────────────────────────────────
+        var f1 = SubsystemReport.From("F1: Ingest", [
+            new() { Name = "Pipe Listener", Health = Volatile.Read(ref _pipeListenerActive), Metrics = new
+            {
+                Connects = Volatile.Read(ref _pipeConnects),
+                Disconnects = Volatile.Read(ref _pipeDisconnects)
+            }},
+            new() { Name = "Enrichment Channel", Health = Volatile.Read(ref _enrichmentChannelAlive), Metrics = new
+            {
+                Depth = Volatile.Read(ref _enrichmentChannelDepth)
+            }}
+        ]);
+
+        // ── F2: Enrichment Engine (17 probes) ─────────────────────────
+        // 1 Worker Pool + 9 stateful + 7 stateless
+        var f2Probes = new ProbeReport[17];
+        var idx = 0;
+
+        // Worker Pool
+        f2Probes[idx++] = new() { Name = "Worker Pool", Health = Volatile.Read(ref _enrichmentWorkersAlive), Metrics = new
+        {
+            Workers = Volatile.Read(ref _enrichmentWorkerCount)
+        }};
+
+        // Stateful enrichments with caches — healthy if cache bounded
+        f2Probes[idx++] = CacheProbe("UaParsing", Volatile.Read(ref _cacheUaParsing), 50_000);
+        f2Probes[idx++] = CacheProbe("BotUaDetection", Volatile.Read(ref _cacheBotUaDetection), 50_000);
+        f2Probes[idx++] = CacheProbe("DnsLookup", Volatile.Read(ref _cacheDnsLookup), 200_000);
+        f2Probes[idx++] = CacheProbe("WhoisAsn", Volatile.Read(ref _cacheWhoisAsn), 200_000);
+        f2Probes[idx++] = CacheProbe("MaxMindGeo", Volatile.Read(ref _cacheMaxMindGeo), 200_000);
+        f2Probes[idx++] = CacheProbe("DeadInternet", Volatile.Read(ref _cacheDeadInternet), 100_000);
+        f2Probes[idx++] = CacheProbe("BehavioralReplay", Volatile.Read(ref _cacheBehavioralReplay), 500_000);
+        f2Probes[idx++] = CacheProbe("CrossCustomerIntel", Volatile.Read(ref _cacheCrossCustomerIntel), 500_000);
+        f2Probes[idx++] = CacheProbe("SessionStitching", Volatile.Read(ref _cacheSessionStitching), 500_000);
+
+        // Stateless enrichments — pure computation, always 1
+        f2Probes[idx++] = new() { Name = "IpClassification", Health = 1 };
+        f2Probes[idx++] = new() { Name = "ContradictionMatrix", Health = 1 };
+        f2Probes[idx++] = new() { Name = "DeviceAffluence", Health = 1 };
+        f2Probes[idx++] = new() { Name = "DeviceAgeEstimation", Health = 1 };
+        f2Probes[idx++] = new() { Name = "GeographicArbitrage", Health = 1 };
+        f2Probes[idx++] = new() { Name = "GpuTierReference", Health = 1 };
+        f2Probes[idx++] = new() { Name = "LeadQualityScoring", Health = 1 };
+
+        var f2 = SubsystemReport.From("F2: Enrichment Engine", f2Probes);
+
+        // ── F3: SQL Writer (1 probe) ──────────────────────────────────
+        var sqlCount = Volatile.Read(ref _sqlLifetimeCount);
+        var sqlFail = Volatile.Read(ref _sqlLifetimeFailures);
+        var sqlHealth = uptimeSeconds < 30 || sqlFail == 0
+            ? 1
+            : (sqlCount > 0 && sqlFail * 100 / (sqlCount + sqlFail) < 5) ? 1 : 0;
+        var f3 = SubsystemReport.From("F3: SQL Writer", [
+            new() { Name = "BulkCopy", Health = sqlHealth, Metrics = new
+            {
+                Written = sqlCount,
+                Failures = sqlFail,
+                QueueDepth = Volatile.Read(ref _sqlWriterChannelDepth)
+            }}
+        ]);
+
+        // ── F4: Failover & Replay (2 probes) ──────────────────────────
+        var stuckFiles = Volatile.Read(ref _replayStuckFiles);
+        var f4 = SubsystemReport.From("F4: Failover & Replay", [
+            new() { Name = "Failover Writer", Health = Volatile.Read(ref _failoverDiskWritable), Metrics = new
+            {
+                RecordsDiverted = Volatile.Read(ref _failoverCount)
+            }},
+            new() { Name = "Replay Service", Health = stuckFiles == 0 ? 1 : 0, Metrics = new
+            {
+                StuckFiles = stuckFiles
+            }}
+        ]);
+
+        // ── F5: ETL Pipeline (2 probes) ───────────────────────────────
+        // Healthy if last run < 2 minutes ago (or first 2 min after startup)
+        var matchLastTicks = Volatile.Read(ref _etlMatchVisitsLastRun);
+        var legacyLastTicks = Volatile.Read(ref _etlMatchLegacyLastRun);
+        var matchAge = matchLastTicks > 0 ? Stopwatch.GetElapsedTime(matchLastTicks).TotalSeconds : double.MaxValue;
+        var legacyAge = legacyLastTicks > 0 ? Stopwatch.GetElapsedTime(legacyLastTicks).TotalSeconds : double.MaxValue;
+        var f5 = SubsystemReport.From("F5: ETL Pipeline", [
+            new() { Name = "MatchVisits", Health = uptimeSeconds < 120 || matchAge < 120 ? 1 : 0, Metrics = new
+            {
+                SecondsSinceLastRun = matchLastTicks > 0 ? matchAge : -1
+            }},
+            new() { Name = "MatchLegacyVisits", Health = uptimeSeconds < 120 || legacyAge < 120 ? 1 : 0, Metrics = new
+            {
+                SecondsSinceLastRun = legacyLastTicks > 0 ? legacyAge : -1
+            }}
+        ]);
+
+        // ── F6: Background IP (2 probes) ──────────────────────────────
+        var f6 = SubsystemReport.From("F6: Background IP", [
+            new() { Name = "DNS Enrichment", Health = Volatile.Read(ref _bgIpDnsProcessing), Metrics = new
+            {
+                ChannelDepth = Volatile.Read(ref _bgIpChannelDepth),
+                DedupCacheSize = Volatile.Read(ref _bgIpDedupCacheSize)
+            }},
+            new() { Name = "WHOIS Enrichment", Health = Volatile.Read(ref _bgIpWhoisProcessing), Metrics = new
+            {
+                ChannelDepth = Volatile.Read(ref _bgIpChannelDepth)
+            }}
+        ]);
+
+        // ── F7: Data Sync (3 probes) ──────────────────────────────────
+        // Company/Pixel sync: healthy if last run < 7 hours ago (or first 7h)
+        var companyLastTicks = Volatile.Read(ref _syncLastCompanyRun);
+        var pixelLastTicks = Volatile.Read(ref _syncLastPixelRun);
+        var companyAge = companyLastTicks > 0 ? Stopwatch.GetElapsedTime(companyLastTicks).TotalSeconds : double.MaxValue;
+        var pixelAge = pixelLastTicks > 0 ? Stopwatch.GetElapsedTime(pixelLastTicks).TotalSeconds : double.MaxValue;
+        var maxSyncAge = 7 * 3600; // 7 hours
+        var syncFails = Volatile.Read(ref _syncLifetimeFailures);
+        var syncHealth = (uptimeSeconds < maxSyncAge || (companyAge < maxSyncAge && pixelAge < maxSyncAge)) && syncFails == 0 ? 1 : 0;
+
+        // IP Data Acquisition: healthy if last import < 26 hours ago (or first 26h)
+        var ipAcqLastTicks = Volatile.Read(ref _ipAcqLastRun);
+        var ipAcqAge = ipAcqLastTicks > 0 ? Stopwatch.GetElapsedTime(ipAcqLastTicks).TotalSeconds : double.MaxValue;
+        var maxIpAcqAge = 26 * 3600; // 26 hours
+
+        var f7 = SubsystemReport.From("F7: Data Sync", [
+            new() { Name = "Company/Pixel Sync", Health = syncHealth, Metrics = new
+            {
+                CompanySecsSinceRun = companyLastTicks > 0 ? companyAge : -1,
+                PixelSecsSinceRun = pixelLastTicks > 0 ? pixelAge : -1,
+                Failures = syncFails
+            }},
+            new() { Name = "IPtoASN", Health = uptimeSeconds < maxIpAcqAge || ipAcqAge < maxIpAcqAge ? 1 : 0, Metrics = new
+            {
+                SecondsSinceLastRun = ipAcqLastTicks > 0 ? ipAcqAge : -1,
+                Failures = Volatile.Read(ref _ipAcqLifetimeFailures)
+            }},
+            new() { Name = "DB-IP", Health = uptimeSeconds < maxIpAcqAge || ipAcqAge < maxIpAcqAge ? 1 : 0, Metrics = new
+            {
+                SecondsSinceLastRun = ipAcqLastTicks > 0 ? ipAcqAge : -1
+            }}
+        ]);
+
+        return ForgeHealthReport.From(uptimeSeconds, [f1, f2, f3, f4, f5, f6, f7]);
+    }
+
+    /// <summary>Probe for a cache-backed enrichment: healthy if under limit.</summary>
+    private static ProbeReport CacheProbe(string name, int count, int maxEntries) =>
+        new() { Name = name, Health = count <= maxEntries ? 1 : 0, Metrics = new { CacheSize = count, MaxEntries = maxEntries } };
 
     // ── Interlocked min/max helpers ───────────────────────────────────
 

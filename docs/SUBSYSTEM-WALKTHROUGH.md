@@ -115,12 +115,12 @@ SmartPiXL (platform)                               33/33 probes walked (+ F8, F9
 │   ├── Pipe Client                                 probe: connected to Forge pipe
 │   └── JSONL Failover                              probe: disk writable, no write errors
 │
-├── Forge (system)                                  health = 29/29 probes walked (+ F8, F9 TBD)
-│   ├── F1: Ingest                                  health = 2/2
+├── Forge (system)                                  health = 29/29 probes  ✅ IMPLEMENTED (ForgeMetrics.GetHealthReport)
+│   ├── F1: Ingest                                  health = 2/2  ✅ PipeListenerService + EnrichmentPipelineService
 │   │   ├── Pipe Listener                           probe: accepting connections
 │   │   └── Enrichment Channel                      probe: not full, consumers alive
 │   │
-│   ├── F2: Enrichment Engine                       health = 17/17
+│   ├── F2: Enrichment Engine                       health = 17/17  ✅ MonitorAndScaleAsync + MetricsReporterService
 │   │   ├── Worker Pool                             probe: workers alive, processing
 │   │   │
 │   │   │  ── Stateful (cache/state that can degrade) ──
@@ -143,22 +143,22 @@ SmartPiXL (platform)                               33/33 probes walked (+ F8, F9
 │   │   ├── GpuTierReference                        probe: stateless → always 1
 │   │   └── LeadQualityScoring                      probe: stateless → always 1
 │   │
-│   ├── F3: SQL Writer                              health = 1/1
+│   ├── F3: SQL Writer                              health = 1/1  ✅ SqlBulkCopyWriterService + MetricsReporterService
 │   │   └── BulkCopy                                probe: batches writing, no failures
 │   │
-│   ├── F4: Failover & Replay                       health = 2/2
+│   ├── F4: Failover & Replay                       health = 2/2  ✅ ForgeFailoverWriter + ForgeReplayService
 │   │   ├── Failover Writer                         probe: disk writable (always 1 unless disk fails)
 │   │   └── Replay Service                          probe: no stuck files > 1h old
 │   │
-│   ├── F5: ETL Pipeline                            health = 2/2
+│   ├── F5: ETL Pipeline                            health = 2/2  ✅ EtlBackgroundService
 │   │   ├── MatchVisits                             probe: last run < 2min ago
 │   │   └── MatchLegacyVisits                       probe: last run < 2min ago
 │   │
-│   ├── F6: Background IP                           health = 2/2
+│   ├── F6: Background IP                           health = 2/2  ✅ BackgroundIpEnrichmentService + MetricsReporterService
 │   │   ├── DNS Enrichment                          probe: lookups processing
 │   │   └── WHOIS Enrichment                        probe: lookups processing
 │   │
-│   ├── F7: Data Sync                               health = 3/3
+│   ├── F7: Data Sync                               health = 3/3  ✅ CompanyPiXLSyncService + IpDataAcquisitionService
 │   │   ├── Company/Pixel Sync                      probe: last sync < 7h, 0 failures
 │   │   └── IP Data Acquisition                     health = 2/2
 │   │       ├── IPtoASN                             probe: last import < 26h

@@ -27,14 +27,17 @@ namespace SmartPiXL.Forge.Services;
 public sealed class EtlBackgroundService : BackgroundService
 {
     private readonly TrackingSettings _settings;
+    private readonly ForgeMetrics _metrics;
     private readonly ITrackingLogger _logger;
     private readonly TimeSpan _interval = TimeSpan.FromSeconds(60);
 
     public EtlBackgroundService(
         IOptions<TrackingSettings> settings,
+        ForgeMetrics metrics,
         ITrackingLogger logger)
     {
         _settings = settings.Value;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -92,6 +95,7 @@ public sealed class EtlBackgroundService : BackgroundService
                 var rowsProcessed = Convert.ToInt64(matchReader.GetValue(0));
                 var rowsMatched = Convert.ToInt64(matchReader.GetValue(1));
 
+                _metrics.RecordEtlMatchVisitsRun();
                 if (rowsProcessed > 0)
                     _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched by email");
             }
@@ -111,6 +115,7 @@ public sealed class EtlBackgroundService : BackgroundService
                 var rowsProcessed = Convert.ToInt64(legacyReader.GetValue(0));
                 var rowsMatched = Convert.ToInt64(legacyReader.GetValue(1));
 
+                _metrics.RecordEtlMatchLegacyRun();
                 if (rowsProcessed > 0)
                     _logger.Info($"ETL legacy match: {rowsProcessed} processed, {rowsMatched} matched by IP");
             }

@@ -38,6 +38,9 @@ public sealed class UaParsingService
     private readonly Parser _uaParser;
     private readonly ITrackingLogger _logger;
 
+    /// <summary>Current cache entry count (for health tree sampling).</summary>
+    public int CacheCount => _cache.Count;
+
     public UaParsingService(ITrackingLogger logger)
     {
         _uaParser = Parser.GetDefault();

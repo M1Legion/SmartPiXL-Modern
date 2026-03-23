@@ -55,6 +55,9 @@ public sealed class BehavioralReplayService : IDisposable
     private readonly ConcurrentDictionary<uint, ReplayEntry> _pathCache = new();
     private readonly Timer _evictionTimer;
 
+    /// <summary>Current path hash cache count (for health tree sampling).</summary>
+    public int CacheCount => _pathCache.Count;
+
     private const int EvictionIntervalMs = 300_000; // 5 min
     private static readonly TimeSpan s_entryTtl = TimeSpan.FromHours(1);
     private const int MinPathLength = 10; // Ignore trivially short paths
