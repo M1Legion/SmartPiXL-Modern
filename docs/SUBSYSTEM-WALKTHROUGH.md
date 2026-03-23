@@ -384,7 +384,7 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F4 | Failover & Replay | ForgeFailoverWriter, ForgeReplayService, JsonlFailoverService | **DONE** | FD23 |
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | **DONE** | FD24–FD32 |
 | F6 | Background IP | BackgroundIpEnrichmentService | **complete** | All 7 observations resolved (FD33-FD37) |
-| F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService | not started | — |
+| F7 | Data Sync | IpApiSyncService, CompanyPiXLSyncService, IpDataAcquisitionService | **review** | 7 observations, 4 questions |
 | F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | not started | — |
 | F9 | Infrastructure | ForgeSettings, ForgeMetrics, MetricsReporter, NumaHelper, Program.cs | not started | — |
 
@@ -1112,3 +1112,131 @@ The key design insight: the pipeline **never waits** for DNS/WHOIS results. Firs
 - Q1: YES — all three service caches migrated to BoundedCache (FD33).
 - Q2: YES — 172.* filter corrected to RFC 1918 range (FD35).
 - Q3: YES — ForgeMetrics integration complete (FD36).
+
+---
+
+### F7 — Data Sync
+
+**Scope:** 3 service files (1,078 lines total) + configuration + SQL migrations
+
+| File | Lines | Purpose | Status |
+|------|-------|---------|--------|
+| `IpApiSyncService.cs` | 13 | Xavier IPGEO → IPAPI sync | **RETIRED** — tombstone file |
+| `CompanyPiXLSyncService.cs` | 662 | Xavier Company/Pixel → local PiXL.Company + PiXL.Settings | **ACTIVE** — temporary bridge |
+| `IpDataAcquisitionService.cs` | 443 | Free public IP data → IPInfo schema (IPtoASN, DB-IP) | **ACTIVE** — replacement for IpApiSync |
+
+**What it does:** Keeps local reference data synchronized with upstream sources. Two distinct sync paths:
+
+1. **Company/Pixel Sync** — Every 6 hours, pulls Company (511 rows) and PiXL/Settings (5,691 rows) from Xavier (192.168.88.35) via full-table MERGE. This is the only remaining dependency on the Xavier production database. Company syncs first (parent FK), then Pixel (child FK). Logs to `IPInfo.ImportLog`.
+
+2. **IP Data Acquisition** — Daily at 01:00 UTC, downloads free public IP data (IPtoASN TSV, DB-IP City Lite CSV) from external URLs. Parses and bulk-loads into staging tables, then does atomic `sp_rename` swap for zero-downtime. Currently imports 441K ASN ranges and 8M geo ranges. Triggers `IpRangeLookupService.ReloadAsync()` after import so enrichment uses fresh data immediately.
+
+#### Architecture
+
+```
+COMPANY/PIXEL PATH (every 6h):
+  Xavier dbo.Company (511 rows)
+    → SqlBulkCopy → #CompanyStaging (temp table)
+    → MERGE → PiXL.Company (INSERT/UPDATE/DELETE)
+  Xavier dbo.PiXL (5,691 rows)
+    → SqlBulkCopy → #PixelStaging (temp table)
+    → MERGE → PiXL.Settings (INSERT/UPDATE/DELETE)
+  Both logged → IPInfo.ImportLog
+
+IP DATA PATH (daily 01:00 UTC):
+  iptoasn.com/data/ip2asn-v4.tsv.gz
+    → DownloadIfChanged (HTTP If-Modified-Since)
+    → Parse TSV → DataTable → SqlBulkCopy → IPInfo.AsnRange_Staging
+    → Index → sp_rename atomic swap → IPInfo.AsnRange
+  download.db-ip.com/free/dbip-city-lite-YYYY-MM.csv.gz
+    → DownloadIfChanged → Parse CSV → DataTable → SqlBulkCopy
+    → IPInfo.GeoRange_Staging → atomic swap → IPInfo.GeoRange
+  Both logged → IPInfo.ImportLog
+  → IpRangeLookupService.ReloadAsync() (hot-reload in-memory)
+```
+
+#### File Details
+
+**IpApiSyncService.cs (13 lines) — RETIRED**
+Tombstone file. The original service synced Xavier's IPGEO database into the IPAPI schema. Replaced by `IpDataAcquisitionService` which downloads free public data (IPtoASN, DB-IP Lite) into the normalized `IPInfo` schema. File header says "safe to delete" — retained only because automated deletion wasn't available at the time.
+
+**CompanyPiXLSyncService.cs (662 lines) — TEMPORARY BRIDGE**
+BackgroundService syncing Company and PiXL configuration from Xavier. Key features:
+- **Full-table MERGE:** Both tables are small enough that a complete snapshot + MERGE is simpler and safer than change tracking. Uses `#temp` staging tables + `SqlBulkCopy` to pull, then MERGE to reconcile.
+- **FK-aware ordering:** Company (parent) always syncs before Pixel (child) to avoid FK violations.
+- **Deadlock retry:** `WithDeadlockRetryAsync()` — exponential backoff with random jitter on SQL error 1205, up to 3 attempts.
+- **Guard validation:** `GuardTablesExistAsync()` — checks target tables exist before attempting sync (catches broken migrations).
+- **Demo row protection:** Both MERGE statements have `WHERE target.CompanyId <> 12344` on the DELETE branch, protecting the Atlas demo company from being deleted by sync.
+- **Email alerts:** Optional `EmailNotificationService` injection for guard failure notifications.
+- **Audit logging:** Every sync cycle logs start/completion to `IPInfo.ImportLog` with insert/update/delete counts and duration.
+- **Stagger delay:** 3-minute startup delay to avoid trampling other services during initialization.
+
+**IpDataAcquisitionService.cs (443 lines) — ACTIVE**
+BackgroundService replacing IpApiSyncService. Key features:
+- **HTTP conditional download:** Uses `If-Modified-Since` header to skip re-downloads when upstream files haven't changed.
+- **SHA-256 dedup:** File-hash comparison prevents redundant imports.
+- **Streaming parse:** GZip-decompressed TSV/CSV parsed line-by-line with 100K-row batch flushes to keep memory bounded.
+- **Atomic table swap:** Staging table → clustered index → `sp_rename` → drop old. Zero query downtime.
+- **ASN dimension upsert:** After AsnRange import, inserts any new ASN numbers into `IPInfo.ASN` dimension table.
+- **Hot reload:** After all imports, calls `_ipRangeLookup.ReloadAsync()` so enrichment services use fresh data without restart.
+- **Configurable schedule:** `ForgeSettings.IpDataAcquisitionHourUtc` (default 1 = 01:00 UTC).
+
+#### Configuration
+
+| Setting | Location | Value | Purpose |
+|---------|----------|-------|---------|
+| `XavierSmartPiXLConnectionString` | `TrackingSettings` | `Server=192.168.88.35;...` | Xavier Company/Pixel source |
+| `SyncIntervalHours` | `TrackingSettings` | `6` | Company/Pixel sync frequency |
+| `IpDataAcquisitionHourUtc` | `ForgeSettings` | `1` | Daily IP data download hour |
+| `IpDataDirectory` | `ForgeSettings` | `IpData` | Local cache directory for downloaded files |
+| `XavierConnectionString` | `TrackingSettings` | _(retired)_ | Was IPGEO source; `[Obsolete]` |
+| `IpApiSyncHourUtc` | `TrackingSettings` | _(retired)_ | Was IPGEO schedule; `[Obsolete]` |
+
+#### SQL Dependencies
+
+| Table/Object | Schema | Purpose |
+|-------------|--------|---------|
+| `PiXL.Company` | PiXL | Sync target — 511 customer rows from Xavier |
+| `PiXL.Settings` | PiXL | Sync target — 5,691 pixel configurations from Xavier |
+| `IPInfo.ImportLog` | IPInfo | Audit trail for all sync/import operations |
+| `IPInfo.AsnRange` | IPInfo | Live ASN-to-IP-range lookup (441K rows, swap-loaded) |
+| `IPInfo.GeoRange` | IPInfo | Live geo-to-IP-range lookup (8M rows, swap-loaded) |
+| `IPInfo.ASN` | IPInfo | ASN dimension table (name, org, source) |
+| `IPInfo.DataSource` | IPInfo | Reference table for data source metadata |
+
+#### Live Data (2026-03-23)
+
+Recent `IPInfo.ImportLog` entries show both sync paths are healthy:
+- Company/Pixel syncing every 6h (~94-107ms Company, ~422-531ms Pixel, 0 errors)
+- AsnRange importing daily at 01:00 UTC (~441K rows in ~4s)
+- GeoRange: 8M rows loaded (DB-IP Lite monthly)
+
+#### Observations
+
+**O1 (minor) — IpApiSyncService.cs is a dead tombstone file.**
+13-line file with only a comment block. The replacement (`IpDataAcquisitionService`) has been active for weeks. The tomb file clutters the Services directory and appears in the F7 index, creating confusion about what's actually running, because IpApiSyncService.cs isn't in Program.cs DI registration at all.
+
+**O2 (minor) — CompanyPiXLSyncService has no ForgeMetrics integration.**
+No counters for sync duration, row counts, or failure tracking. The only visibility is log messages and `IPInfo.ImportLog` entries. The Tron dashboard can't show sync health without metrics.
+
+**O3 (nitpick) — IpDataAcquisitionService has no ForgeMetrics integration.**
+Same as O2 — import cycle duration, row counts, and skip/failure events are invisible to the dashboard. IPInfo.ImportLog is the only audit trail, but it's not surfaced in real-time metrics.
+
+**O4 (minor) — CompanyPiXLSyncService MERGE updates ALL columns unconditionally.**
+Both MERGE statements update every column regardless of whether values changed. For 511 + 5,691 rows every 6 hours this is trivially cheap, but the `RowsUpdated` counter in ImportLog always shows the full table count (510/5690) even when nothing actually changed. This makes "did anything change?" impossible to answer from the log alone.
+
+**O5 (question) — Cloud provider range imports are missing.**
+The `IpDataAcquisitionService` header documents AWS, GCP, Azure, and Cloudflare range sources, but `RunAllImportsAsync()` only calls `ImportIpToAsnAsync()` and `ImportDbIpCityLiteAsync()`. The cloud provider ranges are noted as "already loaded by DatacenterIpService at startup" — are they duplicated between in-memory-only and SQL, or is DatacenterIpService the sole source? Should these be imported into `IPInfo.DatacenterRange` for ETL enrichment too?
+
+**O6 (minor) — `TrustServerCertificate=True` in Xavier connection string.**
+The `TrackingSettings.cs` comments document this is needed because Xavier's SQL Server 2017 isn't configured to present its custom cert. This is a known security debt item. Is there a plan to fix Xavier's cert configuration, or will the sync be decommissioned before that matters?
+
+**O7 (nitpick) — Two `[Obsolete]` properties in TrackingSettings for retired IPGEO sync.**
+`XavierConnectionString` and `IpApiSyncHourUtc` are marked `[Obsolete]` and retained "to avoid config binding errors." If no config file still references them, they can be removed. If config files do reference them, the `[Obsolete]` warning fires during build but removal would cause a runtime exception.
+
+#### Questions for Owner
+
+- **Q1:** Delete `IpApiSyncService.cs` tombstone? It's 13 lines of comments, not registered in DI, and the replacement has been running for weeks.
+- **Q2:** Should CompanyPiXLSyncService and IpDataAcquisitionService get ForgeMetrics counters (sync duration, rows, failures) for Tron dashboard visibility? Same pattern as F6 Lane 3 metrics.
+- **Q3:** The cloud provider imports (AWS/GCP/Azure/Cloudflare) — should those go into SQL `IPInfo.DatacenterRange` too, or is the `DatacenterIpService` in-memory-only approach sufficient?
+- **Q4:** What's the timeline for decommissioning CompanyPiXLSyncService? Is there a front-end replacement project in progress, or is this bridge indefinite?
