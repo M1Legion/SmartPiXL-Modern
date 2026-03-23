@@ -15,22 +15,20 @@
 | # | Subsystem | Status | Decision |
 |---|-----------|--------|----------|
 | 1 | **Edge HTTP capture** (SmartPiXL project) | **COMPLETE** | Capture-only, enrichment moved to Forge |
-| 2 | PiXL Script (browser JavaScript) | **COMPLETE** | 8 implementation batches, NUglify, all tests pass |
-| 3 | Named pipe transport + failover | **COMPLETE** | Zero-data-loss failover chain, dead-letter, .processed retention |
-| 4 | **Forge pipeline** (sub-subsystem walkthrough) | **IN PROGRESS** | Broken into F1–F9 sub-subsystems below |
-| 5 | SQL schema (tables, indexes, relationships) | not started | — |
-| 6 | ETL stored procedures | not started | — |
-| 7 | Enrichment services (×15) | not started | — |
-| 8 | Background IP enrichment (Lane 3) | not started | — |
-| 9 | IPAPI/Xavier sync | not started | — |
-| 10 | Sentinel (dashboards, Atlas, TrafficAlert) | not started | — |
-| 11 | Failover chain (Edge JSONL, Forge JSONL, dead letter, replay) | not started | — |
-| 12 | Synthetic data generator | not started | — |
-| 13 | Shared library (SmartPiXL.Shared) | not started | — |
-| 14 | SQL CLR functions | not started | — |
-| 15 | Test suite | not started | — |
+| 2 | **PiXL Script** (browser JavaScript) | **COMPLETE** | 8 implementation batches, NUglify, all tests pass |
+| 3 | **Named pipe transport + failover** | **COMPLETE** | Zero-data-loss failover chain, dead-letter, .processed retention |
+| 4 | **Forge pipeline** (sub-subsystem walkthrough) | **COMPLETE** | F1–F9 all walked. 29 Forge probes. F8 services → Sentinel. Absorbed old subsystems 7–9, 11. |
+| 5 | SQL schema + ETL + CLR | not started | Tables, indexes, ETL stored procs, CLR functions. All SQL work. |
+| 6 | **Sentinel** (health, dashboards, Atlas, TrafficAlert) | not started | 5 services, 3 endpoint files, 4 wwwroot pages. Owns health/ops domain. |
+| 7 | Synthetic data generator | not started | SmartPiXL.SyntheticTraffic — Engine, Generation, Network, Profiles |
+| 8 | Shared library (SmartPiXL.Shared) | not started | Configuration, Models, Services — used by Edge + Forge + Sentinel |
+| 9 | Test suite | not started | 24 test files, 543 tests. Coverage analysis. |
 
----
+**Subsystems absorbed by Forge walkthrough (F1–F9):**
+- ~~Enrichment services (×18)~~ → walked as F2 (Enrichment Engine)
+- ~~Background IP enrichment (Lane 3)~~ → walked as F6 + F7
+- ~~IPAPI/Xavier sync~~ → walked as F7 (Data Sync)
+- ~~Failover chain~~ → walked as F4 (Forge side) + subsystem 1/3 (Edge side)
 
 ## Design Decisions Log
 
@@ -58,6 +56,12 @@ Decisions made during walkthroughs that affect architecture.
 | D18 | Dead-letter format unified to JSONL | All failover/dead-letter persistence uses JSONL (one JSON object per line). Legacy JSON array files handled as fallback in ForgeReplayService. | 2026-03-19 |
 | D19 | **Health Tree — organizing principle for SmartPiXL** | Hierarchical tree: Platform → System → Subsystem → Component → Probe. Probes are leaves (binary health). Parents aggregate as ratios. Metrics are continuous; health is derived boolean. Tree is a living document, defined now, filled by walkthroughs. See Health Tree section. | 2026-03-23 |
 | D20 | **Probe audit — 6 enrichments reclassified stateful** | Agent examined every service against probe definition. UaParsing, BotUaDetection, DeadInternet, BehavioralReplay, CrossCustomerIntel, SessionStitching all maintain ConcurrentDictionary/BoundedCache state. Only 7 enrichments are truly stateless. Each enrichment stays an individual probe (owner: "use the rules"). Non-runtime subsystems (SQL schema, CLR, tests) are NOT tree nodes. | 2026-03-23 |
+| D21 | **PiXL.Raw is dead — examine all references** | PiXL.Parsed is the only ingestion table. PiXL.Raw deprecated. Code referencing PiXL.Raw needs examination before deletion. Owner suspects most can go. | 2026-03-23 |
+| D22 | **Domain separation — Sentinel owns health/web, Forge owns enrichment** | Forge does enrichment only. Sentinel manages all web pages (Tron Health, Tron Metrics, Atlas, Pipeline). InfraHealthService, SelfHealingService, EmailNotificationService all belong in Sentinel. | 2026-03-23 |
+| D23 | **One canonical InfraHealthService in Sentinel** | Delete Forge copy (stuck on PiXL.Raw). Sentinel copy is canonical (partially modernized). Forge reports health via ForgeMetrics.GetHealthReport(). | 2026-03-23 |
+| D24 | **MaintenanceScheduler → SQL Agent jobs** | Daily purge + weekly index rebuild are pure SQL ops. Move to SQL Agent, delete C# BackgroundService. | 2026-03-23 |
+| D25 | **SelfHealingService → Sentinel (future modernization)** | Architecture sound, checks reference obsolete schema. Future home: Sentinel. Will call Forge internal endpoints for Forge-specific remediations. | 2026-03-23 |
+| D26 | **Tron page rename: Operations → Health, Analytics → Metrics** | Consistent with health tree vocabulary. Health = probe state. Metrics = performance counters. | 2026-03-23 |
 
 ---
 
@@ -107,7 +111,7 @@ This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 4/4 = **15.95/17**
 Living document. Nodes marked `(?)` have not been walked yet. Each walkthrough fills in its branch. The tree grows with the project.
 
 ```
-SmartPiXL (platform)                               33/33 probes walked (+ F8, F9, Sentinel TBD)
+SmartPiXL (platform)                               33/33 probes walked (Forge F8/F9 add 0 new probes)
 │
 ├── Edge (system)                                   health = 4/4 probes  ✅ IMPLEMENTED (EdgeMetrics.cs)
 │   ├── HTTP Listener                               probe: Kestrel responding (always 1 if process up)
@@ -164,11 +168,16 @@ SmartPiXL (platform)                               33/33 probes walked (+ F8, F9
 │   │       ├── IPtoASN                             probe: last import < 26h
 │   │       └── DB-IP                               probe: last import < 35 days
 │   │
-│   ├── F8: Ops & Health (?)                        not walked — structure TBD
-│   │
-│   └── F9: Infrastructure (?)                      not walked — structure TBD
+│   └── F8: Ops & Health                             WALKED — no Forge probes (FD47–FD55)
+│         InfraHealthService → belongs to Sentinel (FD49)
+│         SelfHealingService → future Sentinel work (FD52)
+│         MaintenanceScheduler → SQL Agent jobs (FD50)
+│         EmailNotification → Sentinel (FD53)
+│         F9 (Infrastructure) → scaffolding, no probes (FD55)
 │
 └── Sentinel (system) (?)                           not walked — structure TBD
+      Will own: InfraHealthService, SelfHealingService, EmailNotification,
+      all dashboards (Health, Metrics, Atlas, Pipeline)
 ```
 
 ### MetricsLane → Tree Mapping
@@ -193,6 +202,9 @@ ForgeMetrics lanes map to subtrees. Each lane provides the raw data that probe h
 - **Edge enrichments removed.** During implementation, code audit confirmed Edge has NO enrichment services — DatacenterIp, IpClassification, IpBehavior, FingerprintStability, GeoCache were all moved to Forge or deleted during earlier walkthroughs. Edge is capture-only: HTTP → TrackingData → Pipe → Failover. The tree was corrected from 9 Edge probes to 4.
 - **SQL schema, CLR, test suite (subsystems 5, 14, 15) → NOT tree nodes.** Owner: "Not a single thing in SQL is finalized. Having those files makes it look like we have an explicit SQL anything, which we do not." The tree is strictly runtime components. Walkthroughs still cover these subsystems but they don't get health probes.
 - **Sentinel structure → deferred.** Owner has built 5 different test concept pages. Structure TBD when Sentinel stabilizes in subsystem 10 walkthrough. Sentinel placeholder removed from tree until then.
+- **F8 Ops & Health → 0 Forge probes, services relocate to Sentinel.** InfraHealthService (both copies), SelfHealingService, EmailNotificationService, and the Tron dashboard all belong in Sentinel domain. MaintenanceSchedulerService replaced by SQL Agent jobs. The Forge copy of InfraHealthService (stuck on PiXL.Raw schema) should be deleted; the Sentinel copy (partially modernized) is canonical.
+- **F9 Infrastructure → scaffolding, 0 probes.** ForgeMetrics, MetricsReporterService, NumaHelper, ForgeSettings, Program.cs are all plumbing. No independent failure modes. If ForgeMetrics breaks, F1-F7 probes go silent — detectable at system level.
+- **Tron page rename:** Operations → Health, Analytics → Metrics. Consistent with health tree vocabulary.
 
 ### Probe Audit (2026-03-23)
 
@@ -218,9 +230,11 @@ Agent analysis of every service file against the probe definition. Three sub-age
 | System | Walked Probes | TBD |
 |--------|--------------|-----|
 | Edge | 4 | — |
-| Forge F1–F7 | 29 | F8, F9 |
-| Sentinel | — | All |
-| **Total** | **33** | **+ F8 + F9 + Sentinel** |
+| Forge F1–F7 | 29 | — |
+| Forge F8 | 0 | Services relocate to Sentinel (FD49, FD52, FD53) |
+| Forge F9 | 0 | Scaffolding, no probes (FD55) |
+| Sentinel | — | All (F8 services + dashboards + Atlas + Pipeline) |
+| **Total** | **33** | **+ Sentinel** |
 
 ---
 
@@ -544,8 +558,8 @@ These fields always return the same value in every browser. Removed to reduce pa
 | F5 | ETL Pipeline | ParsedBulkInsertService, EtlBackgroundService | **DONE** | FD24–FD32 |
 | F6 | Background IP | BackgroundIpEnrichmentService | **complete** | All 7 observations resolved (FD33-FD37) |
 | F7 | Data Sync | CompanyPiXLSyncService, IpDataAcquisitionService | **complete** | IPAPI deleted, MERGE→UPDATE+INSERT, ForgeMetrics added |
-| F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | not started | — |
-| F9 | Infrastructure | ForgeSettings, ForgeMetrics, MetricsReporter, NumaHelper, Program.cs | not started | — |
+| F8 | Ops & Health | SelfHealingService, MaintenanceScheduler, EmailNotification, InfraHealth | **DONE** | FD47–FD54: Services relocate to Sentinel, 0 Forge probes |
+| F9 | Infrastructure | ForgeSettings, ForgeMetrics, MetricsReporter, NumaHelper, Program.cs | **DONE** | FD55: Scaffolding, no probes |
 
 ### Pre-Walkthrough Decisions (2026-03-19)
 
@@ -1417,3 +1431,189 @@ The `TrackingSettings.cs` comments document this is needed because Xavier's SQL 
 **FD45 — Hierarchical health tree concept (new).** Owner proposed a composite health check pattern: leaf subsystems report binary 1/0 health, parent nodes aggregate as ratios (e.g., "Data Sync 2/2", "IpDataAcquisition 2/3"). Maps the existing ForgeMetrics + subsystem structure into a standardized tree. ~~Design deferred until F1-F9 walkthroughs complete and the full tree shape is known.~~ → Superseded by FD46.
 
 **FD46 — Health tree is the organizing principle, defined NOW, filled incrementally.** Owner corrected the deferral: "After F8 and F9 there's subsystems 5-15. I don't really get doing this AFTER all that." The tree is a living design document that starts with known structure (F1-F7, Edge, Sentinel surface area) and grows as walkthroughs fill in branches. F8 (Ops & Health) should be *guided by* the tree concept, not walked blind and later restructured. See **Health Tree** section below for the full design.
+
+---
+
+### F8 — Ops & Health
+
+**Scope:** 5 service files in Forge + 1 shared model file + 1 duplicate in Sentinel (~2,770 lines total)
+
+**What it does:** Infrastructure health monitoring, automated remediation, scheduled maintenance, email notifications, and HTTP bridge to Edge health endpoints. All files originated as bulk ports from `SmartPiXL.Worker-Deprecated`.
+
+#### File Inventory
+
+| File | Lines | Location | DI Status (Forge) | Origin |
+|------|-------|----------|-------------------|--------|
+| `InfraHealthService.cs` | ~620 | Forge/Services | **Registered** (singleton) | Ported from Worker-Deprecated |
+| `SelfHealingService.cs` | ~700 | Forge/Services | **Commented out** | Ported from Worker-Deprecated |
+| `MaintenanceSchedulerService.cs` | ~300 | Forge/Services | **Commented out** | Ported from Worker-Deprecated |
+| `EmailNotificationService.cs` | ~250 | Forge/Services | **Commented out** | Ported from Worker-Deprecated |
+| `HttpEdgeHealthClient.cs` | ~150 | Forge/Services | **Registered** (via `IEdgeHealthClient`) | Ported from Worker-Deprecated |
+| `InfraHealthModels.cs` | ~430 | Shared/Models | Data model | Ported from Worker-Deprecated |
+| `InfraHealthService.cs` | ~570 | **Sentinel**/Services | **Registered** in Sentinel | Divergent fork of the Forge copy |
+
+**Total: ~3,020 lines across 7 files. Only 2 of 5 Forge services are registered in DI.**
+
+#### The Divergence Problem
+
+The central finding of this walkthrough: **InfraHealthService exists in two copies that have silently diverged.** The Sentinel copy was partially modernized (queries `PiXL.Parsed`, reads from `Ops.DashboardSnapshot`, references `ProcessDimensions` watermark, removed Dev Kestrel probe). The Forge copy was left on the legacy schema (queries `PiXL.Raw`, `COUNT(*)` scans, references `ParseNewHits` watermark, includes Dev Kestrel probe).
+
+| Probe | Forge Copy | Sentinel Copy |
+|-------|-----------|---------------|
+| `ProbeSqlAsync` TestRows | `OBJECT_ID('PiXL.Raw')` | `OBJECT_ID('PiXL.Parsed')` |
+| `ProbeSqlAsync` Watermark | `ProcessName = 'ParseNewHits'` | `ProcessName = 'ProcessDimensions'` |
+| `ProbeDataFlowAsync` source | Direct `PiXL.Raw` queries + `COUNT(*)` | `PiXL.Parsed` + reads `Ops.DashboardSnapshot` |
+| `ProbeDataFlowAsync` staleness | `MAX(ReceivedAt) FROM PiXL.Raw` | `MAX(ReceivedAt) FROM PiXL.Parsed` |
+| Website probes | 3 targets (incl. Dev Kestrel) | 2 targets (prod only) |
+
+Both copies share:
+- Hardcoded IP `192.168.88.176` for website probes
+- Sync-over-async `_edge.GetHealthAsync().GetAwaiter().GetResult()` in `ProbeAppComponents`
+- Same 15s cache + `SemaphoreSlim` double-check pattern
+- Same `ComputeOverallStatus` logic
+
+#### InfraHealthService — What It Probes (7 parallel probes)
+
+| Probe | What it checks | Assessment |
+|-------|---------------|------------|
+| `ProbeWindowsServices` | 4 services: MSSQL$SQL2025, W3SVC, SmartPiXL-Forge, SQLAgent$SQL2025 | Clean — ServiceController lookups |
+| `ProbeSqlAsync` | SQL connection + row counts + watermark + version | **DRIFT** — Forge copy reads PiXL.Raw |
+| `ProbeWebsitesAsync` | HTTP HEAD to 2-3 IIS endpoints | Hardcoded IPs, Forge has extra Dev probe |
+| `ProbeAppComponents` | Process stats, GC, memory, Edge queue depth | Sync-over-async for Edge call |
+| `ProbeDataFlowAsync` | Last insert time, hit rates, ETL lag, queue depth | **DRIFT** — Forge copy queries PiXL.Raw directly |
+| `ProbePipelineAsync` | `EXEC usp_Dash_PipelineHealth` | Depends on stored proc output columns |
+| `ProbeIisLogs` | Tail-reads log files for `[ERROR` lines | Clean — file-based, no SQL dependency |
+
+#### SelfHealingService — The Disabled Remediation Engine
+
+60s loop with 30s offset from ETL. Decision tree of 7 checks:
+
+| Check | What it does | Remediation | Assessment |
+|-------|-------------|-------------|------------|
+| `CheckCircuitBreakerAsync` | Tests if SQL circuit breaker is open | Reset via `_edge.ResetCircuitBreakerAsync()` | OK concept |
+| `CheckEtlLagAsync` | ParseLag/MatchLag from watermarks | **References `ETL.usp_ParseNewHits`** — legacy proc | **DRIFT** |
+| `CheckDataFlowAsync` | Data staleness from InfraHealth | Logs, emails | OK concept |
+| `CheckSqlConnectivityAsync` | Direct SQL connection test | Logs, emails | OK concept |
+| `CheckRecentErrorsAsync` | Error count from InfraHealth | Logs, emails | OK concept |
+| `CheckDiskSpaceAsync` | Free disk GB on C: | Triggers `RawDataPurge` → **`ETL.usp_PurgeRawData`** | **DRIFT** — purges dead table |
+| `CheckFilegroupSpaceAsync` | 3 SQL checks: filegroup space, default FG, log % | Auto-fixes default filegroup to SmartPiXL | Smart |
+
+Additional drift: ETL lag thresholds "TEMPORARILY RAISED to 50M" with comment about manual catch-up. Hardcoded hack never reverted.
+
+The service logs to `Ops.RemediationLog` with 2h dedup. Auto-executes safe actions, emails for destructive ones. The remediation architecture is sound — the specific checks reference obsolete schema.
+
+#### MaintenanceSchedulerService — Disabled, Purges Ghost Table
+
+Clock-based: daily purge at 3 AM UTC (>90 days from `PiXL.Raw`), weekly index rebuild Sunday 4 AM (>10% fragmentation).
+
+**Drift:**
+- Purge target is `PiXL.Raw` — deprecated table. Batched `DELETE TOP(10000)` of a table that's either empty or no longer receiving data.
+- Index rebuild uses `ALTER INDEX [{indexName}] ON [{tableName}]` — single-bracket format breaks on schema-qualified names like `PiXL.Parsed` (needs `[PiXL].[Parsed]`).
+
+#### EmailNotificationService — Disabled in Forge, Active in Sentinel
+
+SMTP + SMS (carrier email-to-SMS gateway) with rate limiting. 1/issue-type/hour for email, 1/issue-type/2h for SMS. Fire-and-forget, exceptions swallowed, `ConcurrentDictionary<string, DateTime>` rate trackers.
+
+**No significant drift.** Clean utility service. Active in Sentinel DI, commented out in Forge.
+
+#### HttpEdgeHealthClient — Active, Clean
+
+`IEdgeHealthClient` implementation. Two endpoints: `GET /internal/health` → `EdgeHealthReport`, `POST /internal/circuit-reset`. All calls swallow exceptions, return safe defaults. Registered in both Forge and Sentinel.
+
+**No drift.** Lightweight HTTP bridge doing what it says.
+
+#### InfraHealthModels.cs — The Schema Ghost
+
+430 lines of DTOs with PiXL.Raw baked into XML doc comments throughout:
+- `SqlHealthItem.TestRows` → "Row count in PiXL.Raw"
+- `DataFlowHealthItem.IsFlowing` → "True if new rows have arrived in PiXL.Raw"
+- `DataFlowHealthItem.MaxTestId` → "MAX(Id) in PiXL.Raw"
+- `DataFlowHealthItem.EtlLag` → "Rows in PiXL.Raw not yet processed"
+- `PipelineHealthItem` → "Covers six core tables (PiXL.Raw, PiXL.Parsed, ...)"
+
+The entire model layer still describes PiXL.Raw as a first-class table.
+
+#### Observations
+
+| # | Severity | Summary |
+|---|----------|---------|
+| O1 | **Critical** | Two diverging InfraHealthService copies (Forge stuck on PiXL.Raw, Sentinel partially modernized) |
+| O2 | **High** | PiXL.Raw references throughout (InfraHealth Forge, SelfHealing, MaintenanceScheduler, InfraHealthModels) |
+| O3 | **High** | Domain violation — InfraHealthService is a monitoring/dashboard concern, not enrichment. Forge should not own it. |
+| O4 | **Medium** | SelfHealingService references `ETL.usp_ParseNewHits` and `ETL.usp_PurgeRawData` — legacy procs |
+| O5 | **Medium** | ETL lag thresholds "TEMPORARILY RAISED to 50M" — hardcoded hack |
+| O6 | **Low** | Hardcoded IP 192.168.88.176 in website probes |
+| O7 | **Low** | Sync-over-async in ProbeAppComponents (both copies) |
+| O8 | **Low** | MaintenanceScheduler ALTER INDEX format breaks on schema-qualified names |
+| O9 | **Low** | InfraHealthModels XML docs describe PiXL.Raw as active |
+
+#### Owner Decisions
+
+**FD47 — PiXL.Raw is dead; references must be examined before deletion.**
+
+Owner: "PiXL.Raw is dead and anything that references it needs to be examined. I suspect we're good to just delete any code that references that table, but I'd prefer to double check before deleting."
+
+PiXL.Parsed is the current and only ingestion table. PiXL.Raw is deprecated — no longer part of the design. The table itself remains because too many legacy dependencies reference it, but no new code should interact with it.
+
+**FD48 — Domain separation: Sentinel owns all health monitoring and web pages. Forge owns enrichment.**
+
+Owner: "The Forge does enrichment. Sentinel manages every single web page I want to create to support the SmartPiXL platform."
+
+Sentinel pages:
+- `http://162.252.59.214:7500/tron` — Operations (→ rename to **Health**) + Analytics (→ rename to **Metrics**)
+- `http://162.252.59.214:7500/atlas` — Tiered documentation
+- `http://162.252.59.214:7500/pipeline` — Visual documentation
+
+All web-facing features are Sentinel's domain. The Forge should never own a web UI or serve pages. InfraHealthService belongs in Sentinel, not Forge.
+
+**FD49 — One canonical InfraHealthService in Sentinel. Delete the Forge copy.**
+
+The Sentinel copy is partially modernized and lives in the correct domain. The Forge copy is legacy and wrong domain. Resolution: **Sentinel owns the single canonical InfraHealthService.** The Forge copy should be deleted after verification. Forge reports its own health via `ForgeMetrics.GetHealthReport()` (already implemented in D22), and Sentinel can aggregate Forge health through that endpoint if needed.
+
+**FD50 — MaintenanceSchedulerService → SQL Agent jobs. Delete from C#.**
+
+Owner: "For the maintenance, I'm perfectly content to run that as jobs inside SQL and let that be self contained. SQL is well suited to managing its own junk in that way."
+
+The daily purge and weekly index rebuild are pure SQL operations. They don't need a C# BackgroundService. Move to SQL Agent jobs and delete the C# file.
+
+**FD51 — SelfHealingService is NOT deprecated — needs modernization.**
+
+Owner: "The SelfHealingService is not deprecated, it was just built out on a legacy design that doesn't necessarily apply to the current design. It is meant to process several known remediations for possible problems the system might run into. I would like to make it more robust and handle more likely possible problems."
+
+The architecture (decision tree → remediation → log → notify) is sound. The specific checks reference obsolete schema and need rewriting for the current design. This is future work — not part of this walkthrough's scope.
+
+**Question for owner (answered in walkthrough):** Where should SelfHealingService live? Given FD48 (Sentinel owns health), and SelfHealingService depends on InfraHealthService (FD49 → Sentinel-owned), the logical home is Sentinel. However, some remediations (like circuit breaker reset, ETL restart) target Forge internals. The service could live in Sentinel and call Forge endpoints for remediation, or live in Forge and consume Sentinel's health data. Owner's answer: "I would say Sentinel. I thought of Sentinel as a place for reports/documentation, but to do those reports, it needs to manage the health endpoints."
+
+**FD52 — SelfHealingService future home: Sentinel.** Sentinel owns health monitoring and remediation. When modernized, SelfHealingService will call Forge's internal endpoints (similar to HttpEdgeHealthClient calling Edge) for Forge-specific remediations.
+
+**FD53 — EmailNotificationService stays in Sentinel.** Already active there. Owner: "This is one of those final features that needs to be there for launch, but doesn't need to be implemented for months."
+
+**FD54 — Tron dashboard page rename: Operations → Health, Analytics → Metrics.** Owner: "I think need to be updated to Health and Metrics to keep our language consistent and to indicate intent." Health monitors system state (probes, green/yellow/red). Metrics monitors performance (counters, timings, throughput).
+
+---
+
+### F9 — Infrastructure
+
+**What it is:** Forge infrastructure plumbing — the composition root, settings, metrics collection, NUMA binding, and metrics reporting. These are the pipes and wires that make F1–F8 work.
+
+#### File Inventory
+
+| File | Lines | Purpose | Assessment |
+|------|-------|---------|------------|
+| `Program.cs` | ~330 | Composition root, DI registration, Windows Service hosting | Core plumbing |
+| `ForgeSettings.cs` | ~120 | POCO settings class bound from appsettings.json | Core plumbing |
+| `ForgeMetrics.cs` | ~280 | Lock-free pipeline counters, health report generation | Core plumbing — already has health tree (D22) |
+| `MetricsReporterService.cs` | ~150 | 10s timer, snapshots ForgeMetrics, logs formatted output | Core plumbing |
+| `NumaHelper.cs` | ~80 | P/Invoke for NUMA node thread affinity | Core plumbing |
+
+**Total: ~960 lines across 5 files.**
+
+#### Assessment
+
+F9 is pure infrastructure. There is no probeable runtime state unique to F9 — these files *enable* health monitoring (ForgeMetrics), they don't *have* health to monitor. ForgeMetrics is the aggregation point that F1–F8 probes feed into. Program.cs is the DI wiring. ForgeSettings holds config values. MetricsReporterService logs metrics. NumaHelper pins threads.
+
+**No probes for F9.** This is the scaffolding, not a subsystem with independent failure modes. If ForgeMetrics fails, you'd know because F1–F8 probes all go silent — that's detectable at the system level, not as an F9 probe.
+
+#### Owner Decision
+
+**FD55 — F9 has no probes and no walkthrough needed.** All infrastructure. No independent failure modes worth monitoring. If these files break, the Forge process itself is broken (detectable at system level). F9 confirmed as scaffolding — excluded from the health tree.
