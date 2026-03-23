@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Endpoints;
@@ -11,7 +10,7 @@ namespace SmartPiXL.Endpoints;
 // connectivity, queue depth). These endpoints provide that bridge.
 //
 // ENDPOINTS:
-//   GET  /internal/health        → EdgeHealthStatus JSON (circuit, queue, uptime)
+//   GET  /internal/health        → EdgeHealthReport JSON (per-probe health + metrics)
 //   POST /internal/circuit-reset → { success: bool } — resets circuit breaker
 //
 // SECURITY:
@@ -21,20 +20,20 @@ namespace SmartPiXL.Endpoints;
 
 /// <summary>
 /// Internal HTTP endpoints called by the SmartPiXL Worker process to query
-/// and control Edge-owned state (circuit breaker, pipe queue depth).
+/// and control Edge-owned state (health probes, pipe queue depth).
 /// </summary>
 public static class InternalEndpoints
 {
-    private static readonly long StartTicks = Stopwatch.GetTimestamp();
-
     /// <summary>
     /// Maps the <c>/internal/*</c> endpoints. Called from <c>Program.cs</c>.
     /// </summary>
     public static void MapInternalEndpoints(this WebApplication app)
     {
-        // ── Health snapshot ─────────────────────────────────────────
-        // Health reports PipeClientService connectivity + queue depth.
-        app.MapGet("/internal/health", (HttpContext ctx, PipeClientService pipeClient) =>
+        // ── Health tree report ──────────────────────────────────────
+        // Returns per-probe health (1/0) + metrics for all 4 Edge probes,
+        // plus aggregated Edge health ratio. Used by Forge, Sentinel, and
+        // external monitoring.
+        app.MapGet("/internal/health", (HttpContext ctx, EdgeMetrics metrics) =>
         {
             if (!IsLoopback(ctx))
             {
@@ -42,15 +41,7 @@ public static class InternalEndpoints
                 return Results.Empty;
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(StartTicks);
-            return Results.Json(new EdgeHealthStatus
-            {
-                Circuit = pipeClient.IsConnected ? "Closed" : "Open",
-                LastTripReason = pipeClient.IsConnected ? null : "Pipe disconnected",
-                QueueDepth = pipeClient.QueueDepth,
-                UptimeSeconds = elapsed.TotalSeconds,
-                IsReachable = true
-            });
+            return Results.Json(metrics.GetHealthReport());
         });
 
         // ── Circuit breaker reset ───────────────────────────────────

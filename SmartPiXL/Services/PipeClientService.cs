@@ -58,6 +58,7 @@ public sealed class PipeClientService : BackgroundService
 {
     private readonly Channel<TrackingData> _channel;
     private readonly JsonlFailoverService _failoverService;
+    private readonly EdgeMetrics _metrics;
     private readonly ITrackingLogger _logger;
     private readonly string _pipeName;
 
@@ -94,9 +95,11 @@ public sealed class PipeClientService : BackgroundService
     public PipeClientService(
         IOptions<TrackingSettings> settings,
         JsonlFailoverService failoverService,
+        EdgeMetrics metrics,
         ITrackingLogger logger)
     {
         _failoverService = failoverService;
+        _metrics = metrics;
         _logger = logger;
         _pipeName = settings.Value.PipeName;
 
@@ -176,6 +179,9 @@ public sealed class PipeClientService : BackgroundService
 
                 if (batch.Count > 0)
                     await WriteBatchAsync(batch, stoppingToken);
+
+                // Sample pipe state for health probes
+                _metrics.SamplePipeState(IsConnected, QueueDepth);
             }
             catch (OperationCanceledException)
             {
@@ -219,6 +225,8 @@ public sealed class PipeClientService : BackgroundService
 
         try
         {
+            var batchStart = EdgeMetrics.StartTimer();
+
             // Write all records to StreamWriter buffer (sync — no kernel transitions)
             for (var i = 0; i < batch.Count; i++)
             {
@@ -229,6 +237,8 @@ public sealed class PipeClientService : BackgroundService
             // SINGLE flush for the entire batch — one kernel transition
             await _writer!.FlushAsync(ct);
             _reconnectAttempts = 0;
+
+            _metrics.RecordPipeWrite(batchStart, batch.Count);
         }
         catch (IOException ex)
         {
@@ -238,6 +248,7 @@ public sealed class PipeClientService : BackgroundService
             SetNextReconnectTime();
 
             // Failover entire batch to JSONL
+            _metrics.RecordPipeFailover(batch.Count);
             foreach (var record in batch)
                 _failoverService.TryEnqueue(record);
         }
@@ -274,6 +285,7 @@ public sealed class PipeClientService : BackgroundService
             };
 
             _reconnectAttempts = 0;
+            _metrics.RecordPipeReconnect();
             _logger.Info("PipeClient: connected to Forge");
             return true;
         }

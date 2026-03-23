@@ -85,6 +85,10 @@ builder.Services.AddSingleton<ITrackingLogger>(sp => sp.GetRequiredService<FileT
 // PiXLID, client IP (from proxy header chain), headers JSON, User-Agent, Referer.
 builder.Services.AddSingleton<TrackingCaptureService>();
 
+// EdgeMetrics: Lock-free Interlocked counters for the 4 Edge health probes.
+// Services record hot-path counters; /internal/health reads and aggregates.
+builder.Services.AddSingleton<EdgeMetrics>();
+
 // The Edge NEVER writes to SQL directly. All records flow:
 //   Edge → PipeClientService → Forge (named pipe) → SQL
 //   Edge → PipeClientService → JsonlFailoverService (pipe down) → disk

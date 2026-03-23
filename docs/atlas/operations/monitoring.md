@@ -81,20 +81,28 @@ Each probe is independent — a SQL failure doesn't block the IIS check.
 The Edge exposes localhost-only endpoints for health monitoring:
 
 ```
-GET  /internal/health        → EdgeHealthStatus JSON
-POST /internal/circuit-reset → Reset circuit breaker
-POST /internal/geo-cache/clear → Invalidate geo cache
+GET  /internal/health        → EdgeHealthReport JSON (per-probe health + metrics)
+POST /internal/circuit-reset → No-op (kept for API compat)
 ```
 
-`EdgeHealthStatus` response:
+`EdgeHealthReport` response:
 
 ```json
 {
-    "circuit": "Closed",
-    "lastTripReason": null,
-    "queueDepth": 12,
+    "system": "Edge",
+    "healthy": 4,
+    "total": 4,
+    "ratio": 1.0,
     "uptimeSeconds": 86400.5,
-    "isReachable": true
+    "isReachable": true,
+    "queueDepth": 12,
+    "circuit": "Closed",
+    "probes": [
+        { "name": "HTTP Listener", "health": 1, "metrics": { "requests": 50000 } },
+        { "name": "Capture Pipeline", "health": 1, "metrics": { "captured": 48000, "errors": 3 } },
+        { "name": "Pipe Client", "health": 1, "metrics": { "connected": true, "queueDepth": 12, "written": 48000 } },
+        { "name": "JSONL Failover", "health": 1, "metrics": { "queueDepth": 0, "errors": 0 } }
+    ]
 }
 ```
 

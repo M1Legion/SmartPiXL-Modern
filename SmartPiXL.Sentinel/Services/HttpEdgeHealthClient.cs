@@ -7,10 +7,9 @@ namespace SmartPiXL.Sentinel.Services;
 // ============================================================================
 // HTTP EDGE HEALTH CLIENT — Calls the IIS Edge process's /internal/* endpoints.
 //
-// The IIS "PiXL Edge" process exposes three localhost-only HTTP endpoints:
-//   GET  /internal/health        → Circuit state, queue depth, uptime
+// The IIS "PiXL Edge" process exposes two localhost-only HTTP endpoints:
+//   GET  /internal/health        → Per-probe health + metrics (EdgeHealthReport)
 //   POST /internal/circuit-reset → Reset circuit breaker to Closed
-//   POST /internal/geo-cache/clear → Invalidate geo hot cache after sync
 //
 // RESILIENCE:
 //   All calls swallow exceptions and return safe defaults. The Edge being
@@ -41,24 +40,24 @@ public sealed class HttpEdgeHealthClient : IEdgeHealthClient
         _logger = logger;
     }
 
-    public async Task<EdgeHealthStatus> GetHealthAsync(CancellationToken ct = default)
+    public async Task<EdgeHealthReport> GetHealthAsync(CancellationToken ct = default)
     {
         try
         {
             var response = await _http.GetAsync("/internal/health", ct);
             if (response.IsSuccessStatusCode)
             {
-                var status = await response.Content.ReadFromJsonAsync<EdgeHealthStatus>(JsonOpts, ct);
-                return status ?? new EdgeHealthStatus { IsReachable = false };
+                var report = await response.Content.ReadFromJsonAsync<EdgeHealthReport>(JsonOpts, ct);
+                return report ?? new EdgeHealthReport { IsReachable = false };
             }
 
             _logger.Warning($"Edge health returned {(int)response.StatusCode}");
-            return new EdgeHealthStatus { IsReachable = false };
+            return new EdgeHealthReport { IsReachable = false };
         }
         catch (Exception ex)
         {
             _logger.Debug($"Edge health unreachable: {ex.Message}");
-            return new EdgeHealthStatus { IsReachable = false };
+            return new EdgeHealthReport { IsReachable = false };
         }
     }
 
@@ -81,19 +80,4 @@ public sealed class HttpEdgeHealthClient : IEdgeHealthClient
         }
     }
 
-    public async Task ClearGeoCacheAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            var response = await _http.PostAsync("/internal/geo-cache/clear", null, ct);
-            if (response.IsSuccessStatusCode)
-                _logger.Debug("Edge geo cache cleared via HTTP");
-            else
-                _logger.Warning($"Edge geo cache clear returned {(int)response.StatusCode}");
-        }
-        catch (Exception ex)
-        {
-            _logger.Debug($"Edge geo cache clear failed (non-critical): {ex.Message}");
-        }
-    }
 }

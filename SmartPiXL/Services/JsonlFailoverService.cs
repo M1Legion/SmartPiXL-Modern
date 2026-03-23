@@ -40,6 +40,7 @@ namespace SmartPiXL.Services;
 public sealed class JsonlFailoverService : BackgroundService
 {
     private readonly Channel<TrackingData> _channel;
+    private readonly EdgeMetrics _metrics;
     private readonly ITrackingLogger _logger;
     private readonly string _failoverDirectory;
     private readonly string _resolvedDirectory;
@@ -52,8 +53,10 @@ public sealed class JsonlFailoverService : BackgroundService
 
     public JsonlFailoverService(
         IOptions<TrackingSettings> settings,
+        EdgeMetrics metrics,
         ITrackingLogger logger)
     {
+        _metrics = metrics;
         _logger = logger;
         _failoverDirectory = settings.Value.FailoverDirectory;
 
@@ -150,9 +153,11 @@ public sealed class JsonlFailoverService : BackgroundService
 
             var json = JsonSerializer.Serialize(record);
             await _currentWriter!.WriteLineAsync(json);
+            _metrics.RecordFailoverWrite();
         }
         catch (Exception ex)
         {
+            _metrics.RecordFailoverError();
             _logger.Error($"JsonlFailover: write failed — {ex.Message}");
         }
     }
@@ -173,9 +178,11 @@ public sealed class JsonlFailoverService : BackgroundService
                 var filePath = Path.Combine(_resolvedDirectory, $"failover_emergency_{date}.jsonl");
                 var json = JsonSerializer.Serialize(record);
                 File.AppendAllText(filePath, json + Environment.NewLine, Encoding.UTF8);
+                _metrics.RecordFailoverEmergency();
             }
             catch (Exception ex)
             {
+                _metrics.RecordFailoverError();
                 _logger.Error($"CRITICAL: Emergency failover write failed — DATA AT RISK: {ex.Message}");
             }
         }

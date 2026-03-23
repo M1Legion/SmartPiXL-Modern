@@ -96,6 +96,7 @@ public static partial class TrackingEndpoints
         var captureService = app.Services.GetRequiredService<TrackingCaptureService>();
         var pipeClient = app.Services.GetRequiredService<PipeClientService>();
         var logger = app.Services.GetRequiredService<ITrackingLogger>();
+        var edgeMetrics = app.Services.GetRequiredService<EdgeMetrics>();
         
         // Resolve wwwroot path once at startup
         _wwwrootPath = ResolveWwwrootPath();
@@ -251,7 +252,7 @@ public static partial class TrackingEndpoints
                 var isValidPiXLUrl = urlMatch.Success;
                 
                 // Capture and enqueue — enrichment adds _srv_hitType and bot flags
-                CaptureAndEnqueue(ctx, captureService, pipeClient, logger, isValidPiXLUrl);
+                CaptureAndEnqueue(ctx, captureService, pipeClient, logger, edgeMetrics, isValidPiXLUrl);
                 
                 ctx.Response.ContentType = GifContentType;
                 ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -266,7 +267,7 @@ public static partial class TrackingEndpoints
             // CompanyID/PiXLID are extracted by CaptureService.PathParseRegex.
             if (ClearDotPattern().IsMatch(path))
             {
-                CaptureAndEnqueue(ctx, captureService, pipeClient, logger, isValidPiXLUrl: true);
+                CaptureAndEnqueue(ctx, captureService, pipeClient, logger, edgeMetrics, isValidPiXLUrl: true);
                 
                 ctx.Response.ContentType = GifContentType;
                 ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -279,7 +280,7 @@ public static partial class TrackingEndpoints
             // Record every hit — scanner probes, bots, malformed URLs are all valuable
             // for traffic quality analysis. Flag with _srv_botTrap=1 for downstream
             // bot traffic metrics and client reporting.
-            CaptureAndEnqueue(ctx, captureService, pipeClient, logger, isValidPiXLUrl: false);
+            CaptureAndEnqueue(ctx, captureService, pipeClient, logger, edgeMetrics, isValidPiXLUrl: false);
             
             ctx.Response.ContentType = GifContentType;
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -331,7 +332,7 @@ public static partial class TrackingEndpoints
                 ctx.Request.QueryString = new QueryString("?" + body);
             }
             
-            CaptureAndEnqueue(ctx, captureService, pipeClient, logger, isValidPiXLUrl: true);
+            CaptureAndEnqueue(ctx, captureService, pipeClient, logger, edgeMetrics, isValidPiXLUrl: true);
             
             ctx.Response.Headers["Access-Control-Allow-Origin"] = CorsAllowAll;
             ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
@@ -381,10 +382,16 @@ public static partial class TrackingEndpoints
         TrackingCaptureService captureService,
         PipeClientService pipeClient,
         ITrackingLogger logger,
+        EdgeMetrics edgeMetrics,
         bool isValidPiXLUrl)
     {
+        edgeMetrics.RecordHttpRequest();
+        var captureStart = EdgeMetrics.StartTimer();
+
         // Step 1: Parse HTTP request into a TrackingData record
         var trackingData = captureService.CaptureFromRequest(ctx.Request);
+
+        edgeMetrics.RecordCapture(captureStart);
         
         // --- Hit-type detection ---
         // Modern hits have PiXLScript-collected parameters (canvasFP, sw).

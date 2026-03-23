@@ -97,7 +97,7 @@ Test: *"Would I page myself differently depending on which child failed?"* If ye
 
     Parent health = Σ(child healthy) / Σ(child total)
 
-This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 5/5 = **16.95/18** platform-wide. One number tells the whole story. Drill down to find what's missing. Display thresholds:
+This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 4/4 = **15.95/17** platform-wide. One number tells the whole story. Drill down to find what's missing. Display thresholds:
 - 100% = green
 - 50–99% = yellow (degraded)  
 - <50% = red (critical)
@@ -107,19 +107,13 @@ This cascades naturally. Forge 8.75/9 + Sentinel 3.2/4 + Edge 5/5 = **16.95/18**
 Living document. Nodes marked `(?)` have not been walked yet. Each walkthrough fills in its branch. The tree grows with the project.
 
 ```
-SmartPiXL (platform)                               38/38 probes walked (+ F8, F9, Sentinel TBD)
+SmartPiXL (platform)                               33/33 probes walked (+ F8, F9, Sentinel TBD)
 │
-├── Edge (system)                                   health = 9/9 probes
-│   ├── HTTP Listener                               probe: Kestrel responding on port
-│   ├── Capture Pipeline                            probe: requests → TrackingData succeeding
-│   ├── Pipe Client                                 probe: connected to Forge pipe, data flowing
-│   ├── JSONL Failover                              probe: disk writable, not accumulating old files
-│   └── Edge Enrichments                            health = 5/5 probes
-│       ├── DatacenterIp                            probe: CIDR ranges loaded (HTTP at startup)
-│       ├── IpClassification                        probe: classifying (stateless → always 1)
-│       ├── IpBehavior                              probe: IMemoryCache bounded, tracking
-│       ├── FingerprintStability                    probe: IMemoryCache bounded, tracking
-│       └── GeoCache                                probe: cache populated, SQL reachable
+├── Edge (system)                                   health = 4/4 probes  ✅ IMPLEMENTED (EdgeMetrics.cs)
+│   ├── HTTP Listener                               probe: Kestrel responding (always 1 if process up)
+│   ├── Capture Pipeline                            probe: requests → TrackingData, error rate < 5%
+│   ├── Pipe Client                                 probe: connected to Forge pipe
+│   └── JSONL Failover                              probe: disk writable, no write errors
 │
 ├── Forge (system)                                  health = 29/29 probes walked (+ F8, F9 TBD)
 │   ├── F1: Ingest                                  health = 2/2
@@ -196,7 +190,7 @@ ForgeMetrics lanes map to subtrees. Each lane provides the raw data that probe h
 ### Resolved Questions
 
 - **Stateless enrichments → individual probes.** Owner: "Use the rules we wrote." Probe definition applied: each service IS independently failable (code bug could break one while siblings stay healthy), independently diagnosable (you'd look at different code), and independently actionable (fix different service). All 16 enrichments are individual leaf probes. 7 are truly stateless (always 1). 9 are stateful — see Probe Audit below.
-- **Edge enrichments vs. Forge enrichments → separate leaves.** Owner: "The enrichments are not actually the same, they're just all IP related." Edge runs DatacenterIp, IpClassification, IpBehavior, FingerprintStability, GeoCache. Forge runs 16 different enrichments. Different service instances, different failure modes, different trees.
+- **Edge enrichments removed.** During implementation, code audit confirmed Edge has NO enrichment services — DatacenterIp, IpClassification, IpBehavior, FingerprintStability, GeoCache were all moved to Forge or deleted during earlier walkthroughs. Edge is capture-only: HTTP → TrackingData → Pipe → Failover. The tree was corrected from 9 Edge probes to 4.
 - **SQL schema, CLR, test suite (subsystems 5, 14, 15) → NOT tree nodes.** Owner: "Not a single thing in SQL is finalized. Having those files makes it look like we have an explicit SQL anything, which we do not." The tree is strictly runtime components. Walkthroughs still cover these subsystems but they don't get health probes.
 - **Sentinel structure → deferred.** Owner has built 5 different test concept pages. Structure TBD when Sentinel stabilizes in subsystem 10 walkthrough. Sentinel placeholder removed from tree until then.
 
@@ -223,10 +217,10 @@ Agent analysis of every service file against the probe definition. Three sub-age
 
 | System | Walked Probes | TBD |
 |--------|--------------|-----|
-| Edge | 9 | — |
+| Edge | 4 | — |
 | Forge F1–F7 | 29 | F8, F9 |
 | Sentinel | — | All |
-| **Total** | **38** | **+ F8 + F9 + Sentinel** |
+| **Total** | **33** | **+ F8 + F9 + Sentinel** |
 
 ---
 
@@ -243,23 +237,17 @@ Agent analysis of every service file against the probe definition. Three sub-age
 | `web.config` | 19 | IIS InProcess hosting config | Core | Gets overwritten by `dotnet publish` |
 | `SmartPiXL.csproj` | — | Project file | Core | — |
 | **Endpoints/** | | | | |
-| `TrackingEndpoints.cs` | 559 | HTTP routes: JS serving, GIF/DATA capture, ClearDot, bot trap, CORS | Core | Contains 6 inline enrichment calls on hot path |
-| `InternalEndpoints.cs` | 91 | /internal/health, /internal/circuit-reset, /internal/geo-cache/clear | Agent-built for Forge↔Edge probing | Clean, small |
+| `TrackingEndpoints.cs` | 559 | HTTP routes: JS serving, GIF/DATA capture, ClearDot, bot trap, CORS | Core | Wired to EdgeMetrics for per-request recording |
+| `InternalEndpoints.cs` | 60 | /internal/health → EdgeHealthReport, /internal/circuit-reset (no-op) | Agent-built for Forge↔Edge probing | Rewritten for health tree |
 | **Services/** | | | | |
 | `TrackingCaptureService.cs` | 292 | Parse HTTP request → TrackingData (IP, CompanyID, headers JSON, QS) | Core | Clean after BUG-001 XFF fix |
-| `PipeClientService.cs` | 338 | Named pipe client → Forge, Channel\<T\> queue, JSONL failover fallback | Core | Not yet read in detail |
-| `JsonlFailoverService.cs` | 123 | JSONL daily-rolling file writer when pipe is down | Core | Not yet read |
-| `DatabaseWriterService.cs` | **722** | Direct SQL BulkCopy writer | Agent-built | **DEAD CODE — not registered in DI** |
-| `DatacenterIpService.cs` | 190 | Downloads AWS+GCP CIDR ranges, checks IPs | Agent-built | Edge enrichment |
-| `CidrTrie.cs` | 166 | IP prefix trie for CIDR matching | Agent-built (supports DatacenterIpService) | Edge enrichment |
-| `IpClassificationService.cs` | 520 | Classifies IPs: Public/Private/Loopback/CGNAT/LinkLocal | Agent-built | Edge enrichment |
-| `IpBehaviorService.cs` | 310 | Subnet /24 velocity + rapid-fire timing detection | Agent-built | Edge enrichment |
-| `FingerprintStabilityService.cs` | 208 | Per-IP fingerprint variation tracking (canvas/WebGL/audio) | Agent-built | Edge enrichment |
-| `GeoCacheService.cs` | 402 | In-memory geo cache backed by IPAPI.IP SQL lookups | Agent-built | Edge enrichment, ties to IPAPI dependency |
+| `PipeClientService.cs` | 338 | Named pipe client → Forge, Channel\<T\> queue, JSONL failover fallback | Core | Wired to EdgeMetrics |
+| `JsonlFailoverService.cs` | 123 | JSONL daily-rolling file writer when pipe is down | Core | Wired to EdgeMetrics |
+| `EdgeMetrics.cs` | 270 | Lock-free counters + health derivation for 4 Edge probes | Agent-built | New — implements health tree |
 | **Scripts/** | | | | |
 | `PiXLScript.cs` | 1195 | C# template → browser JavaScript (~52KB served) | Core | Separate subsystem (#2) |
 
-**Total Edge code: ~5,460 lines across 16 files. Of that, 722 lines (DatabaseWriterService) are dead code.**
+**Total Edge code: ~3,900 lines across 10 files (4 services, 2 endpoints, PiXLScript, config). EdgeMetrics implements the health tree.**
 
 ### Walkthrough Notes — What I Found
 
