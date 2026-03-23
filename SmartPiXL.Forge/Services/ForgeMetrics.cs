@@ -81,6 +81,27 @@ public sealed class ForgeMetrics
     private int _bgIpChannelDepth;
     private int _bgIpDedupCacheSize;
 
+    // Lane 4: Data Sync (CompanyPiXLSyncService)
+    private long _syncCompanyCycles;
+    private long _syncCompanyInserted;
+    private long _syncCompanyUpdated;
+    private long _syncCompanyDeleted;
+    private long _syncPixelCycles;
+    private long _syncPixelInserted;
+    private long _syncPixelUpdated;
+    private long _syncPixelDeleted;
+    private long _syncDurationTicks;
+    private long _syncFailures;
+
+    // Lane 5: IP Data Acquisition (IpDataAcquisitionService)
+    private long _ipAcqCycles;
+    private long _ipAcqAsnRows;
+    private long _ipAcqGeoRows;
+    private long _ipAcqCloudRanges;
+    private long _ipAcqSkipped;
+    private long _ipAcqDurationTicks;
+    private long _ipAcqFailures;
+
     /// <summary>Starts a high-resolution timer. Call <see cref="Record"/> with the result.</summary>
     public static long StartTimer() => Stopwatch.GetTimestamp();
 
@@ -181,6 +202,47 @@ public sealed class ForgeMetrics
         Volatile.Write(ref _bgIpDedupCacheSize, dedupCacheSize);
     }
 
+    // ── Lane 4: Data Sync ─────────────────────────────────────────────
+
+    /// <summary>Records a completed Company sync cycle with row counts.</summary>
+    public void RecordCompanySync(long startTimestamp, int inserted, int updated, int deleted)
+    {
+        Interlocked.Increment(ref _syncCompanyCycles);
+        Interlocked.Add(ref _syncCompanyInserted, inserted);
+        Interlocked.Add(ref _syncCompanyUpdated, updated);
+        Interlocked.Add(ref _syncCompanyDeleted, deleted);
+        Interlocked.Add(ref _syncDurationTicks, Stopwatch.GetTimestamp() - startTimestamp);
+    }
+
+    /// <summary>Records a completed Pixel sync cycle with row counts.</summary>
+    public void RecordPixelSync(long startTimestamp, int inserted, int updated, int deleted)
+    {
+        Interlocked.Increment(ref _syncPixelCycles);
+        Interlocked.Add(ref _syncPixelInserted, inserted);
+        Interlocked.Add(ref _syncPixelUpdated, updated);
+        Interlocked.Add(ref _syncPixelDeleted, deleted);
+        Interlocked.Add(ref _syncDurationTicks, Stopwatch.GetTimestamp() - startTimestamp);
+    }
+
+    /// <summary>Records a failed sync attempt.</summary>
+    public void RecordSyncFailure() => Interlocked.Increment(ref _syncFailures);
+
+    // ── Lane 5: IP Data Acquisition ───────────────────────────────────
+
+    /// <summary>Records a completed IP data acquisition cycle.</summary>
+    public void RecordIpAcqCycle(long startTimestamp, int asnRows, int geoRows, int cloudRanges, int skipped)
+    {
+        Interlocked.Increment(ref _ipAcqCycles);
+        Interlocked.Add(ref _ipAcqAsnRows, asnRows);
+        Interlocked.Add(ref _ipAcqGeoRows, geoRows);
+        Interlocked.Add(ref _ipAcqCloudRanges, cloudRanges);
+        Interlocked.Add(ref _ipAcqSkipped, skipped);
+        Interlocked.Add(ref _ipAcqDurationTicks, Stopwatch.GetTimestamp() - startTimestamp);
+    }
+
+    /// <summary>Records a failed IP data acquisition attempt.</summary>
+    public void RecordIpAcqFailure() => Interlocked.Increment(ref _ipAcqFailures);
+
     /// <summary>
     /// Takes a frozen snapshot of all counters and atomically resets them.
     /// Returns the metrics for the elapsed window.
@@ -238,6 +300,27 @@ public sealed class ForgeMetrics
             BgIpWhoisLookups = Interlocked.Exchange(ref _bgIpWhoisLookups, 0),
             BgIpChannelDepth = Volatile.Read(ref _bgIpChannelDepth),
             BgIpDedupCacheSize = Volatile.Read(ref _bgIpDedupCacheSize),
+
+            // Lane 4: Data Sync
+            SyncCompanyCycles = Interlocked.Exchange(ref _syncCompanyCycles, 0),
+            SyncCompanyInserted = Interlocked.Exchange(ref _syncCompanyInserted, 0),
+            SyncCompanyUpdated = Interlocked.Exchange(ref _syncCompanyUpdated, 0),
+            SyncCompanyDeleted = Interlocked.Exchange(ref _syncCompanyDeleted, 0),
+            SyncPixelCycles = Interlocked.Exchange(ref _syncPixelCycles, 0),
+            SyncPixelInserted = Interlocked.Exchange(ref _syncPixelInserted, 0),
+            SyncPixelUpdated = Interlocked.Exchange(ref _syncPixelUpdated, 0),
+            SyncPixelDeleted = Interlocked.Exchange(ref _syncPixelDeleted, 0),
+            SyncDurationTicks = Interlocked.Exchange(ref _syncDurationTicks, 0),
+            SyncFailures = Interlocked.Exchange(ref _syncFailures, 0),
+
+            // Lane 5: IP Data Acquisition
+            IpAcqCycles = Interlocked.Exchange(ref _ipAcqCycles, 0),
+            IpAcqAsnRows = Interlocked.Exchange(ref _ipAcqAsnRows, 0),
+            IpAcqGeoRows = Interlocked.Exchange(ref _ipAcqGeoRows, 0),
+            IpAcqCloudRanges = Interlocked.Exchange(ref _ipAcqCloudRanges, 0),
+            IpAcqSkipped = Interlocked.Exchange(ref _ipAcqSkipped, 0),
+            IpAcqDurationTicks = Interlocked.Exchange(ref _ipAcqDurationTicks, 0),
+            IpAcqFailures = Interlocked.Exchange(ref _ipAcqFailures, 0),
         };
 
         return snap;
@@ -337,6 +420,27 @@ public readonly record struct MetricsSnapshot
     public int BgIpChannelDepth { get; init; }
     public int BgIpDedupCacheSize { get; init; }
 
+    // ── Lane 4: Data Sync ──
+    public long SyncCompanyCycles { get; init; }
+    public long SyncCompanyInserted { get; init; }
+    public long SyncCompanyUpdated { get; init; }
+    public long SyncCompanyDeleted { get; init; }
+    public long SyncPixelCycles { get; init; }
+    public long SyncPixelInserted { get; init; }
+    public long SyncPixelUpdated { get; init; }
+    public long SyncPixelDeleted { get; init; }
+    public long SyncDurationTicks { get; init; }
+    public long SyncFailures { get; init; }
+
+    // ── Lane 5: IP Data Acquisition ──
+    public long IpAcqCycles { get; init; }
+    public long IpAcqAsnRows { get; init; }
+    public long IpAcqGeoRows { get; init; }
+    public long IpAcqCloudRanges { get; init; }
+    public long IpAcqSkipped { get; init; }
+    public long IpAcqDurationTicks { get; init; }
+    public long IpAcqFailures { get; init; }
+
     // ── Derived values (microseconds) ──
     public double PipeAvgUs => PipeCount > 0 ? PipeTotalTicks / (PipeCount * s_ticksPerUs) : 0;
     public double PipeMinUs => PipeMinTicks == long.MaxValue ? 0 : PipeMinTicks / s_ticksPerUs;
@@ -352,6 +456,8 @@ public readonly record struct MetricsSnapshot
     public double SqlAvgPerRecordUs => SqlCount > 0 ? SqlTotalTicks / (SqlCount * s_ticksPerUs) : 0;
     public double SqlAvgBatchSize => SqlBatchCount > 0 ? (double)SqlCount / SqlBatchCount : 0;
     public double BatchFillPct => BatchFillCount > 0 ? (double)BatchFillSum / BatchFillCount : 0;
+    public double SyncDurationMs => SyncDurationTicks / s_ticksPerMs;
+    public double IpAcqDurationMs => IpAcqDurationTicks / s_ticksPerMs;
 
     /// <summary>
     /// Formats the snapshot as a compact multi-line log entry.
@@ -373,6 +479,12 @@ public readonly record struct MetricsSnapshot
                 : "") +
             (PipeConnects > 0 || PipeDisconnects > 0 ? $"  PIPE conn={PipeConnects} disconn={PipeDisconnects}" : "") +
             (FailoverCount > 0 ? $"  FAILOVER {FailoverCount:N0} rec" : "") +
-            (ReplayFiles > 0 ? $"  REPLAY {ReplayFiles} file(s) {ReplayRecords:N0} rec" : "");
+            (ReplayFiles > 0 ? $"  REPLAY {ReplayFiles} file(s) {ReplayRecords:N0} rec" : "") +
+            (SyncCompanyCycles > 0 || SyncPixelCycles > 0
+                ? $"\n  DATASYNC  co={SyncCompanyCycles} ins={SyncCompanyInserted} upd={SyncCompanyUpdated} del={SyncCompanyDeleted}  px={SyncPixelCycles} ins={SyncPixelInserted} upd={SyncPixelUpdated} del={SyncPixelDeleted}  {SyncDurationMs:N0}ms  fails={SyncFailures}"
+                : "") +
+            (IpAcqCycles > 0
+                ? $"\n  IPACQ     cycles={IpAcqCycles} asn={IpAcqAsnRows:N0} geo={IpAcqGeoRows:N0} cloud={IpAcqCloudRanges:N0} skip={IpAcqSkipped} {IpAcqDurationMs:N0}ms  fails={IpAcqFailures}"
+                : "");
     }
 }

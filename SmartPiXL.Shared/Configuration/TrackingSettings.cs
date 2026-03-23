@@ -104,20 +104,12 @@ public sealed class TrackingSettings
     public string? BaseUrl { get; set; }
 
     // ========================================================================
-    // IP-API / GEO SYNC SETTINGS — RETIRED (see IPInfo schema)
-    // ========================================================================
-    
-    // ========================================================================
     // XAVIER COMPANY/PIXL SYNC SETTINGS — TEMPORARY BRIDGE
     //
     // The Company and PiXL syncs from Xavier exist ONLY as a transitional
     // bridge while Xavier's legacy front-end is the client-facing product.
     // Once a new front-end is built (not yet scoped), SmartPiXL becomes the
     // authoritative data source and these syncs are decommissioned.
-    //
-    // NOTE: The Xavier IPGEO sync (IpApiSyncService) has been retired and
-    // replaced by IpDataAcquisitionService which uses free public data
-    // (IPtoASN, DB-IP Lite, etc.) imported into the IPInfo schema.
     //
     // CERT STATUS: Xavier (192.168.88.35 / D43DQBM2) has a self-signed
     // cert (CN=192.168.88.35, sha1RSA, thumbprint 02AC76BB...) installed
@@ -128,16 +120,6 @@ public sealed class TrackingSettings
     // required. Once configured, remove TrustServerCertificate=True and
     // connections will validate against the trusted root cert.
     // ========================================================================
-    
-    /// <summary>
-    /// Connection string for Xavier (192.168.88.35) — the IPGEO database.
-    /// <b>RETIRED</b>: No longer used. The IpApiSyncService that consumed this
-    /// has been replaced by IpDataAcquisitionService. This property is retained
-    /// temporarily so existing appsettings.json files don't cause binding errors.
-    /// Safe to remove once all config files are updated.
-    /// </summary>
-    [Obsolete("IPGEO sync retired. Use IpDataAcquisitionService + IPInfo schema instead.")]
-    public string? XavierConnectionString { get; set; }
 
     /// <summary>
     /// Connection string for the SmartPiXL database on Xavier (192.168.88.35).
@@ -155,13 +137,6 @@ public sealed class TrackingSettings
     /// </para>
     /// </summary>
     public string? XavierSmartPiXLConnectionString { get; set; }
-    
-    /// <summary>
-    /// UTC hour (0–23) when the daily IP-API sync ran.
-    /// <b>RETIRED</b>: No longer used. Retained to avoid config binding errors.
-    /// </summary>
-    [Obsolete("IPGEO sync retired. IP data acquisition schedule is in ForgeSettings.")]
-    public int IpApiSyncHourUtc { get; set; } = 2;
     
     /// <summary>
     /// Hours between Xavier sync cycles. Default 6 = syncs at UTC hours 2, 8, 14, 20.

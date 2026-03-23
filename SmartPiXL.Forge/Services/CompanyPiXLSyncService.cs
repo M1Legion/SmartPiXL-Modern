@@ -18,7 +18,8 @@ namespace SmartPiXL.Forge.Services;
 //   SmartPiXL.dbo.PiXL    (5612 rows) →  SmartPiXL.PiXL.Settings
 //
 // SYNC STRATEGY:
-//   Both tables are small enough for a full-table MERGE each cycle.
+//   Both tables are small enough for a full-table sync each cycle.
+//   Uses UPDATE + INSERT + DELETE (no MERGE).
 //   Company runs first (parent), then Pixel (child FK).
 // ============================================================================
 
@@ -31,13 +32,16 @@ public sealed class CompanyPiXLSyncService : BackgroundService
 {
     private readonly TrackingSettings _settings;
     private readonly ITrackingLogger _logger;
+    private readonly ForgeMetrics _metrics;
 
     public CompanyPiXLSyncService(
         IOptions<TrackingSettings> settings,
-        ITrackingLogger logger)
+        ITrackingLogger logger,
+        ForgeMetrics metrics)
     {
         _settings = settings.Value;
         _logger = logger;
+        _metrics = metrics;
     }
 
     /// <summary>Optional email service injected after construction for guard notifications.</summary>
@@ -97,7 +101,7 @@ public sealed class CompanyPiXLSyncService : BackgroundService
 
         _logger.Info($"CompanyPiXLSync started. Interval: {_settings.SyncIntervalHours}h");
 
-        // Stagger slightly after IpApiSync
+        // Stagger startup to avoid contention with other background services
         await Task.Delay(TimeSpan.FromMinutes(3), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -145,12 +149,15 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         int coIns = 0, coUpd = 0, coDel = 0;
         try
         {
+            var coStart = ForgeMetrics.StartTimer();
             (coIns, coUpd, coDel) = await SyncCompanyAsync(ct);
+            _metrics.RecordCompanySync(coStart, coIns, coUpd, coDel);
             if (coSyncId > 0)
                 await CompleteSyncLogAsync(coSyncId, coIns, coUpd, coDel, null, ct);
         }
         catch (Exception ex)
         {
+            _metrics.RecordSyncFailure();
             if (coSyncId > 0)
                 await CompleteSyncLogAsync(coSyncId, coIns, coUpd, coDel, ex.Message, ct);
             throw;
@@ -161,12 +168,15 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         int pxIns = 0, pxUpd = 0, pxDel = 0;
         try
         {
+            var pxStart = ForgeMetrics.StartTimer();
             (pxIns, pxUpd, pxDel) = await SyncPixelAsync(ct);
+            _metrics.RecordPixelSync(pxStart, pxIns, pxUpd, pxDel);
             if (pxSyncId > 0)
                 await CompleteSyncLogAsync(pxSyncId, pxIns, pxUpd, pxDel, null, ct);
         }
         catch (Exception ex)
         {
+            _metrics.RecordSyncFailure();
             if (pxSyncId > 0)
                 await CompleteSyncLogAsync(pxSyncId, pxIns, pxUpd, pxDel, ex.Message, ct);
             throw;
@@ -335,55 +345,56 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         var (inserted, updated, deleted) = await WithDeadlockRetryAsync(async () =>
         {
             int ins = 0, upd = 0, del = 0;
-            await using var mergeCmd = localConn.CreateCommand();
-            mergeCmd.CommandText = @"
+            await using var cmd = localConn.CreateCommand();
+            cmd.CommandText = @"
                 SET IDENTITY_INSERT PiXL.Company ON;
 
-                DECLARE @changes TABLE (Action NVARCHAR(10));
+                -- UPDATE existing rows
+                UPDATE t SET
+                    t.CompanyName          = s.CompanyName,
+                    t.ContactName          = s.ContactName,
+                    t.Email                = s.Email,
+                    t.Phone                = s.Phone,
+                    t.Address              = s.Address,
+                    t.City                 = s.City,
+                    t.State                = s.State,
+                    t.Zipcode              = s.Zipcode,
+                    t.CompanyTypeId        = s.CompanyTypeId,
+                    t.TaxId                = s.TaxId,
+                    t.Extension            = s.Extension,
+                    t.Address2             = s.Address2,
+                    t.ParentCompanyId      = s.ParentCompanyId,
+                    t.OriginalParentCoId   = s.OriginalParentCoId,
+                    t.BillingResponsibleFlag = s.BillingResponsibleFlag,
+                    t.BillingResponsibleId = s.BillingResponsibleId,
+                    t.NAICS_SIC            = s.NAICS_SIC,
+                    t.NAICS_Code           = s.NAICS_Code,
+                    t.SIC_Code             = s.SIC_Code,
+                    t.PortalURL            = s.PortalURL,
+                    t.Profit               = s.Profit,
+                    t.Cost                 = s.Cost,
+                    t.P_Cost               = s.P_Cost,
+                    t.P_Margin             = s.P_Margin,
+                    t.SuspensionDate       = s.SuspensionDate,
+                    t.Reasons              = s.Reasons,
+                    t.StatusLastUpdated    = s.StatusLastUpdated,
+                    t.PriceListExempt      = s.PriceListExempt,
+                    t.BillingExempt        = s.BillingExempt,
+                    t.SalesRepresentative  = s.SalesRepresentative,
+                    t.RampUpPeriod         = s.RampUpPeriod,
+                    t.RampUpDate           = s.RampUpDate,
+                    t.MinOrder             = s.MinOrder,
+                    t.StatusId             = s.StatusId,
+                    t.IsActive             = s.IsActive,
+                    t.CreatedDate          = s.CreatedDate,
+                    t.ModifiedDate         = s.ModifiedDate
+                FROM PiXL.Company t
+                INNER JOIN #CompanyStaging s ON t.CompanyID = s.CompanyID;
 
-                MERGE PiXL.Company AS target
-                USING #CompanyStaging AS src ON target.CompanyID = src.CompanyID
+                SET @upd = @@ROWCOUNT;
 
-                WHEN MATCHED THEN UPDATE SET
-                    target.CompanyName          = src.CompanyName,
-                    target.ContactName          = src.ContactName,
-                    target.Email                = src.Email,
-                    target.Phone                = src.Phone,
-                    target.Address              = src.Address,
-                    target.City                 = src.City,
-                    target.State                = src.State,
-                    target.Zipcode              = src.Zipcode,
-                    target.CompanyTypeId        = src.CompanyTypeId,
-                    target.TaxId                = src.TaxId,
-                    target.Extension            = src.Extension,
-                    target.Address2             = src.Address2,
-                    target.ParentCompanyId      = src.ParentCompanyId,
-                    target.OriginalParentCoId   = src.OriginalParentCoId,
-                    target.BillingResponsibleFlag = src.BillingResponsibleFlag,
-                    target.BillingResponsibleId = src.BillingResponsibleId,
-                    target.NAICS_SIC            = src.NAICS_SIC,
-                    target.NAICS_Code           = src.NAICS_Code,
-                    target.SIC_Code             = src.SIC_Code,
-                    target.PortalURL            = src.PortalURL,
-                    target.Profit               = src.Profit,
-                    target.Cost                 = src.Cost,
-                    target.P_Cost               = src.P_Cost,
-                    target.P_Margin             = src.P_Margin,
-                    target.SuspensionDate       = src.SuspensionDate,
-                    target.Reasons              = src.Reasons,
-                    target.StatusLastUpdated    = src.StatusLastUpdated,
-                    target.PriceListExempt      = src.PriceListExempt,
-                    target.BillingExempt        = src.BillingExempt,
-                    target.SalesRepresentative  = src.SalesRepresentative,
-                    target.RampUpPeriod         = src.RampUpPeriod,
-                    target.RampUpDate           = src.RampUpDate,
-                    target.MinOrder             = src.MinOrder,
-                    target.StatusId             = src.StatusId,
-                    target.IsActive             = src.IsActive,
-                    target.CreatedDate          = src.CreatedDate,
-                    target.ModifiedDate         = src.ModifiedDate
-
-                WHEN NOT MATCHED BY TARGET THEN INSERT (
+                -- INSERT new rows
+                INSERT INTO PiXL.Company (
                     CompanyID, CompanyName, ContactName, Email, Phone,
                     Address, City, State, Zipcode, CompanyTypeId, TaxId,
                     Extension, Address2, ParentCompanyId, OriginalParentCoId,
@@ -394,35 +405,41 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                     PriceListExempt, BillingExempt, SalesRepresentative,
                     RampUpPeriod, RampUpDate, MinOrder,
                     StatusId, IsActive, CreatedDate, ModifiedDate)
-                VALUES (
-                    src.CompanyID, src.CompanyName, src.ContactName, src.Email, src.Phone,
-                    src.Address, src.City, src.State, src.Zipcode, src.CompanyTypeId, src.TaxId,
-                    src.Extension, src.Address2, src.ParentCompanyId, src.OriginalParentCoId,
-                    src.BillingResponsibleFlag, src.BillingResponsibleId,
-                    src.NAICS_SIC, src.NAICS_Code, src.SIC_Code, src.PortalURL,
-                    src.Profit, src.Cost, src.P_Cost, src.P_Margin,
-                    src.SuspensionDate, src.Reasons, src.StatusLastUpdated,
-                    src.PriceListExempt, src.BillingExempt, src.SalesRepresentative,
-                    src.RampUpPeriod, src.RampUpDate, src.MinOrder,
-                    src.StatusId, src.IsActive, src.CreatedDate, src.ModifiedDate)
-
-                -- Protect local-only rows (Atlas demo company 12344) from sync deletion
-                WHEN NOT MATCHED BY SOURCE AND target.CompanyID <> 12344 THEN DELETE
-
-                OUTPUT $action INTO @changes;
-
                 SELECT
-                    SUM(CASE WHEN Action = 'INSERT' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN Action = 'UPDATE' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN Action = 'DELETE' THEN 1 ELSE 0 END)
-                FROM @changes;
+                    s.CompanyID, s.CompanyName, s.ContactName, s.Email, s.Phone,
+                    s.Address, s.City, s.State, s.Zipcode, s.CompanyTypeId, s.TaxId,
+                    s.Extension, s.Address2, s.ParentCompanyId, s.OriginalParentCoId,
+                    s.BillingResponsibleFlag, s.BillingResponsibleId,
+                    s.NAICS_SIC, s.NAICS_Code, s.SIC_Code, s.PortalURL,
+                    s.Profit, s.Cost, s.P_Cost, s.P_Margin,
+                    s.SuspensionDate, s.Reasons, s.StatusLastUpdated,
+                    s.PriceListExempt, s.BillingExempt, s.SalesRepresentative,
+                    s.RampUpPeriod, s.RampUpDate, s.MinOrder,
+                    s.StatusId, s.IsActive, s.CreatedDate, s.ModifiedDate
+                FROM #CompanyStaging s
+                WHERE NOT EXISTS (SELECT 1 FROM PiXL.Company t WHERE t.CompanyID = s.CompanyID);
+
+                SET @ins = @@ROWCOUNT;
+
+                -- DELETE rows no longer in source (protect demo company 12344)
+                DELETE t
+                FROM PiXL.Company t
+                WHERE t.CompanyID <> 12344
+                  AND NOT EXISTS (SELECT 1 FROM #CompanyStaging s WHERE s.CompanyID = t.CompanyID);
+
+                SET @del = @@ROWCOUNT;
 
                 SET IDENTITY_INSERT PiXL.Company OFF;
 
-                DROP TABLE #CompanyStaging;";
-            mergeCmd.CommandTimeout = 120;
+                SELECT @ins, @upd, @del;
 
-            await using var reader = await mergeCmd.ExecuteReaderAsync(ct);
+                DROP TABLE #CompanyStaging;";
+            cmd.Parameters.Add(new SqlParameter("@ins", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output });
+            cmd.Parameters.Add(new SqlParameter("@upd", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output });
+            cmd.Parameters.Add(new SqlParameter("@del", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output });
+            cmd.CommandTimeout = 120;
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
             {
                 ins = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
@@ -430,7 +447,7 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                 del = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
             }
             return (ins, upd, del);
-        }, "Company MERGE");
+        }, "Company UPDATE+INSERT");
 
         return (inserted, updated, deleted);
     }
@@ -549,61 +566,63 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         var (inserted, updated, deleted) = await WithDeadlockRetryAsync(async () =>
         {
             int ins = 0, upd = 0, del = 0;
-            await using var mergeCmd = localConn.CreateCommand();
-            mergeCmd.CommandText = @"
-                DECLARE @changes TABLE (Action NVARCHAR(10));
+            await using var syncCmd = localConn.CreateCommand();
+            syncCmd.CommandText = @"
+                DECLARE @ins INT, @upd INT, @del INT;
 
-                MERGE PiXL.Settings AS target
-                USING #PixelStaging AS src
-                    ON target.CompanyId = src.CompanyId AND target.PiXLId = src.PiXLId
+                -- UPDATE existing pixels
+                UPDATE t SET
+                    t.PiXLName         = s.PiXLName,
+                    t.SmartPiXL        = s.SmartPiXL,
+                    t.PiXLNew          = s.PiXLNew,
+                    t.PiXLLegacy       = s.PiXLLegacy,
+                    t.OutputPathNew    = s.OutputPathNew,
+                    t.OutputPathLegacy = s.OutputPathLegacy,
+                    t.PiXLContactName  = s.PiXLContactName,
+                    t.PiXLContactEmail = s.PiXLContactEmail,
+                    t.PiXLURL          = s.PiXLURL,
+                    t.Alertnotraffic   = s.Alertnotraffic,
+                    t.TimeAlert        = s.TimeAlert,
+                    t.Zipcode          = s.Zipcode,
+                    t.Radius           = s.Radius,
+                    t.Nationwide       = s.Nationwide,
+                    t.NumberPage       = s.NumberPage,
+                    t.TimeSite         = s.TimeSite,
+                    t.IncomeRefInitial = s.IncomeRefInitial,
+                    t.IncomeRefFinal   = s.IncomeRefFinal,
+                    t.InferredCS       = s.InferredCS,
+                    t.NetWorth         = s.NetWorth,
+                    t.Married_Y        = s.Married_Y,
+                    t.Married_N        = s.Married_N,
+                    t.Married_U        = s.Married_U,
+                    t.Children_Y       = s.Children_Y,
+                    t.Children_N       = s.Children_N,
+                    t.Children_U       = s.Children_U,
+                    t.Gender_F         = s.Gender_F,
+                    t.Gender_M         = s.Gender_M,
+                    t.Gender_U         = s.Gender_U,
+                    t.UserId           = s.UserId,
+                    t.StatusId         = s.StatusId,
+                    t.SuspendedId      = s.SuspendedId,
+                    t.Reasons          = s.Reasons,
+                    t.CreatedDate      = s.CreatedDate,
+                    t.StatusLastUpdated = s.StatusLastUpdated,
+                    t.PiXLAddress      = s.PiXLAddress,
+                    t.PiXLCity         = s.PiXLCity,
+                    t.PiXLState        = s.PiXLState,
+                    t.PiXLZipCode      = s.PiXLZipCode,
+                    t.PiXLPolicyURL    = s.PiXLPolicyURL,
+                    t.PiXLDomain       = s.PiXLDomain,
+                    t.PiXLLatitude     = s.PiXLLatitude,
+                    t.PiXLLongitude    = s.PiXLLongitude,
+                    t.[PiXL 2.5]       = s.[PiXL 2.5]
+                FROM PiXL.Settings t
+                INNER JOIN #PixelStaging s
+                    ON t.CompanyId = s.CompanyId AND t.PiXLId = s.PiXLId;
+                SET @upd = @@ROWCOUNT;
 
-                WHEN MATCHED THEN UPDATE SET
-                    target.PiXLName         = src.PiXLName,
-                    target.SmartPiXL        = src.SmartPiXL,
-                    target.PiXLNew          = src.PiXLNew,
-                    target.PiXLLegacy       = src.PiXLLegacy,
-                    target.OutputPathNew    = src.OutputPathNew,
-                    target.OutputPathLegacy = src.OutputPathLegacy,
-                    target.PiXLContactName  = src.PiXLContactName,
-                    target.PiXLContactEmail = src.PiXLContactEmail,
-                    target.PiXLURL          = src.PiXLURL,
-                    target.Alertnotraffic   = src.Alertnotraffic,
-                    target.TimeAlert        = src.TimeAlert,
-                    target.Zipcode          = src.Zipcode,
-                    target.Radius           = src.Radius,
-                    target.Nationwide       = src.Nationwide,
-                    target.NumberPage       = src.NumberPage,
-                    target.TimeSite         = src.TimeSite,
-                    target.IncomeRefInitial = src.IncomeRefInitial,
-                    target.IncomeRefFinal   = src.IncomeRefFinal,
-                    target.InferredCS       = src.InferredCS,
-                    target.NetWorth         = src.NetWorth,
-                    target.Married_Y        = src.Married_Y,
-                    target.Married_N        = src.Married_N,
-                    target.Married_U        = src.Married_U,
-                    target.Children_Y       = src.Children_Y,
-                    target.Children_N       = src.Children_N,
-                    target.Children_U       = src.Children_U,
-                    target.Gender_F         = src.Gender_F,
-                    target.Gender_M         = src.Gender_M,
-                    target.Gender_U         = src.Gender_U,
-                    target.UserId           = src.UserId,
-                    target.StatusId         = src.StatusId,
-                    target.SuspendedId      = src.SuspendedId,
-                    target.Reasons          = src.Reasons,
-                    target.CreatedDate      = src.CreatedDate,
-                    target.StatusLastUpdated = src.StatusLastUpdated,
-                    target.PiXLAddress      = src.PiXLAddress,
-                    target.PiXLCity         = src.PiXLCity,
-                    target.PiXLState        = src.PiXLState,
-                    target.PiXLZipCode      = src.PiXLZipCode,
-                    target.PiXLPolicyURL    = src.PiXLPolicyURL,
-                    target.PiXLDomain       = src.PiXLDomain,
-                    target.PiXLLatitude     = src.PiXLLatitude,
-                    target.PiXLLongitude    = src.PiXLLongitude,
-                    target.[PiXL 2.5]       = src.[PiXL 2.5]
-
-                WHEN NOT MATCHED BY TARGET THEN INSERT (
+                -- INSERT new pixels
+                INSERT INTO PiXL.Settings (
                     CompanyId, PiXLId, PiXLName, SmartPiXL, PiXLNew,
                     PiXLLegacy, OutputPathNew, OutputPathLegacy,
                     PiXLContactName, PiXLContactEmail, PiXLURL,
@@ -618,37 +637,41 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                     PiXLAddress, PiXLCity, PiXLState, PiXLZipCode,
                     PiXLPolicyURL, PiXLDomain,
                     PiXLLatitude, PiXLLongitude, [PiXL 2.5])
-                VALUES (
-                    src.CompanyId, src.PiXLId, src.PiXLName, src.SmartPiXL, src.PiXLNew,
-                    src.PiXLLegacy, src.OutputPathNew, src.OutputPathLegacy,
-                    src.PiXLContactName, src.PiXLContactEmail, src.PiXLURL,
-                    src.Alertnotraffic, src.TimeAlert, src.Zipcode, src.Radius,
-                    src.Nationwide, src.NumberPage, src.TimeSite,
-                    src.IncomeRefInitial, src.IncomeRefFinal, src.InferredCS, src.NetWorth,
-                    src.Married_Y, src.Married_N, src.Married_U,
-                    src.Children_Y, src.Children_N, src.Children_U,
-                    src.Gender_F, src.Gender_M, src.Gender_U,
-                    src.UserId, src.StatusId, src.SuspendedId, src.Reasons,
-                    src.CreatedDate, src.StatusLastUpdated,
-                    src.PiXLAddress, src.PiXLCity, src.PiXLState, src.PiXLZipCode,
-                    src.PiXLPolicyURL, src.PiXLDomain,
-                    src.PiXLLatitude, src.PiXLLongitude, src.[PiXL 2.5])
-
-                -- Protect local-only rows (Atlas demo pixel 12344/1) from sync deletion
-                WHEN NOT MATCHED BY SOURCE AND target.CompanyId <> 12344 THEN DELETE
-
-                OUTPUT $action INTO @changes;
-
                 SELECT
-                    SUM(CASE WHEN Action = 'INSERT' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN Action = 'UPDATE' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN Action = 'DELETE' THEN 1 ELSE 0 END)
-                FROM @changes;
+                    s.CompanyId, s.PiXLId, s.PiXLName, s.SmartPiXL, s.PiXLNew,
+                    s.PiXLLegacy, s.OutputPathNew, s.OutputPathLegacy,
+                    s.PiXLContactName, s.PiXLContactEmail, s.PiXLURL,
+                    s.Alertnotraffic, s.TimeAlert, s.Zipcode, s.Radius,
+                    s.Nationwide, s.NumberPage, s.TimeSite,
+                    s.IncomeRefInitial, s.IncomeRefFinal, s.InferredCS, s.NetWorth,
+                    s.Married_Y, s.Married_N, s.Married_U,
+                    s.Children_Y, s.Children_N, s.Children_U,
+                    s.Gender_F, s.Gender_M, s.Gender_U,
+                    s.UserId, s.StatusId, s.SuspendedId, s.Reasons,
+                    s.CreatedDate, s.StatusLastUpdated,
+                    s.PiXLAddress, s.PiXLCity, s.PiXLState, s.PiXLZipCode,
+                    s.PiXLPolicyURL, s.PiXLDomain,
+                    s.PiXLLatitude, s.PiXLLongitude, s.[PiXL 2.5]
+                FROM #PixelStaging s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM PiXL.Settings t
+                    WHERE t.CompanyId = s.CompanyId AND t.PiXLId = s.PiXLId);
+                SET @ins = @@ROWCOUNT;
+
+                -- DELETE removed pixels (protect demo pixel 12344)
+                DELETE t FROM PiXL.Settings t
+                WHERE t.CompanyId <> 12344
+                  AND NOT EXISTS (
+                    SELECT 1 FROM #PixelStaging s
+                    WHERE s.CompanyId = t.CompanyId AND s.PiXLId = t.PiXLId);
+                SET @del = @@ROWCOUNT;
+
+                SELECT @ins, @upd, @del;
 
                 DROP TABLE #PixelStaging;";
-            mergeCmd.CommandTimeout = 120;
+            syncCmd.CommandTimeout = 120;
 
-            await using var reader = await mergeCmd.ExecuteReaderAsync(ct);
+            await using var reader = await syncCmd.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
             {
                 ins = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
@@ -656,7 +679,7 @@ public sealed class CompanyPiXLSyncService : BackgroundService
                 del = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
             }
             return (ins, upd, del);
-        }, "PiXL MERGE");
+        }, "PiXL UPDATE+INSERT");
 
         return (inserted, updated, deleted);
     }

@@ -52,6 +52,7 @@ public sealed class IpDataAcquisitionService : BackgroundService
     private readonly ITrackingLogger _logger;
     private readonly HttpClient _http;
     private readonly IpRangeLookupService _ipRangeLookup;
+    private readonly ForgeMetrics _metrics;
     private string _dataDir = null!;
 
     // Known data source URLs
@@ -68,13 +69,15 @@ public sealed class IpDataAcquisitionService : BackgroundService
         IOptions<TrackingSettings> trackingSettings,
         ITrackingLogger logger,
         HttpClient http,
-        IpRangeLookupService ipRangeLookup)
+        IpRangeLookupService ipRangeLookup,
+        ForgeMetrics metrics)
     {
         _forgeSettings = forgeSettings.Value;
         _trackingSettings = trackingSettings.Value;
         _logger = logger;
         _http = http;
         _ipRangeLookup = ipRangeLookup;
+        _metrics = metrics;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -112,16 +115,37 @@ public sealed class IpDataAcquisitionService : BackgroundService
     private async Task RunAllImportsAsync(CancellationToken ct)
     {
         _logger.Info("IpDataAcquisition: starting import cycle...");
+        var cycleStart = ForgeMetrics.StartTimer();
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        int asnRows = 0, geoRows = 0, skipped = 0, failures = 0;
 
-        try { await ImportIpToAsnAsync(ct); }
-        catch (Exception ex) { _logger.Error($"IpDataAcquisition [IPtoASN]: {ex.Message}"); }
+        try
+        {
+            asnRows = await ImportIpToAsnAsync(ct);
+            if (asnRows < 0) { skipped++; asnRows = 0; }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"IpDataAcquisition [IPtoASN]: {ex.Message}");
+            failures++;
+        }
 
-        try { await ImportDbIpCityLiteAsync(ct); }
-        catch (Exception ex) { _logger.Error($"IpDataAcquisition [DB-IP]: {ex.Message}"); }
+        try
+        {
+            geoRows = await ImportDbIpCityLiteAsync(ct);
+            if (geoRows < 0) { skipped++; geoRows = 0; }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"IpDataAcquisition [DB-IP]: {ex.Message}");
+            failures++;
+        }
 
         // Cloud provider ranges are already loaded by DatacenterIpService at startup.
         // Future: import them into SQL tables too for ETL enrichment.
+
+        _metrics.RecordIpAcqCycle(cycleStart, asnRows, geoRows, 0, skipped);
+        for (int i = 0; i < failures; i++) _metrics.RecordIpAcqFailure();
 
         sw.Stop();
         _logger.Info($"IpDataAcquisition: import cycle complete in {sw.Elapsed.TotalSeconds:F1}s");
@@ -133,7 +157,7 @@ public sealed class IpDataAcquisitionService : BackgroundService
     // ========================================================================
     // IPtoASN Import — TSV format: range_start\trange_end\tAS_number\tcc\tAS_desc
     // ========================================================================
-    private async Task ImportIpToAsnAsync(CancellationToken ct)
+    private async Task<int> ImportIpToAsnAsync(CancellationToken ct)
     {
         var localPath = Path.Combine(_dataDir, "ip2asn-v4.tsv.gz");
 
@@ -141,7 +165,7 @@ public sealed class IpDataAcquisitionService : BackgroundService
         if (!await DownloadIfChangedAsync(IpToAsnV4Uri, localPath, ct))
         {
             _logger.Info("IpDataAcquisition [IPtoASN]: file unchanged — skipped");
-            return;
+            return -1;
         }
 
         _logger.Info("IpDataAcquisition [IPtoASN]: importing...");
@@ -264,12 +288,14 @@ public sealed class IpDataAcquisitionService : BackgroundService
 
         await LogImportAsync(4, "AsnRange", rowCount, (int)sw.ElapsedMilliseconds,
             Path.GetFileName(localPath), null, ct);
+
+        return rowCount;
     }
 
     // ========================================================================
     // DB-IP Lite City Import — CSV: ip_start,ip_end,continent,cc,region,city,lat,lon
     // ========================================================================
-    private async Task ImportDbIpCityLiteAsync(CancellationToken ct)
+    private async Task<int> ImportDbIpCityLiteAsync(CancellationToken ct)
     {
         // DB-IP publishes monthly files named by year-month
         var yearMonth = DateTime.UtcNow.ToString("yyyy-MM");
@@ -279,7 +305,7 @@ public sealed class IpDataAcquisitionService : BackgroundService
         if (!await DownloadIfChangedAsync(url, localPath, ct))
         {
             _logger.Info("IpDataAcquisition [DB-IP]: file unchanged — skipped");
-            return;
+            return -1;
         }
 
         _logger.Info("IpDataAcquisition [DB-IP]: importing...");
@@ -403,6 +429,8 @@ public sealed class IpDataAcquisitionService : BackgroundService
 
         await LogImportAsync(2, "GeoRange", rowCount, (int)sw.ElapsedMilliseconds,
             Path.GetFileName(localPath), null, ct);
+
+        return rowCount;
     }
 
     // ========================================================================

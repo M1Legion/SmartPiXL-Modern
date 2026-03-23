@@ -49,8 +49,6 @@ if (!string.IsNullOrEmpty(sqlUser) && !string.IsNullOrEmpty(sqlPass))
 {
     builder.Services.PostConfigure<TrackingSettings>(settings =>
     {
-        settings.XavierConnectionString = RewriteToSqlAuth(
-            settings.XavierConnectionString, sqlUser, sqlPass);
         settings.XavierSmartPiXLConnectionString = RewriteToSqlAuth(
             settings.XavierSmartPiXLConnectionString, sqlUser, sqlPass);
     });

@@ -21,9 +21,8 @@ namespace SmartPiXL.Services;
 /// <summary>
 /// Cross-process abstraction for querying and controlling the IIS Edge process.
 /// <para>
-/// Used by <c>InfraHealthService</c> (reads circuit/queue state),
-/// <c>SelfHealingService</c> (reads circuit + can reset it), and
-/// <c>IpApiSyncService</c> (clears geo cache after sync).
+/// Used by <c>InfraHealthService</c> (reads circuit/queue state) and
+/// <c>SelfHealingService</c> (reads circuit + can reset it).
 /// </para>
 /// </summary>
 public interface IEdgeHealthClient
@@ -42,9 +41,9 @@ public interface IEdgeHealthClient
     Task<bool> ResetCircuitAsync(CancellationToken ct = default);
     
     /// <summary>
-    /// Invalidates the Edge process's in-memory geo hot cache. Called by
-    /// <c>IpApiSyncService</c> after completing an IP geolocation data sync
-    /// so subsequent hits pick up the fresh data.
+    /// Invalidates the Edge process's in-memory geo hot cache.
+    /// Called after IP geolocation data updates so subsequent hits
+    /// pick up the fresh data.
     /// </summary>
     Task ClearGeoCacheAsync(CancellationToken ct = default);
 }
