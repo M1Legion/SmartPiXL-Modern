@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* ============================================================================
-   TRON AESTHETIC -- Single-Page App: Operations + Analytics
+   TRON AESTHETIC -- Single-Page App: Health + Metrics
    Canvas, header, nav, and modal persist across view switches.
    ============================================================================ */
 
@@ -900,7 +900,7 @@ body::before {
 }
 
 /* ============================================================================
-   OPERATIONS VIEW -- Critical Zone, Status Strip, Infra, Error Log, ETL
+   HEALTH VIEW -- Critical Zone, Status Strip, Infra, Error Log, ETL
    ============================================================================ */
 
 /* Critical Issues Zone */
@@ -1574,7 +1574,7 @@ body::before {
 .all-clear-sub { margin-left: auto; font-size: 0.72rem; color: var(--text-dim); }
 
 /* ============================================================================
-   ANALYTICS VIEW -- Hero Cards, Charts, Signals, Evasion, Behavior, FP, Devices
+   METRICS VIEW -- Hero Cards, Charts, Signals, Evasion, Behavior, FP, Devices
    ============================================================================ */
 
 /*  Hero Cards - Primary KPI holotiles  */
@@ -1842,8 +1842,8 @@ body::before {
   <div class="landing-logo">SMARTPIXL</div>
   <div class="landing-sub">DevOps Command Center</div>
   <div class="landing-buttons">
-    <button class="landing-btn" onclick="enterView('ops')">OPERATIONS</button>
-    <button class="landing-btn" onclick="enterView('analytics')">ANALYTICS</button>
+    <button class="landing-btn" onclick="enterView('ops')">HEALTH</button>
+    <button class="landing-btn" onclick="enterView('analytics')">METRICS</button>
   </div>
   <div class="landing-hint">SELECT A VIEW TO ENTER THE GRID</div>
 </div>
@@ -1854,7 +1854,7 @@ body::before {
     <div class="header-left">
       <div>
         <div class="logo">SMARTPIXL</div>
-        <div class="logo-sub" id="logo-sub">Operations Center</div>
+        <div class="logo-sub" id="logo-sub">Health Center</div>
       </div>
       <div class="status-beacon">
         <div class="beacon-dot" id="beacon"></div>
@@ -1870,11 +1870,11 @@ body::before {
 
   <!-- SHARED NAV (JS-driven, no page reload) -->
   <div class="nav-bar">
-    <a class="nav-tab" id="nav-ops" onclick="toggleView('ops')">OPERATIONS</a>
-    <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">ANALYTICS</a>
+    <a class="nav-tab" id="nav-ops" onclick="toggleView('ops')">HEALTH</a>
+    <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">METRICS</a>
   </div>
 
-  <!-- OPERATIONS VIEW -->
+  <!-- HEALTH VIEW -->
   <div id="view-ops" class="view-content">
     <!-- Critical Issues -->
     <div id="critical-zone"></div>
@@ -2008,7 +2008,7 @@ body::before {
     </div>
   </div>
 
-  <!-- ANALYTICS VIEW -->
+  <!-- METRICS VIEW -->
   <div id="view-analytics" class="view-content">
     <!-- Hero Cards  Pipeline Metrics -->
     <div class="hero-grid" id="hero-grid">
@@ -2173,10 +2173,10 @@ function setViewClasses(view) {
   document.getElementById('view-analytics').className = 'view-content' + (view === 'analytics' ? ' active' : '');
   document.getElementById('nav-ops').className = 'nav-tab' + (view === 'ops' ? ' active' : '');
   document.getElementById('nav-analytics').className = 'nav-tab' + (view === 'analytics' ? ' active' : '');
-  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Operations Center' : view === 'analytics' ? 'Analytics & Intelligence' : '';
+  document.getElementById('logo-sub').textContent = view === 'ops' ? 'Health Center' : view === 'analytics' ? 'Metrics & Intelligence' : '';
   document.getElementById('etl-header-wrap').style.display = view === 'ops' ? '' : 'none';
-  document.title = view === 'ops' ? 'SmartPiXL // TRON | Operations'
-                 : view === 'analytics' ? 'SmartPiXL // TRON | Analytics'
+  document.title = view === 'ops' ? 'SmartPiXL // TRON | Health'
+                 : view === 'analytics' ? 'SmartPiXL // TRON | Metrics'
                  : 'SmartPiXL // TRON';
 }
 
@@ -2199,7 +2199,7 @@ function enterView(view) {
   });
 
   setViewClasses(view);
-  const url = view === 'ops' ? '/tron' : '/tron/analytics';
+  const url = view === 'ops' ? '/tron' : '/tron/metrics';
   history.pushState({ view }, '', url);
   window.scrollTo(0, 0);
 
@@ -2242,7 +2242,7 @@ function toggleView(view) {
     refreshAbort = true;
     currentView = view;
     setViewClasses(view);
-    const url = view === 'ops' ? '/tron' : '/tron/analytics';
+    const url = view === 'ops' ? '/tron' : '/tron/metrics';
     history.pushState({ view }, '', url);
     window.scrollTo(0, 0);
     renderCachedData(view);
@@ -2320,7 +2320,7 @@ function timeAgo(dt) {
 }
 
 // ============================================================================
-// ------  OPERATIONS RENDERERS & DRILL-DOWNS
+// ------  HEALTH RENDERERS & DRILL-DOWNS
 // ============================================================================
 
 //  Drill-Down: Pipeline Nodes 
@@ -3478,7 +3478,7 @@ function updateOpsBeacon(health, infra) {
 }
 
 // ============================================================================
-// ------  ANALYTICS RENDERERS & DRILL-DOWNS
+// ------  METRICS RENDERERS & DRILL-DOWNS
 // ============================================================================
 
 //  Drill-Down: Hit (shared by both views) 

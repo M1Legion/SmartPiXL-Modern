@@ -11,25 +11,17 @@ using SmartPiXL.Services;
 // Background Windows Service that runs all non-hot-path workloads:
 //   - Named pipe server (receives enriched records from IIS Edge)
 //   - Enrichment pipeline (adaptive workers, NUMA-pinned)
-//   - SqlBulkCopy writer (Channel<T> → PiXL.Raw)
+//   - SqlBulkCopy writer (Channel<T> → PiXL.Parsed)
 //   - Unified replay (ForgeReplayService: Edge failover + Forge failover + dead-letter)
-//   - ETL pipeline (PiXL.Raw → PiXL.Parsed every 60s)
+//   - ETL identity resolution (MatchVisits + MatchLegacyVisits every 60s)
 //   - IP data acquisition (IPtoASN, DB-IP Lite → IPInfo schema, daily)
 //   - Company/PiXL sync (Xavier → PiXL.Company/PiXL.Settings, every 6h)
-//   - Infrastructure health monitoring (InfraHealthService, 15s cache)
-//   - Self-healing (circuit breaker watch, filegroup checks, auto-remediation)
-//   - Maintenance scheduling (purge 3AM, index rebuild Sunday 4AM)
-//   - Email + SMS ops notifications
 //
 // NO HTTP — This is a pure Worker Service.
 // Tron dashboard + Atlas portal will be served by SmartPiXL.Sentinel (Phase 10).
 //
 // COMMUNICATION WITH IIS EDGE:
 //   Inbound:  Named pipe "SmartPiXL-Enrichment" (TrackingData JSON lines)
-//   Outbound: IEdgeHealthClient HTTP calls to localhost Edge endpoints
-//     GET  /internal/health        → circuit state, queue depth, uptime
-//     POST /internal/circuit-reset → reset circuit breaker
-//     POST /internal/geo-cache/clear → invalidate geo cache after sync
 //
 // DEPLOYMENT:
 //   sc.exe create SmartPiXL-Forge binPath= "C:\Services\SmartPiXL-Forge\SmartPiXL.Forge.exe"
@@ -94,14 +86,7 @@ builder.Services.AddSingleton(sp =>
     return new ForgeChannels(forgeSettings.PipeChannelCapacity, forgeSettings.SqlWriterChannelCapacity);
 });
 
-// IEdgeHealthClient: HTTP bridge to the IIS Edge process.
-// Base address comes from Tracking:EdgeBaseUrl (default http://127.0.0.1:6000).
-builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, client) =>
-{
-    var settings = sp.GetRequiredService<IOptions<TrackingSettings>>().Value;
-    client.BaseAddress = new Uri(settings.EdgeBaseUrl ?? "http://127.0.0.1:6000");
-    client.Timeout = TimeSpan.FromSeconds(5);
-});
+
 
 // ── Enrichment services ───────────────────────────────────────────────────
 // Three-lane architecture (Session 17):
@@ -204,26 +189,9 @@ builder.Services.AddHostedService<EtlBackgroundService>();
 builder.Services.AddHttpClient<IpDataAcquisitionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IpDataAcquisitionService>());
 
-// ── Non-essential services DISABLED ───────────────────────────────────────
-// All background sync, maintenance, health, and notification services disabled
-// to isolate the core Pipe → SQL pipeline. Re-enable after baseline verified.
-//
-// builder.Services.AddSingleton<EmailNotificationService>();
-//
+// ── Company sync ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<CompanyPiXLSyncService>();
-builder.Services.AddHostedService(sp =>
-{
-    var svc = sp.GetRequiredService<CompanyPiXLSyncService>();
-    svc.EmailService = sp.GetService<EmailNotificationService>();
-    return svc;
-});
-
-builder.Services.AddSingleton<InfraHealthService>();
-//
-// builder.Services.AddSingleton<SelfHealingService>();
-// builder.Services.AddHostedService(sp => sp.GetRequiredService<SelfHealingService>());
-//
-// builder.Services.AddHostedService<MaintenanceSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CompanyPiXLSyncService>());
 
 // ---------------------------------------------------------------------------
 // WINDOWS SERVICE SUPPORT
@@ -257,15 +225,12 @@ logger.Info($"Pipe: {host.Services.GetRequiredService<IOptions<ForgeSettings>>()
 var forgeSettings = host.Services.GetRequiredService<IOptions<ForgeSettings>>().Value;
 if (forgeSettings.NumaNode >= 0)
 {
-    var lpCount = NumaHelper.PinToNumaNode(forgeSettings.NumaNode, logger);
+    var lpCount = NumaHelper.PinToNumaNode(forgeSettings.NumaNode, logger, forgeSettings.RamPerNumaNodeGB);
     if (lpCount > 0)
     {
-        // Cap enrichment workers to the LP count on this NUMA node
-        if (forgeSettings.EnrichmentWorkerCount > lpCount)
-        {
-            logger.Warning($"NUMA: Capping EnrichmentWorkerCount from {forgeSettings.EnrichmentWorkerCount} to {lpCount} (NUMA node {forgeSettings.NumaNode} LP count)");
-            forgeSettings.EnrichmentWorkerCount = lpCount;
-        }
+        forgeSettings.NumaLogicalProcessors = lpCount;
+        if (forgeSettings.EffectiveMaxWorkers < forgeSettings.EnrichmentWorkerCount)
+            logger.Info($"NUMA: EffectiveMaxWorkers capped to {forgeSettings.EffectiveMaxWorkers} (node {forgeSettings.NumaNode} has {lpCount} LPs, config requested {forgeSettings.EnrichmentWorkerCount})");
     }
 }
 

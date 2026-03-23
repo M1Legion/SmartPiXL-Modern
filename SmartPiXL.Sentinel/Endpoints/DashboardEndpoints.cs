@@ -38,8 +38,9 @@ namespace SmartPiXL.Sentinel.Endpoints;
 //   /api/dash/subnet-clusters â†’ vw_Dash_SubnetClusters   (subnet reputation)
 //
 // DASHBOARD HTML:
-//   /tron                  â†’  wwwroot/tron.html          (Tron ops dashboard SPA)
-//   /tron/analytics        â†’  wwwroot/tron.html          (same SPA, JS view switch)
+//   /tron                  →  wwwroot/tron.html          (Tron health dashboard SPA)
+//   /tron/metrics           →  wwwroot/tron.html          (same SPA, JS view switch)
+//   /tron/analytics         →  wwwroot/tron.html          (legacy alias for /tron/metrics)
 // ============================================================================
 
 /// <summary>
@@ -520,7 +521,8 @@ public static class DashboardEndpoints
         // DASHBOARD HTML PAGES
         // ====================================================================
         app.MapGet("/tron", ServeTronHtml);
-        app.MapGet("/tron/analytics", ServeTronHtml);
+        app.MapGet("/tron/metrics", ServeTronHtml);
+        app.MapGet("/tron/analytics", ServeTronHtml);  // legacy alias
         app.MapGet("/tron/{file}", ServeTronModule);
         app.MapGet("/pipeline", ServePipelineHtml);
 

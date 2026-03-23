@@ -77,6 +77,23 @@ public sealed class ForgeSettings
     public int NumaNode { get; set; } = 3;
 
     /// <summary>
+    /// Logical processor count discovered at runtime by NUMA pinning.
+    /// Set once by Program.cs after <see cref="NumaHelper.PinToNumaNode"/>.
+    /// Not a config file value — populated at startup. Default <see cref="int.MaxValue"/> (no cap).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int NumaLogicalProcessors { get; set; } = int.MaxValue;
+
+    /// <summary>
+    /// Effective maximum worker count, capped by NUMA topology when applicable.
+    /// Use this instead of <see cref="EnrichmentWorkerCount"/> to respect NUMA limits.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int EffectiveMaxWorkers => NumaLogicalProcessors < EnrichmentWorkerCount
+        ? NumaLogicalProcessors
+        : EnrichmentWorkerCount;
+
+    /// <summary>
     /// Number of background I/O workers for DNS and WHOIS cache warming
     /// (Lane 3). These workers are I/O-bound, not CPU-bound. Pinned to the
     /// same NUMA node as the rest of the Forge process. Default 8.
@@ -140,4 +157,47 @@ public sealed class ForgeSettings
     /// Default 1 AM UTC (low traffic, before enrichment cycle).
     /// </summary>
     public int IpDataAcquisitionHourUtc { get; set; } = 1;
+
+    // ========================================================================
+    // NUMA SETTINGS
+    // ========================================================================
+
+    /// <summary>
+    /// Estimated total RAM in GB on each NUMA node. Used for the NUMA pinning
+    /// log message. Default 500 (matches 2TB / 4-node Xeon Gold 6254 topology).
+    /// </summary>
+    public int RamPerNumaNodeGB { get; set; } = 500;
+
+    // ========================================================================
+    // HEALTH TREE — CACHE THRESHOLDS
+    // ========================================================================
+    // Health probes report unhealthy (0) when a cache exceeds its threshold.
+    // TODO: Explore auto-tuning thresholds based on memory pressure and hit rates.
+
+    /// <summary>Max entries for UaParsing cache before health probe flags unhealthy.</summary>
+    public int CacheThreshold_UaParsing { get; set; } = 50_000;
+
+    /// <summary>Max entries for BotUaDetection cache.</summary>
+    public int CacheThreshold_BotUaDetection { get; set; } = 50_000;
+
+    /// <summary>Max entries for DnsLookup cache.</summary>
+    public int CacheThreshold_DnsLookup { get; set; } = 200_000;
+
+    /// <summary>Max entries for WhoisAsn cache.</summary>
+    public int CacheThreshold_WhoisAsn { get; set; } = 200_000;
+
+    /// <summary>Max entries for MaxMindGeo cache.</summary>
+    public int CacheThreshold_MaxMindGeo { get; set; } = 200_000;
+
+    /// <summary>Max entries for DeadInternet cache.</summary>
+    public int CacheThreshold_DeadInternet { get; set; } = 100_000;
+
+    /// <summary>Max entries for BehavioralReplay cache.</summary>
+    public int CacheThreshold_BehavioralReplay { get; set; } = 500_000;
+
+    /// <summary>Max entries for CrossCustomerIntel cache.</summary>
+    public int CacheThreshold_CrossCustomerIntel { get; set; } = 500_000;
+
+    /// <summary>Max entries for SessionStitching cache.</summary>
+    public int CacheThreshold_SessionStitching { get; set; } = 500_000;
 }

@@ -44,8 +44,7 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         _metrics = metrics;
     }
 
-    /// <summary>Optional email service injected after construction for guard notifications.</summary>
-    public EmailNotificationService? EmailService { get; set; }
+
 
     private async Task<T> WithDeadlockRetryAsync<T>(Func<Task<T>> action, string operationName, int maxAttempts = 3)
     {
@@ -79,12 +78,7 @@ public sealed class CompanyPiXLSyncService : BackgroundService
         if (string.IsNullOrEmpty(result))
             return true;
 
-        var msg = $"CompanyPiXLSync GUARD: missing table(s): {result}. Sync skipped.";
-        _logger.Warning(msg);
-
-        if (EmailService is not null)
-            await EmailService.NotifyAsync("MissingTable", "Missing sync target tables", msg);
-
+        _logger.Warning($"CompanyPiXLSync GUARD: missing table(s): {result}. Sync skipped.");
         return false;
     }
 

@@ -87,8 +87,7 @@ public sealed class ServiceHealthItem
 
 /// <summary>
 /// SQL Server connectivity probe result. Tests the connection string,
-/// checks basic row counts in PiXL.Raw and PiXL.Parsed, and reads
-/// the ETL watermark.
+/// checks basic row counts in PiXL.Parsed, and reads the ETL watermark.
 /// </summary>
 public sealed class SqlHealthItem
 {
@@ -104,7 +103,7 @@ public sealed class SqlHealthItem
     /// <summary>Round-trip time for the connectivity test query, in milliseconds.</summary>
     public int ResponseMs { get; set; }
     
-    /// <summary>Row count in <c>PiXL.Raw</c> (raw ingest table).</summary>
+    /// <summary>Row count in <c>PiXL.Parsed</c> (ingest table — PiXL.Raw is retired).</summary>
     public int TestRows { get; set; }
     
     /// <summary>Row count in <c>PiXL.Parsed</c> (materialized warehouse).</summary>
@@ -202,10 +201,10 @@ public sealed class AppHealthItem
 /// </summary>
 public sealed class DataFlowHealthItem
 {
-    /// <summary>True if new rows have arrived in <c>PiXL.Raw</c> within the last 5 minutes.</summary>
+    /// <summary>True if new rows have arrived in <c>PiXL.Parsed</c> within the last 5 minutes.</summary>
     public bool IsFlowing { get; set; }
     
-    /// <summary>UTC timestamp of the most recent INSERT into <c>PiXL.Raw</c>.</summary>
+    /// <summary>UTC timestamp of the most recent INSERT into <c>PiXL.Parsed</c>.</summary>
     public DateTime? LastInsertUtc { get; set; }
     
     /// <summary>Seconds elapsed since the last insert. High values indicate ingestion stall.</summary>
@@ -217,7 +216,7 @@ public sealed class DataFlowHealthItem
     /// <summary>Number of hits ingested in the last 5 minutes.</summary>
     public int HitsLast5Min { get; set; }
     
-    /// <summary>MAX(Id) in <c>PiXL.Raw</c> — the latest raw ingest row.</summary>
+    /// <summary>MAX(Id) in <c>PiXL.Parsed</c> — the latest ingest row.</summary>
     public long MaxTestId { get; set; }
     
     /// <summary>Current <c>ETL.Watermark.LastProcessedId</c> for ParseNewHits.</summary>
@@ -226,7 +225,7 @@ public sealed class DataFlowHealthItem
     /// <summary>MAX(OriginalTestId) in <c>PiXL.Parsed</c>.</summary>
     public long MaxParsedId { get; set; }
     
-    /// <summary>Rows in <c>PiXL.Raw</c> not yet processed by the ETL (MaxTestId - WatermarkId).</summary>
+    /// <summary>Rows in <c>PiXL.Parsed</c> not yet processed by the ETL (MaxTestId - WatermarkId).</summary>
     public int EtlLag { get; set; }
     
     /// <summary>Current Channel&lt;T&gt; queue depth.</summary>
@@ -300,8 +299,9 @@ public sealed class ErrorEntry
 /// <summary>
 /// Full pipeline health snapshot from <c>vw_Dash_PipelineHealth</c>.
 /// <para>
-/// Covers six core tables (PiXL.Raw, PiXL.Parsed, PiXL.Device, PiXL.IP,
+/// Covers five core tables (PiXL.Parsed, PiXL.Device, PiXL.IP,
 /// PiXL.Visit, PiXL.Match) and both ETL watermarks (ParseNewHits, MatchVisits).
+/// PiXL.Raw is retired — Forge writes directly to PiXL.Parsed.
 /// The dashboard uses this to display row counts, max IDs, watermark positions,
 /// lag indicators, and timestamp freshness in the pipeline health panel.
 /// </para>
@@ -319,7 +319,7 @@ public sealed class PipelineHealthItem
     public string? Error { get; set; }
 
     // ── Table row counts ────────────────────────────────────────────
-    /// <summary>Row count of <c>PiXL.Raw</c> (raw ingest table).</summary>
+    /// <summary>Row count of <c>PiXL.Parsed</c> (ingest table — PiXL.Raw is retired).</summary>
     public int TestRows { get; set; }
 
     /// <summary>Row count of <c>PiXL.Parsed</c> (materialized warehouse table).</summary>
@@ -338,7 +338,7 @@ public sealed class PipelineHealthItem
     public int MatchRows { get; set; }
 
     // ── Max IDs ─────────────────────────────────────────────────────
-    /// <summary>Maximum identity value in <c>PiXL.Raw</c>. Used to calculate parse lag.</summary>
+    /// <summary>Maximum identity value in <c>PiXL.Parsed</c>. Used to calculate parse lag.</summary>
     public long MaxTestId { get; set; }
 
     /// <summary>Maximum identity value in <c>PiXL.Visit</c>. Used to calculate match lag.</summary>
@@ -348,7 +348,7 @@ public sealed class PipelineHealthItem
     public long MaxMatchId { get; set; }
 
     // ── ParseNewHits watermark ──────────────────────────────────────
-    /// <summary>Last PiXL.Raw ID processed by <c>ETL.usp_ParseNewHits</c>.</summary>
+    /// <summary>Last PiXL.Parsed ID processed by <c>ETL.usp_ParseNewHits</c>.</summary>
     public long ParseWatermark { get; set; }
 
     /// <summary>Cumulative rows processed by the parse ETL since watermark reset.</summary>
@@ -394,7 +394,7 @@ public sealed class PipelineHealthItem
     public int MatchLag { get; set; }
 
     // ── Latest timestamps (freshness indicators) ────────────────────
-    /// <summary>Timestamp of the most recent row in <c>PiXL.Raw</c>.</summary>
+    /// <summary>Timestamp of the most recent row in <c>PiXL.Parsed</c>.</summary>
     public DateTime? TestLatest { get; set; }
 
     /// <summary>Timestamp of the most recent row in <c>PiXL.Parsed</c>.</summary>

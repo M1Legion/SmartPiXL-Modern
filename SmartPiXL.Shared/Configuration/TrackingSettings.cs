@@ -175,19 +175,6 @@ public sealed class TrackingSettings
     
     /// <summary>Enable SSL/TLS for SMTP connection.</summary>
     public bool SmtpEnableSsl { get; set; } = true;
-    
-    // ========================================================================
-    // MAINTENANCE SCHEDULE SETTINGS
-    // ========================================================================
-    
-    /// <summary>UTC hour (0–23) for daily raw data purge. Default 3 AM.</summary>
-    public int PurgeHourUtc { get; set; } = 3;
-    
-    /// <summary>UTC hour (0–23) for weekly parsed data archive. Default 2 AM Sunday.</summary>
-    public int ArchiveHourUtc { get; set; } = 2;
-    
-    /// <summary>UTC hour (0–23) for weekly index maintenance. Default 4 AM Sunday.</summary>
-    public int IndexMaintenanceHourUtc { get; set; } = 4;
 }
 
 /// <summary>

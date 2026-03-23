@@ -32,8 +32,9 @@ internal static class NumaHelper
     /// </summary>
     /// <param name="nodeIndex">NUMA node index (0-based). -1 = no pinning.</param>
     /// <param name="logger">Logger for diagnostics.</param>
+    /// <param name="ramPerNodeGB">Estimated RAM in GB per NUMA node (for log output).</param>
     /// <returns>Logical processor count on the pinned node (or total system count if not pinned).</returns>
-    public static int PinToNumaNode(int nodeIndex, ITrackingLogger logger)
+    public static int PinToNumaNode(int nodeIndex, ITrackingLogger logger, int ramPerNodeGB = 500)
     {
         if (nodeIndex < 0)
         {
@@ -74,7 +75,7 @@ internal static class NumaHelper
                 return cpuSetIds.Length;
             }
 
-            logger.Info($"NUMA: Forge pinned to node {nodeIndex} — {cpuSetIds.Length} logical processors, ~{cpuSetIds.Length * 500 / 36}GB local RAM");
+            logger.Info($"NUMA: Forge pinned to node {nodeIndex} \u2014 {cpuSetIds.Length} logical processors, ~{ramPerNodeGB}GB local RAM");
             return cpuSetIds.Length;
         }
         catch (Exception ex)

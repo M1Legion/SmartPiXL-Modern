@@ -174,8 +174,8 @@ public sealed class EnrichmentPipelineService : BackgroundService
         // and scale up toward MaxWorkers when backpressure builds. Scale down
         // after 30s idle. Workers with ID >= _targetWorkerCount park themselves.
         _minWorkers = Math.Max(1, _forgeSettings.MinEnrichmentWorkers);
-        _maxWorkers = _forgeSettings.EnrichmentWorkerCount > 0
-            ? _forgeSettings.EnrichmentWorkerCount
+        _maxWorkers = _forgeSettings.EffectiveMaxWorkers > 0
+            ? _forgeSettings.EffectiveMaxWorkers
             : Environment.ProcessorCount;
         _targetWorkerCount = _minWorkers;
 

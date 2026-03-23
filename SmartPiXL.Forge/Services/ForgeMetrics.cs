@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
+using SmartPiXL.Configuration;
 using SmartPiXL.Services;
 
 namespace SmartPiXL.Forge.Services;
@@ -29,6 +31,12 @@ namespace SmartPiXL.Forge.Services;
 public sealed class ForgeMetrics
 {
     private static readonly long s_startTicks = Stopwatch.GetTimestamp();
+    private readonly ForgeSettings _settings;
+
+    public ForgeMetrics(IOptions<ForgeSettings> settings)
+    {
+        _settings = settings.Value;
+    }
 
     // ── Stage counters ────────────────────────────────────────────────
     // Each stage has: record count, total ticks, min ticks, max ticks
@@ -480,15 +488,15 @@ public sealed class ForgeMetrics
         }};
 
         // Stateful enrichments with caches — healthy if cache bounded
-        f2Probes[idx++] = CacheProbe("UaParsing", Volatile.Read(ref _cacheUaParsing), 50_000);
-        f2Probes[idx++] = CacheProbe("BotUaDetection", Volatile.Read(ref _cacheBotUaDetection), 50_000);
-        f2Probes[idx++] = CacheProbe("DnsLookup", Volatile.Read(ref _cacheDnsLookup), 200_000);
-        f2Probes[idx++] = CacheProbe("WhoisAsn", Volatile.Read(ref _cacheWhoisAsn), 200_000);
-        f2Probes[idx++] = CacheProbe("MaxMindGeo", Volatile.Read(ref _cacheMaxMindGeo), 200_000);
-        f2Probes[idx++] = CacheProbe("DeadInternet", Volatile.Read(ref _cacheDeadInternet), 100_000);
-        f2Probes[idx++] = CacheProbe("BehavioralReplay", Volatile.Read(ref _cacheBehavioralReplay), 500_000);
-        f2Probes[idx++] = CacheProbe("CrossCustomerIntel", Volatile.Read(ref _cacheCrossCustomerIntel), 500_000);
-        f2Probes[idx++] = CacheProbe("SessionStitching", Volatile.Read(ref _cacheSessionStitching), 500_000);
+        f2Probes[idx++] = CacheProbe("UaParsing", Volatile.Read(ref _cacheUaParsing), _settings.CacheThreshold_UaParsing);
+        f2Probes[idx++] = CacheProbe("BotUaDetection", Volatile.Read(ref _cacheBotUaDetection), _settings.CacheThreshold_BotUaDetection);
+        f2Probes[idx++] = CacheProbe("DnsLookup", Volatile.Read(ref _cacheDnsLookup), _settings.CacheThreshold_DnsLookup);
+        f2Probes[idx++] = CacheProbe("WhoisAsn", Volatile.Read(ref _cacheWhoisAsn), _settings.CacheThreshold_WhoisAsn);
+        f2Probes[idx++] = CacheProbe("MaxMindGeo", Volatile.Read(ref _cacheMaxMindGeo), _settings.CacheThreshold_MaxMindGeo);
+        f2Probes[idx++] = CacheProbe("DeadInternet", Volatile.Read(ref _cacheDeadInternet), _settings.CacheThreshold_DeadInternet);
+        f2Probes[idx++] = CacheProbe("BehavioralReplay", Volatile.Read(ref _cacheBehavioralReplay), _settings.CacheThreshold_BehavioralReplay);
+        f2Probes[idx++] = CacheProbe("CrossCustomerIntel", Volatile.Read(ref _cacheCrossCustomerIntel), _settings.CacheThreshold_CrossCustomerIntel);
+        f2Probes[idx++] = CacheProbe("SessionStitching", Volatile.Read(ref _cacheSessionStitching), _settings.CacheThreshold_SessionStitching);
 
         // Stateless enrichments — pure computation, always 1
         f2Probes[idx++] = new() { Name = "IpClassification", Health = 1 };
