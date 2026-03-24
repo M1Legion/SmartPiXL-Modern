@@ -6,7 +6,7 @@
 <title>SmartPiXL // TRON</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* ============================================================================
    TRON AESTHETIC -- Single-Page App: Health + Metrics
@@ -34,7 +34,7 @@
   --text: #d4eeff;
   --text-dim: rgba(160, 200, 230, 0.7);
   --mono: 'JetBrains Mono', 'Consolas', monospace;
-  --display: 'Rajdhani', 'Segoe UI', sans-serif;
+  --display: 'Inter', 'Segoe UI', sans-serif;
 }
 
 html { font-size: 16px; scroll-behavior: smooth; }
@@ -2591,10 +2591,10 @@ function drillIssue(idx) {
   if (!issues || !issues[idx]) return;
   const issue = issues[idx];
   let html = '<div class="detail-grid">';
-  html += di('Severity', issue.severity.toUpperCase(), issue.severity === 'critical' ? 'bad' : 'warn');
+  html += di('Severity', esc((issue.severity || 'unknown').toUpperCase()), issue.severity === 'critical' ? 'bad' : 'warn');
   html += di('Detected', issue.time ? timeAgo(issue.time) : 'Current');
   html += '</div>';
-  html += '<div style="margin-top:16px;font-size:0.85rem;line-height:1.6;color:var(--text);">' + issue.detail + '</div>';
+  html += '<div style="margin-top:16px;font-size:0.85rem;line-height:1.6;color:var(--text);">' + esc(issue.detail) + '</div>';
   const fixes = getFixSuggestion(issue);
   if (fixes) html += sug(fixes);
   openModal(issue.title, html);
@@ -2709,10 +2709,10 @@ function renderCriticalZone(issues) {
       </div>
       ${issues.map((issue, i) => `
         <div class="critical-issue ${issue.severity === 'warning' ? 'warning' : ''}" onclick="drillIssue(${i})">
-          <div class="issue-severity ${issue.severity}">${issue.severity.toUpperCase()}</div>
+          <div class="issue-severity ${issue.severity}">${esc(issue.severity.toUpperCase())}</div>
           <div class="issue-body">
-            <div class="issue-title">${issue.title}</div>
-            <div class="issue-detail">${issue.detail}</div>
+            <div class="issue-title">${esc(issue.title)}</div>
+            <div class="issue-detail">${esc(issue.detail)}</div>
           </div>
           <div class="issue-time">${issue.time ? timeAgo(issue.time) : ''}</div>
         </div>
@@ -2812,7 +2812,7 @@ function renderSystemBox(boxId, data) {
   const header = box.querySelector('.system-box-header');
   header.innerHTML = `
     <div class="system-box-icon ${iconCls}"></div>
-    <div class="system-box-name">${data.name}</div>
+    <div class="system-box-name">${esc(data.name)}</div>
     <div class="system-box-badge ${badgeCls}">${badgeText}</div>
   `;
 
@@ -2820,8 +2820,8 @@ function renderSystemBox(boxId, data) {
   list.innerHTML = data.items.map(item => `
     <div class="subsystem-item">
       <div class="sub-dot ${item.status}"></div>
-      <div class="sub-name">${item.name}</div>
-      <div class="sub-value ${item.valueCls || ''}">${item.value}</div>
+      <div class="sub-name">${esc(item.name)}</div>
+      <div class="sub-value ${item.valueCls || ''}">${esc(item.value)}</div>
     </div>
   `).join('');
 }

@@ -23,7 +23,7 @@ namespace SmartPiXL.Sentinel.Services;
 //   Parent nodes aggregate as ratios: healthy/total.
 //
 // DATA SOURCES:
-//   Edge:     GET http://127.0.0.1:6000/internal/health → EdgeHealthReport
+//   Edge:     GET http://127.0.0.1/internal/health → EdgeHealthReport
 //   Forge:    GET http://127.0.0.1:7100/health          → ForgeHealthReport
 //   Sentinel: Local probes (SQL, Windows services, IIS, self)
 //
@@ -274,7 +274,7 @@ public sealed class HealthTreeService : IDisposable
     {
         try
         {
-            var baseUrl = _settings.EdgeBaseUrl ?? "http://127.0.0.1:6000";
+            var baseUrl = _settings.EdgeBaseUrl ?? "http://127.0.0.1";
             var response = await _edgeHttp.GetAsync($"{baseUrl.TrimEnd('/')}/internal/health");
             if (!response.IsSuccessStatusCode) return null;
             return await response.Content.ReadFromJsonAsync<EdgeHealthReportDto>(s_jsonOptions);
@@ -353,9 +353,9 @@ public sealed class HealthTreeService : IDisposable
         // IIS Reachability
         try
         {
-            var baseUrl = _settings.EdgeBaseUrl ?? "http://127.0.0.1:6000";
+            var baseUrl = _settings.EdgeBaseUrl ?? "http://127.0.0.1";
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = http.Send(new HttpRequestMessage(HttpMethod.Head, $"{baseUrl.TrimEnd('/')}/health"));
+            var response = http.Send(new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/health"));
             results["sentinel.iis-reachability"] = new ProbeState
             {
                 Health = (int)response.StatusCode < 400 ? 1 : 0,

@@ -6,11 +6,11 @@ SmartPiXL is a browser fingerprinting and traffic intelligence platform. Three p
 
 | Process | Project | Prod Location | Ports |
 |---------|---------|---------------|-------|
-| **PiXL Edge** | `SmartPiXL` (IIS) | `C:\inetpub\Smartpixl.info\` | 80/443 via IIS, Kestrel 6000/6001 |
-| **SmartPiXL Forge** | `SmartPiXL.Forge` (Windows Service) | `C:\Services\SmartPiXL-Forge\` | — (no HTTP) |
+| **PiXL Edge** | `SmartPiXL` (IIS) | `C:\inetpub\Smartpixl.info\` | 80/443 via IIS (InProcess hosting) |
+| **SmartPiXL Forge** | `SmartPiXL.Forge` (Windows Service) | `C:\Services\SmartPiXL-Forge\` | 7100 (loopback health only) |
 | **SmartPiXL Sentinel** | `SmartPiXL.Sentinel` (Windows Service) | `C:\Services\SmartPiXL-Sentinel\` | 7500 |
 
-Dev ports: Edge 7000/7001, Sentinel 7500. Prod IIS Kestrel: 6000/6001.
+IIS binds Edge on 80/443. Loopback 127.0.0.1:80 is how Sentinel reaches Edge's `/internal/health`. Kestrel ports in appsettings are unused under InProcess hosting. Sentinel is on 7500.
 
 **Data flow:** Browser → PiXL Script → `_SMART.GIF` → Edge (parse + fast enrichments) → named pipe → Forge (enrichments + SQL write) → ETL procs → Sentinel (dashboards).
 
@@ -30,6 +30,7 @@ Dev ports: Edge 7000/7001, Sentinel 7500. Prod IIS Kestrel: 6000/6001.
 - **SP-first:** Business logic lives in stored procedures. C# services are schedulers and plumbers.
 - **No data deletion:** Records are never deleted from domain tables.
 - **Incremental build:** Get basics working, build up from there. Don't over-design.
+- **Single environment:** Dev IS live. There are no separate dev/staging/prod environments and no external clients yet. All three processes (Edge, Forge, Sentinel) run on this one server. Always publish to production locations after changes.
 
 ## Critical Sync Files
 
