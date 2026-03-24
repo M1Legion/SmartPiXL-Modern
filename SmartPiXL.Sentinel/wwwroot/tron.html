@@ -2349,6 +2349,12 @@ function timeAgo(dt) {
   return Math.floor(sec/3600) + 'h ago';
 }
 
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 // ============================================================================
 // ------  HEALTH TREE RENDERER
 // ============================================================================
@@ -2474,16 +2480,17 @@ function renderTreeProbe(probe) {
   const ok = probe.health === 1;
   const dotCls = ok ? 'up' : 'down';
   const statusColor = ok ? 'var(--green)' : 'var(--red)';
-  const label = ok ? 'Healthy' : (probe.status || 'Unhealthy');
+  const label = ok ? 'Healthy' : 'Unhealthy';
 
   let metricsHtml = '';
+  const parts = [];
+  if (probe.status && probe.status !== 'live') parts.push('<span class="probe-metric">status: ' + esc(probe.status) + '</span>');
   if (probe.metrics && typeof probe.metrics === 'object') {
-    const parts = [];
     for (const [k, v] of Object.entries(probe.metrics)) {
       parts.push('<span class="probe-metric">' + esc(k) + ': ' + (typeof v === 'number' ? num(v) : esc(String(v))) + '</span>');
     }
-    if (parts.length) metricsHtml = '<div class="probe-metrics">' + parts.join('') + '</div>';
   }
+  if (parts.length) metricsHtml = '<div class="probe-metrics">' + parts.join('') + '</div>';
 
   return '<div class="tree-probe' + (ok ? '' : ' unhealthy') + '">' +
     '<span class="probe-dot ' + dotCls + '"></span>' +
