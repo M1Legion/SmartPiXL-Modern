@@ -86,6 +86,9 @@ builder.Services.AddHttpClient<IEdgeHealthClient, HttpEdgeHealthClient>((sp, cli
 // InfraHealthService: Probes Windows services, SQL, IIS, app metrics (15s cache).
 builder.Services.AddSingleton<InfraHealthService>();
 
+// HealthTreeService: Aggregates the full health tree from SQL, Edge, Forge, and local probes.
+builder.Services.AddSingleton<HealthTreeService>();
+
 // EmailNotificationService: SMTP + SMS ops notifications.
 builder.Services.AddSingleton<EmailNotificationService>();
 
@@ -187,6 +190,7 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapDashboardEndpoints();
 app.MapAtlasEndpoints();
 app.MapTrafficAlertEndpoints();
+app.MapHealthTreeEndpoints();
 
 // ---------------------------------------------------------------------------
 // STARTUP LOGGING + GRACEFUL SHUTDOWN

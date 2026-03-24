@@ -17,8 +17,9 @@ using SmartPiXL.Services;
 //   - IP data acquisition (IPtoASN, DB-IP Lite → IPInfo schema, daily)
 //   - Company/PiXL sync (Xavier → PiXL.Company/PiXL.Settings, every 6h)
 //
-// NO HTTP — This is a pure Worker Service.
-// Tron dashboard + Atlas portal will be served by SmartPiXL.Sentinel (Phase 10).
+// NO HTTP FRAMEWORK — This is a pure Worker Service.
+// A lightweight HttpListener on loopback:7100 exposes GET /health for Sentinel polling.
+// Tron dashboard + Atlas portal are served by SmartPiXL.Sentinel.
 //
 // COMMUNICATION WITH IIS EDGE:
 //   Inbound:  Named pipe "SmartPiXL-Enrichment" (TrackingData JSON lines)
@@ -140,6 +141,11 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<BackgroundIpEnrich
 // ── Performance metrics ───────────────────────────────────────────────────
 builder.Services.AddSingleton<ForgeMetrics>();
 builder.Services.AddHostedService<MetricsReporterService>();
+
+// ── Health endpoint ───────────────────────────────────────────────────────
+// Minimal HTTP listener on loopback (127.0.0.1:7100) for Sentinel health polling.
+// Returns ForgeMetrics.GetHealthReport() as JSON on GET /health.
+builder.Services.AddHostedService<ForgeHealthEndpoint>();
 
 // ── Forge failover writer ─────────────────────────────────────────────────
 // Persists enriched TrackingData to JSONL files when the SQL writer channel

@@ -27,8 +27,7 @@ namespace SmartPiXL.Sentinel.Endpoints;
 /// <summary>
 /// Atlas documentation portal API endpoints — serves markdown-backed 4-tier content
 /// with live SQL metrics. Content is read from docs/atlas/*.md and parsed via Markdig.
-/// Unlike <see cref="DashboardEndpoints"/> (localhost-only), Atlas endpoints are
-/// accessible from any IP.
+/// Protected by <see cref="SentinelAccessControl"/> like all other Sentinel endpoints.
 /// </summary>
 public static class AtlasEndpoints
 {
@@ -51,13 +50,18 @@ public static class AtlasEndpoints
         // ====================================================================
         // ATLAS HTML — SPA shell (served as static file)
         // ====================================================================
-        app.MapGet("/atlas", ServeAtlasHtml);
+        app.MapGet("/atlas", async (HttpContext ctx, IWebHostEnvironment env) =>
+        {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
+            await ServeAtlasHtml(ctx, env);
+        });
 
         // ====================================================================
         // SECTIONS — All markdown-backed content
         // ====================================================================
         app.MapGet("/api/atlas/sections", (HttpContext ctx) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return Task.CompletedTask;
             var sections = atlas.GetSections();
             return WriteJsonAsync(ctx, sections);
         });
@@ -67,6 +71,7 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/section/{slug}", async (HttpContext ctx, string slug) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             var section = atlas.GetSectionBySlug(slug);
             if (section is null)
             {
@@ -82,6 +87,7 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/categories", (HttpContext ctx) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return Task.CompletedTask;
             var categories = atlas.GetCategories();
             return WriteJsonAsync(ctx, categories);
         });
@@ -91,6 +97,7 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/status", async (HttpContext ctx) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             try
             {
                 var statuses = await QueryAsync(settings.ConnectionString, @"
@@ -112,6 +119,7 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/metrics", async (HttpContext ctx) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             try
             {
                 var metrics = await GetMetricsAsync(settings.ConnectionString);
@@ -132,6 +140,7 @@ public static class AtlasEndpoints
         // ====================================================================
         app.MapGet("/api/atlas/demo", async (HttpContext ctx) =>
         {
+            if (!SentinelAccessControl.IsAllowed(ctx)) return;
             try
             {
                 var viewerIp = ctx.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "";

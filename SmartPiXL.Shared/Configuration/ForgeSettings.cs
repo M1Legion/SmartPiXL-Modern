@@ -200,4 +200,15 @@ public sealed class ForgeSettings
 
     /// <summary>Max entries for SessionStitching cache.</summary>
     public int CacheThreshold_SessionStitching { get; set; } = 500_000;
+
+    // ========================================================================
+    // HEALTH ENDPOINT
+    // ========================================================================
+
+    /// <summary>
+    /// TCP port for the Forge health HTTP endpoint. Bound to loopback only
+    /// (127.0.0.1). Sentinel polls this to read Forge health probes.
+    /// Default 7100.
+    /// </summary>
+    public int ForgeHealthPort { get; set; } = 7100;
 }
