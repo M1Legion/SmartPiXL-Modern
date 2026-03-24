@@ -10,18 +10,25 @@ namespace SmartPiXL.Services;
 // ============================================================================
 // JSONL FAILOVER SERVICE — Durable write path for when the named pipe to the
 // Forge is unavailable. Writes TrackingData records as one JSON line per
-// record to daily rolling files in the Failover/ directory.
+// record to per-outage files in the Failover/ directory.
 //
 // ARCHITECTURE:
 //   PipeClientService (pipe unavailable)
 //       → JsonlFailoverService.TryEnqueue (lock-free Channel<T>.Writer.TryWrite)
 //       → Single background writer thread reads from channel
-//       → Appends JSON line to failover_yyyy_MM_dd.jsonl
+//       → Appends JSON line to failover_{date}_{time}.jsonl
+//
+// PER-OUTAGE FILE DESIGN:
+//   Each failover event creates a new timestamped file. When the channel is
+//   idle for 5 seconds (outage over), the writer closes the file immediately.
+//   This lets Forge's replay service pick it up on the next 60s scan cycle
+//   instead of waiting until the next calendar day.
 //
 // RECOVERY:
-//   When the Forge starts (or restarts), its FailoverCatchupService scans
-//   the Failover/ directory, reads and processes all .jsonl files, then
-//   deletes them. Zero data loss across all failure scenarios.
+//   Forge's ForgeReplayService scans the Failover/ directory, reads and
+//   processes all .jsonl files, then renames them to .processed. If a file
+//   is still locked (active outage), replay skips it and retries next cycle.
+//   Zero data loss across all failure scenarios.
 //
 // THREADING:
 //   Single reader (background loop) eliminates file contention. Multiple
@@ -32,9 +39,9 @@ namespace SmartPiXL.Services;
 /// JSONL failover writer for when the named pipe to the Forge is unavailable.
 /// <para>
 /// Writes <see cref="TrackingData"/> records as one JSON line per record to
-/// daily rolling files in the configured failover directory. Uses a bounded
-/// <see cref="Channel{T}"/> internally so <see cref="TryEnqueue"/> is a
-/// lock-free CAS operation safe for concurrent producers.
+/// per-outage files in the configured failover directory. Each outage creates
+/// a new timestamped file; when the channel is idle for 5 seconds the writer
+/// closes the file so Forge's replay service can process it immediately.
 /// </para>
 /// </summary>
 public sealed class JsonlFailoverService : BackgroundService
@@ -45,8 +52,11 @@ public sealed class JsonlFailoverService : BackgroundService
     private readonly string _failoverDirectory;
     private readonly string _resolvedDirectory;
 
+    /// <summary>Seconds of channel idle before closing the current file.</summary>
+    private const int IdleCloseSeconds = 5;
+
     private StreamWriter? _currentWriter;
-    private string? _currentDate;
+    private string? _currentFileName;
 
     /// <summary>Lock for synchronous emergency writes when the channel is full.</summary>
     private readonly object _emergencyWriteLock = new();
@@ -108,9 +118,23 @@ public sealed class JsonlFailoverService : BackgroundService
 
         try
         {
-            await foreach (var record in _channel.Reader.ReadAllAsync(stoppingToken))
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await WriteRecordAsync(record, dir);
+                // Block until failover data arrives (outage starts)
+                if (!await _channel.Reader.WaitToReadAsync(stoppingToken))
+                    break;
+
+                // Drain all available records, then wait briefly for more
+                do
+                {
+                    while (_channel.Reader.TryRead(out var record))
+                        await WriteRecordAsync(record, dir);
+                }
+                while (await WaitForMoreAsync(stoppingToken));
+
+                // Channel idle for 5s — outage likely over, close the file
+                // so Forge replay can pick it up immediately
+                CloseCurrentWriter();
             }
         }
         catch (OperationCanceledException)
@@ -124,35 +148,60 @@ public sealed class JsonlFailoverService : BackgroundService
             await WriteRecordAsync(record, dir);
         }
 
-        _currentWriter?.Dispose();
+        CloseCurrentWriter();
         _logger.Info("JsonlFailoverService stopped.");
     }
 
     /// <summary>
-    /// Writes a single record as a JSON line to the current daily file.
-    /// Rolls to a new file at midnight UTC.
+    /// Waits up to <see cref="IdleCloseSeconds"/> for more data on the channel.
+    /// Returns true if data arrived (keep writing), false on idle timeout (close file).
+    /// </summary>
+    private async Task<bool> WaitForMoreAsync(CancellationToken ct)
+    {
+        using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idleCts.CancelAfter(TimeSpan.FromSeconds(IdleCloseSeconds));
+        try
+        {
+            return await _channel.Reader.WaitToReadAsync(idleCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return false; // Idle timeout — no data for 5s
+        }
+    }
+
+    /// <summary>Closes and disposes the current writer, releasing the file lock.</summary>
+    private void CloseCurrentWriter()
+    {
+        if (_currentWriter is null) return;
+        _currentWriter.Dispose();
+        _logger.Debug($"JsonlFailover: closed {_currentFileName}");
+        _currentWriter = null;
+        _currentFileName = null;
+    }
+
+    /// <summary>
+    /// Writes a single record as a JSON line. Opens a new per-outage file
+    /// if no writer is active.
     /// </summary>
     private async Task WriteRecordAsync(TrackingData record, string directory)
     {
         try
         {
-            var date = DateTime.UtcNow.ToString("yyyy_MM_dd");
-
-            // Roll to new file if date changed
-            if (date != _currentDate)
+            if (_currentWriter is null)
             {
-                _currentWriter?.Dispose();
-                var filePath = Path.Combine(directory, $"failover_{date}.jsonl");
+                var timestamp = DateTime.UtcNow.ToString("yyyy_MM_dd_HHmmss");
+                _currentFileName = $"failover_{timestamp}.jsonl";
+                var filePath = Path.Combine(directory, _currentFileName);
                 _currentWriter = new StreamWriter(filePath, append: true, Encoding.UTF8)
                 {
                     AutoFlush = true
                 };
-                _currentDate = date;
-                _logger.Debug($"JsonlFailover: writing to failover_{date}.jsonl");
+                _logger.Debug($"JsonlFailover: opened {_currentFileName}");
             }
 
             var json = JsonSerializer.Serialize(record);
-            await _currentWriter!.WriteLineAsync(json);
+            await _currentWriter.WriteLineAsync(json);
             _metrics.RecordFailoverWrite();
         }
         catch (Exception ex)

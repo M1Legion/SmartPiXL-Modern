@@ -126,21 +126,24 @@ public sealed class ForgeReplayService : BackgroundService
     /// <summary>
     /// Single scan pass: replay enriched files to SQL, un-enriched to enrichment,
     /// then clean up old .processed files across all directories.
+    /// Stuck file count is sampled AFTER replay so locked files (active outage)
+    /// are not counted — only truly stuck files appear in health.
     /// </summary>
     private async Task ScanAndReplayAsync(CancellationToken ct)
     {
-        // Sample stuck file counts for health tree (before replay clears them)
-        var stuckFiles = GetReplayableFiles(_forgeFailoverDir).Length
-                       + GetReplayableFiles(_deadLetterDir).Length
-                       + GetReplayableFiles(_edgeFailoverDir).Length;
-        _metrics.SampleReplayStuckFiles(stuckFiles);
-
         // Enriched records first — straight to SQL, fastest path
         await ReplayDirectoryToSqlAsync(_forgeFailoverDir, ct);
         await ReplayDirectoryToSqlAsync(_deadLetterDir, ct);
 
         // Un-enriched Edge failover — through enrichment pipeline
         await ReplayDirectoryToEnrichmentAsync(_edgeFailoverDir, ct);
+
+        // Count stuck files AFTER replay: remaining unlocked .jsonl/.json files
+        // are truly stuck. Locked files are still being written (active outage).
+        var stuckFiles = CountUnlockedReplayableFiles(_forgeFailoverDir)
+                       + CountUnlockedReplayableFiles(_deadLetterDir)
+                       + CountUnlockedReplayableFiles(_edgeFailoverDir);
+        _metrics.SampleReplayStuckFiles(stuckFiles);
 
         // Clean up .processed files older than 7 days
         CleanupProcessedFiles(_edgeFailoverDir);
@@ -162,6 +165,7 @@ public sealed class ForgeReplayService : BackgroundService
             if (ct.IsCancellationRequested) break;
 
             var records = ReadFileAdaptive(file);
+            if (records is null) continue; // Locked — active outage
             if (records.Count == 0)
             {
                 MarkProcessed(file);
@@ -192,6 +196,7 @@ public sealed class ForgeReplayService : BackgroundService
             if (ct.IsCancellationRequested) break;
 
             var records = ReadFileAdaptive(file);
+            if (records is null) continue; // Locked — active outage
             if (records.Count == 0)
             {
                 MarkProcessed(file);
@@ -215,11 +220,10 @@ public sealed class ForgeReplayService : BackgroundService
     // ── Smart format detection ────────────────────────────────────────────
 
     /// <summary>
-    /// Reads a replay file. All Forge persistence now uses JSONL format.
-    /// Retains JSON array fallback for legacy dead-letter files created before
-    /// the format was unified.
+    /// Reads a replay file. Returns null if the file is locked (active outage,
+    /// skip without counting as stuck). Returns empty list if corrupt/empty.
     /// </summary>
-    private List<TrackingData> ReadFileAdaptive(string filePath)
+    private List<TrackingData>? ReadFileAdaptive(string filePath)
     {
         try
         {
@@ -230,6 +234,13 @@ public sealed class ForgeReplayService : BackgroundService
             // Fallback: legacy JSON array dead-letters (created before JSONL unification)
             return TryReadAsArray(filePath) ?? [];
         }
+        catch (IOException)
+        {
+            // File locked — Edge is actively writing (outage in progress).
+            // Skip silently; replay will pick it up once Edge closes the file.
+            _logger.Debug($"ForgeReplay: skipping locked file {Path.GetFileName(filePath)}");
+            return null;
+        }
         catch (Exception ex)
         {
             _logger.Error($"ForgeReplay: failed to read {Path.GetFileName(filePath)}: {ex.Message}");
@@ -237,12 +248,15 @@ public sealed class ForgeReplayService : BackgroundService
         }
     }
 
-    /// <summary>Tries to deserialize the file as a JSON array. Returns null on failure.</summary>
+    /// <summary>Tries to deserialize the file as a JSON array. Returns null on failure.
+    /// Uses FileShare.ReadWrite in case another process holds a write lock.</summary>
     private List<TrackingData>? TryReadAsArray(string filePath)
     {
         try
         {
-            var content = File.ReadAllText(filePath);
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs, System.Text.Encoding.UTF8);
+            var content = sr.ReadToEnd();
             var batch = JsonSerializer.Deserialize<List<TrackingData>>(content, s_jsonOpts);
             return batch is { Count: > 0 } ? batch : null;
         }
@@ -252,13 +266,17 @@ public sealed class ForgeReplayService : BackgroundService
         }
     }
 
-    /// <summary>Reads line-by-line JSONL. Dead-letters malformed lines.</summary>
+    /// <summary>Reads line-by-line JSONL. Dead-letters malformed lines.
+    /// Uses FileShare.ReadWrite in case another process holds a write lock.</summary>
     private List<TrackingData> ReadAsJsonl(string filePath)
     {
         var records = new List<TrackingData>();
         var deadLetterCount = 0;
 
-        foreach (var line in File.ReadLines(filePath))
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs, System.Text.Encoding.UTF8);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
         {
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//")) continue;
 
@@ -401,13 +419,41 @@ public sealed class ForgeReplayService : BackgroundService
         if (!Directory.Exists(dir)) return [];
 
         return Directory.EnumerateFiles(dir)
-            .Where(f =>
-            {
-                var ext = Path.GetExtension(f);
-                return ext is ".jsonl" or ".json";
-            })
+            .Where(f => Path.GetExtension(f) is ".jsonl" or ".json")
             .OrderBy(f => f)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Counts replayable files that are NOT locked by another process.
+    /// Locked files are in active use (Edge outage in progress) — not stuck.
+    /// </summary>
+    private static int CountUnlockedReplayableFiles(string dir)
+    {
+        if (!Directory.Exists(dir)) return 0;
+
+        var count = 0;
+        foreach (var f in Directory.EnumerateFiles(dir))
+        {
+            if (Path.GetExtension(f) is not (".jsonl" or ".json")) continue;
+            if (IsFileLocked(f)) continue;
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>Returns true if the file is locked by another process.</summary>
+    private static bool IsFileLocked(string filePath)
+    {
+        try
+        {
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
     }
 
     /// <summary>Renames a file to .processed after successful replay.</summary>
@@ -418,7 +464,7 @@ public sealed class ForgeReplayService : BackgroundService
             if (File.Exists(filePath))
             {
                 var processedPath = filePath + ".processed";
-                File.Move(filePath, processedPath);
+                File.Move(filePath, processedPath, overwrite: true);
             }
         }
         catch (IOException ex)
