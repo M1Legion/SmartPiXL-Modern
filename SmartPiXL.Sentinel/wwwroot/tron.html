@@ -2165,6 +2165,7 @@ function sug(text) {
 // Landing = background only + three buttons. Clicking active tab derezzes back.
 // ============================================================================
 let currentView = 'landing';  // start on landing
+const treeCollapseState = new Map();  // subsystem name -> true/false (collapsed)
 
 const dashEl   = document.getElementById('dashboard');
 const landingEl = document.getElementById('landing-overlay');
@@ -2211,7 +2212,9 @@ function enterView(view) {
 
   // Immediately render from cached pipeline data (cycles have been fetching all along)
   renderCachedData(view);
-  countdown = 0; // next cycle will refresh with fresh data
+  // Fetch fresh data immediately — don't wait for countdown
+  isRefreshing = false;
+  refreshAll();
 }
 
 // Render all panels from whatever lastData the pipeline has already cached
@@ -2250,7 +2253,8 @@ function toggleView(view) {
     history.pushState({ view }, '', meta ? meta.url : '/tron');
     window.scrollTo(0, 0);
     renderCachedData(view);
-    countdown = 0;
+    isRefreshing = false;
+    refreshAll();
   }
 }
 
@@ -2404,6 +2408,11 @@ function renderHealthTree(data) {
   // --- Tree detail ---
   const detailEl = document.getElementById('tree-detail');
   if (detailEl) {
+    // Capture current collapse state from DOM before re-render
+    detailEl.querySelectorAll('.tree-sub').forEach(el => {
+      const nameEl = el.querySelector('.tree-sub-name');
+      if (nameEl) treeCollapseState.set(nameEl.textContent, el.classList.contains('collapsed'));
+    });
     detailEl.innerHTML = (root.children || []).map(sys => renderTreeSys(sys)).join('');
   }
 }
@@ -2431,7 +2440,8 @@ function renderTreeSys(sys) {
 function renderTreeSubsystem(sub) {
   const pct = Math.round(sub.ratio * 100);
   const color = ratioColor(sub.ratio);
-  const collapsed = sub.ratio >= 1;
+  const defaultCollapsed = sub.ratio >= 1;
+  const collapsed = treeCollapseState.has(sub.name) ? treeCollapseState.get(sub.name) : defaultCollapsed;
 
   let html = '<div class="tree-sub' + (collapsed ? ' collapsed' : '') + '">' +
     '<div class="tree-sub-head" onclick="this.parentElement.classList.toggle(\'collapsed\')">' +
