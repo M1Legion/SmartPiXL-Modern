@@ -1830,6 +1830,161 @@ body::before {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; box-shadow: 0 0 6px rgba(0,243,255,0.1); }
 ::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); box-shadow: 0 0 12px rgba(0,243,255,0.25); }
+
+/* ========== HEALTH TREE VIEW ========== */
+.health-hero {
+  display: flex; align-items: center; gap: 32px;
+  justify-content: center; padding: 32px 24px 24px;
+}
+.hero-ring-wrap {
+  position: relative; width: 120px; height: 120px; flex-shrink: 0;
+}
+.hero-ring-svg {
+  width: 100%; height: 100%; transform: rotate(-90deg);
+}
+.hero-ring-bg {
+  fill: none; stroke: rgba(255,255,255,0.04); stroke-width: 8;
+}
+.hero-ring-fg {
+  fill: none; stroke: var(--green); stroke-width: 8;
+  stroke-linecap: round;
+  stroke-dasharray: 326.73; /* 2π×52 */
+  stroke-dashoffset: 326.73;
+  transition: stroke-dashoffset 0.6s ease, stroke 0.3s;
+}
+.hero-pct {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 700; font-family: var(--mono); color: var(--text);
+}
+.hero-info { text-align: left; }
+.hero-name {
+  font-size: 18px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 2px; color: var(--cyan);
+}
+.hero-counts {
+  font-size: 15px; color: var(--text); margin-top: 6px; font-family: var(--mono);
+}
+.hero-meta {
+  font-size: 12px; color: var(--text-dim); margin-top: 8px; font-family: var(--mono);
+}
+
+.system-cards {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; padding: 0 24px 8px;
+}
+.sys-card {
+  background: var(--panel); border: 1px solid rgba(0,243,255,0.1);
+  border-radius: 8px; padding: 16px; border-top: 3px solid var(--sys-color);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.sys-card:hover { box-shadow: 0 0 20px rgba(0,243,255,0.06); }
+.sys-card-head {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+}
+.sys-card-name {
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--text);
+}
+.sys-card-pct {
+  font-size: 22px; font-weight: 700; font-family: var(--mono);
+}
+.sys-card-bar {
+  height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden;
+}
+.sys-card-bar-fill {
+  height: 100%; border-radius: 2px; transition: width 0.4s ease;
+}
+.sys-card-counts {
+  font-size: 11px; color: var(--text-dim); margin-top: 8px; font-family: var(--mono);
+}
+.sys-card-reach {
+  font-size: 10px; margin-top: 4px; font-family: var(--mono); letter-spacing: 0.5px;
+}
+.sys-card-reach.up { color: var(--green); }
+.sys-card-reach.down { color: var(--red); }
+
+.tree-detail { padding: 0 24px 24px; display: flex; flex-direction: column; gap: 16px; }
+
+.tree-sys {
+  background: var(--panel); border: 1px solid rgba(0,243,255,0.08);
+  border-radius: 8px; overflow: hidden;
+}
+.tree-sys-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 20px; border-left: 3px solid; background: rgba(0,243,255,0.03);
+}
+.tree-sys-name {
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1.5px; color: var(--cyan);
+}
+.tree-sys-ratio {
+  font-size: 13px; font-weight: 600; font-family: var(--mono);
+}
+.tree-children { padding: 4px 20px 12px; }
+
+.tree-sub {
+  margin-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.tree-sub:last-child { border-bottom: none; }
+.tree-sub-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 0; cursor: pointer; user-select: none;
+}
+.tree-sub-head:hover { opacity: 0.85; }
+.tree-toggle {
+  font-size: 11px; color: var(--text-dim); width: 14px; text-align: center;
+  transition: transform 0.2s;
+}
+.tree-sub.collapsed .tree-toggle { transform: rotate(-90deg); }
+.tree-sub-name {
+  font-size: 12px; font-weight: 600; color: var(--text); min-width: 180px;
+}
+.tree-sub-bar {
+  flex: 1; height: 3px; background: rgba(255,255,255,0.06);
+  border-radius: 2px; overflow: hidden;
+}
+.tree-sub-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.tree-sub-ratio {
+  font-size: 11px; font-weight: 600; font-family: var(--mono);
+  min-width: 44px; text-align: right;
+}
+.tree-sub-probes { padding-left: 22px; margin-bottom: 2px; }
+.tree-sub.collapsed .tree-sub-probes { display: none; }
+
+.tree-probe {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+}
+.tree-probe.unhealthy {
+  background: rgba(255,45,85,0.06); padding: 5px 8px;
+  border-radius: 4px; margin: 2px -8px;
+}
+.probe-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.probe-dot.up { background: var(--green); box-shadow: 0 0 6px var(--green-dim); }
+.probe-dot.down { background: var(--red); box-shadow: 0 0 6px rgba(255,45,85,0.4); animation: probePulse 1.5s ease-in-out infinite; }
+@keyframes probePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.probe-name { font-size: 12px; color: var(--text); flex: 1; }
+.probe-status {
+  font-size: 10px; font-weight: 700; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.probe-desc {
+  font-size: 10px; color: var(--text-dim); min-width: 120px;
+}
+.probe-metrics {
+  display: flex; gap: 12px; padding-left: 16px; flex-wrap: wrap;
+}
+.probe-metric {
+  font-size: 10px; color: var(--text-dim); font-family: var(--mono);
+}
+
+@media (max-width: 900px) {
+  .health-hero { flex-direction: column; text-align: center; gap: 16px; }
+  .hero-info { text-align: center; }
+  .system-cards { grid-template-columns: 1fr; }
+  .tree-sub-name { min-width: 120px; }
+}
 </style>
 </head>
 <body>
@@ -1874,138 +2029,21 @@ body::before {
     <a class="nav-tab" id="nav-analytics" onclick="toggleView('analytics')">METRICS</a>
   </div>
 
-  <!-- HEALTH VIEW -->
+  <!-- HEALTH VIEW — Tree-Driven -->
   <div id="view-ops" class="view-content">
-    <!-- Critical Issues -->
-    <div id="critical-zone"></div>
-
-    <!-- Status Strip -->
-    <div class="status-strip" id="status-strip">
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">OVERALL</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">DATA FLOW</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">SQL</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">IIS</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">ETL</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">MATCH</div><div class="chip-value">--</div></div>
-      <div class="status-chip"><div class="chip-dot idle"></div><div class="chip-label">LAST HIT</div><div class="chip-value">--</div></div>
-      <div class="status-chip" id="xavier-chip"><div class="chip-dot idle"></div><div class="chip-label">XAVIER</div><div class="chip-value">--</div></div>
+    <!-- Platform Health Hero -->
+    <div id="health-hero" class="health-hero">
+      <div class="hero-ring-wrap"><svg class="hero-ring-svg" viewBox="0 0 120 120"><circle class="hero-ring-bg" cx="60" cy="60" r="52"/><circle class="hero-ring-fg" cx="60" cy="60" r="52"/></svg><span class="hero-pct">--%</span></div>
+      <div class="hero-info"><div class="hero-name">SMARTPIXL</div><div class="hero-counts">-- / -- probes healthy</div><div class="hero-meta">Waiting for data...</div></div>
     </div>
 
-    <!-- System Health Boxes -->
-    <div class="system-grid" id="system-boxes">
-      <div class="system-box" id="sysbox-edge"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">PiXL Edge</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
-      <div class="system-box" id="sysbox-forge"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">Forge</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
-      <div class="system-box" id="sysbox-sql"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">SQL Server</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
-      <div class="system-box" id="sysbox-sentinel"><div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">Sentinel</div><div class="system-box-badge">--</div></div><div class="subsystem-list"><div class="loading" style="font-size:0.72rem;">LOADING</div></div></div>
-    </div>
+    <!-- System Cards -->
+    <div id="system-cards" class="system-cards"></div>
 
     <div class="section-divider"></div>
 
-    <!-- Data Flow Pipeline -->
-    <div class="pipeline-section" style="margin-bottom:24px;">
-      <div class="panel">
-        <div class="panel-title">DATA FLOW PIPELINE</div>
-        <div class="pipeline" id="ops-pipeline">
-          <div class="pipe-node" id="pipe-ingest" onclick="drillPipeline('ingest')">
-            <div class="pipe-node-label">INGEST</div>
-            <div class="pipe-node-value" id="pipe-ingest-val">--</div>
-            <div class="pipe-node-sub" id="pipe-ingest-sub">queue</div>
-          </div>
-          <div class="pipe-arrow" id="pipe-arrow-1"></div>
-          <div class="pipe-node" id="pipe-sql" onclick="drillPipeline('sql')">
-            <div class="pipe-node-label">SQL WRITE</div>
-            <div class="pipe-node-value" id="pipe-sql-val">--</div>
-            <div class="pipe-node-sub" id="pipe-sql-sub">PiXL.Test</div>
-          </div>
-          <div class="pipe-arrow" id="pipe-arrow-2"></div>
-          <div class="pipe-node" id="pipe-etl" onclick="drillPipeline('etl')">
-            <div class="pipe-node-label">ETL PARSE</div>
-            <div class="pipe-node-value" id="pipe-etl-val">--</div>
-            <div class="pipe-node-sub" id="pipe-etl-sub">parsed</div>
-          </div>
-          <div class="pipe-arrow" id="pipe-arrow-3"></div>
-          <div class="pipe-node" id="pipe-dim" onclick="drillPipeline('dim')">
-            <div class="pipe-node-label">DIMENSIONS</div>
-            <div class="pipe-node-value" id="pipe-dim-val">--</div>
-            <div class="pipe-node-sub" id="pipe-dim-sub">Device · IP</div>
-          </div>
-          <div class="pipe-arrow" id="pipe-arrow-4"></div>
-          <div class="pipe-node" id="pipe-visit" onclick="drillPipeline('visit')">
-            <div class="pipe-node-label">VISITS</div>
-            <div class="pipe-node-value" id="pipe-visit-val">--</div>
-            <div class="pipe-node-sub" id="pipe-visit-sub">linked</div>
-          </div>
-          <div class="pipe-arrow" id="pipe-arrow-5"></div>
-          <div class="pipe-node" id="pipe-match" onclick="drillPipeline('match')">
-            <div class="pipe-node-label">MATCH</div>
-            <div class="pipe-node-value" id="pipe-match-val">--</div>
-            <div class="pipe-node-sub" id="pipe-match-sub">resolved</div>
-          </div>
-        </div>
-        <div class="etl-grid" style="margin-top:12px;">
-          <div class="etl-stat"><div class="etl-val" id="flow-5min">--</div><div class="etl-lbl">LAST 5 MIN</div></div>
-          <div class="etl-stat"><div class="etl-val" id="flow-1hr">--</div><div class="etl-lbl">LAST HOUR</div></div>
-          <div class="etl-stat"><div class="etl-val" id="flow-last-insert">--</div><div class="etl-lbl">LAST INSERT</div></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <!-- Errors + ETL + Pipeline -->
-    <div class="panel-grid triple">
-      <div class="panel">
-        <div class="panel-title">ERROR LOG</div>
-        <div class="error-log" id="error-log"><div style="color:var(--text-dim); font-size:0.78rem; padding: 20px; text-align:center;">Waiting for data...</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">ETL HEALTH</div>
-        <div id="etl-details"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">PIPELINE TABLES</div>
-        <div id="pipeline-tables"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <!-- Xavier Sync Health -->
-    <div class="panel" style="margin-bottom:24px;">
-      <div class="panel-title">XAVIER DATA SYNC</div>
-      <div id="xavier-sync-panel"><div class="loading">LOADING</div></div>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <!-- Infrastructure -->
-    <div class="panel" style="margin-bottom:24px;">
-      <div class="panel-title">INFRASTRUCTURE</div>
-      <div id="infra-detail"><div class="loading">LOADING</div></div>
-    </div>
-
-    <!-- Pipeline Health + Remediations -->
-    <div class="panel-grid half">
-      <div class="panel">
-        <div class="panel-title">PIPELINE HEALTH</div>
-        <div id="pipeline-health"><div class="loading">LOADING</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">REMEDIATIONS</div>
-        <div id="remediation-log"><div class="loading">LOADING</div></div>
-      </div>
-    </div>
-
-    <!-- Live Feed (compact, 15 hits) -->
-    <div class="panel" style="margin-bottom:24px;">
-      <div class="panel-title">LIVE FEED -- LAST 15 HITS</div>
-      <div style="overflow-x:auto;">
-        <table class="feed-table">
-          <thead><tr><th>TIME</th><th>IP</th><th>THREAT</th><th>SCORE</th><th>PLATFORM</th><th>BROWSER</th><th>FINGERPRINT</th></tr></thead>
-          <tbody id="ops-feed-body"><tr><td colspan="7" class="loading">LOADING</td></tr></tbody>
-        </table>
-      </div>
-    </div>
+    <!-- Full Tree Detail -->
+    <div id="tree-detail" class="tree-detail"></div>
   </div>
 
   <!-- METRICS VIEW -->
@@ -2211,19 +2249,10 @@ function enterView(view) {
 
 // Render all panels from whatever lastData the pipeline has already cached
 function renderCachedData(view) {
-  const { health, infra, recent } = lastData;
   if (view === 'ops') {
-    if (health) document.getElementById('etl-status').textContent = health.etL_Watermark ? `#${num(health.etL_Watermark)}` : '--';
-    if (health || infra) {
-      renderCriticalZone(buildIssues(health, infra));
-      renderStatusStrip(health, infra);
-      renderPipeline(health, infra);
-      renderOpsETL(health, infra);
-      updateOpsBeacon(health, infra);
-    }
-    if (infra) { renderErrorLog(infra); renderPipelineTables(infra); renderInfraDetail(infra); }
-    if (recent) renderOpsFeed(recent);
+    if (lastData.healthTree) renderHealthTree(lastData.healthTree);
   } else if (view === 'analytics') {
+    const { health } = lastData;
     if (health) updateAnalyticsBeacon(health);
     if (lastData.pipeline) renderAnalyticsPipeline(lastData.pipeline);
     if (lastData.hourly) renderHourlyChart(lastData.hourly);
@@ -2321,1225 +2350,176 @@ function timeAgo(dt) {
 }
 
 // ============================================================================
-// ------  HEALTH RENDERERS & DRILL-DOWNS
+// ------  HEALTH TREE RENDERER
 // ============================================================================
 
-//  Drill-Down: Pipeline Nodes 
-function drillPipeline(stage) {
-  const infra = lastData.infra;
-  const health = lastData.health;
-  if (!infra && !health) { openModal('NO DATA', '<div style="color:var(--text-dim)">Waiting for data...</div>'); return; }
-  const df = infra?.dataFlow;
-  const sql = infra?.sql;
-  let html = '<div class="detail-grid">';
-
-  if (stage === 'ingest') {
-    html += di('Queue Depth', df?.queueDepth ?? '--', df?.queueDepth > 100 ? 'warn' : 'ok');
-    html += di('Hits Last 5m', df?.hitsLast5Min ?? '--', df?.hitsLast5Min === 0 ? 'bad' : 'ok');
-    html += di('Hits Last Hour', df?.hitsLastHour ?? '--', df?.hitsLastHour === 0 ? 'warn' : 'ok');
-    html += di('Is Flowing', df?.isFlowing ? 'YES' : 'NO', df?.isFlowing ? 'ok' : 'bad');
-    html += di('Last Insert', df?.secondsSinceLastInsert != null ? formatDuration(df.secondsSinceLastInsert) + ' ago' : '--');
-    html += di('Write Service', infra?.app ? 'PID ' + infra.app.processId : '--', 'cyan');
-    html += '</div>';
-    html += sug('If the queue is backing up, check SQL Server connectivity and disk I/O. If hits are 0, verify that tracking requests are reaching the server (check IIS logs). The write queue should normally be near 0.');
-    openModal('INGEST STAGE', html);
-  }
-  else if (stage === 'sql') {
-    html += di('Connected', sql?.isConnected ? 'YES' : 'NO', sql?.isConnected ? 'ok' : 'bad');
-    html += di('Response Time', sql?.responseMs != null ? sql.responseMs + 'ms' : '--', sql?.responseMs > 200 ? 'warn' : 'ok');
-    html += di('Data Source', sql?.dataSource || '--');
-    html += di('Database', sql?.database || '--');
-    html += di('PiXL.Test Rows', num(sql?.testRows));
-    html += di('PiXL.Parsed Rows', num(sql?.parsedRows));
-    html += di('Watermark', num(sql?.watermark));
-    html += di('Last ETL Run', sql?.lastEtlRun ? timeAgo(sql.lastEtlRun) : '--');
-    html += '</div>';
-    if (!sql?.isConnected) {
-      html += sug('SQL Server is disconnected. Check that the SQL2025 instance is running:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>Verify the connection string in appsettings.json points to localhost\\SQL2025.');
-    } else {
-      html += sug('SQL connection is healthy. PiXL.Test stores raw ingested hits. PiXL.Parsed contains ETL-processed rows with all 167+ signals materialized.');
-    }
-    openModal('SQL WRITE STAGE', html);
-  }
-  else if (stage === 'etl') {
-    html += di('Watermark', num(sql?.watermark ?? health?.etL_Watermark));
-    html += di('Total Processed', num(health?.etL_TotalProcessed));
-    html += di('Parsed Rows', num(sql?.parsedRows ?? health?.totalHits));
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
-    html += di('Last ETL Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
-    html += di('Synthetic Hits', num(health?.syntheticHits));
-    html += '</div>';
-    html += sug('ETL runs every 60 seconds via EtlBackgroundService calling ETL.usp_ProcessDimensions. Normal lag is 0-5000 rows (one cycle). If lag exceeds 50K, ETL may be stuck.');
-    openModal('ETL PARSE STAGE', html);
-  }
-  else if (stage === 'dash') {
-    html += di('Status', df?.isFlowing ? 'LIVE' : 'STALE', df?.isFlowing ? 'ok' : 'bad');
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--', df?.etlLag > 10000 ? 'warn' : 'ok');
-    html += di('Data Freshness', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) + ' ago' : '--');
-    html += di('24h Hits', num(health?.hits_24h));
-    html += di('Total Hits', num(health?.totalHits));
-    html += di('Unique Fingerprints', num(health?.uniqueFP_24h));
-    html += '</div>';
-    html += sug('Dashboard reads from materialized views on PiXL.Parsed. If showing stale, ensure ETL is processing and that the views are querying PiXL.Parsed (not the old dbo schema).');
-    openModal('DASHBOARD STAGE', html);
-  }
-  else if (stage === 'dim') {
-    const pipe = infra?.pipeline;
-    html += di('Devices', num(pipe?.deviceRows), 'cyan');
-    html += di('IPs', num(pipe?.ipRows), 'cyan');
-    html += di('Unique Devices in Visits', num(pipe?.uniqueDevicesInVisits));
-    html += di('Unique IPs in Visits', num(pipe?.uniqueIpsInVisits));
-    html += di('Last Device Activity', pipe?.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
-    html += di('Last IP Activity', pipe?.ipLatest ? timeAgo(pipe.ipLatest) : '--');
-    html += '</div>';
-    html += sug('PiXL.Device and PiXL.IP are dimension tables populated by ProcessDimensions. Each stores a unique hash with first/last seen timestamps. They are keyed to Visit rows via DeviceId and IpId foreign keys.');
-    openModal('DIMENSION TABLES', html);
-  }
-  else if (stage === 'visit') {
-    const pipe = infra?.pipeline;
-    html += di('Total Visits', num(pipe?.visitRows), 'cyan');
-    html += di('With Email', num(pipe?.visitsWithEmail), pipe?.visitsWithEmail > 0 ? 'ok' : '');
-    html += di('Max Visit ID', num(pipe?.maxVisitId));
-    html += di('Last Visit', pipe?.visitLatest ? timeAgo(pipe.visitLatest) : '--');
-    html += di('Parse Lag', pipe?.parseLag != null ? pipe.parseLag + ' rows' : '--', pipe?.parseLag > 10000 ? 'warn' : 'ok');
-    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
-    html += '</div>';
-    html += sug('PiXL.Visit is the fact table linking Device + IP per parsed hit. Visits with a MatchEmail are eligible for identity resolution via usp_MatchVisits. Match lag shows how many visits haven\'t been checked yet.');
-    openModal('VISIT TABLE', html);
-  }
-  else if (stage === 'match') {
-    const pipe = infra?.pipeline;
-    html += di('Total Matches', num(pipe?.matchRows));
-    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
-    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
-    html += di('Match Watermark', num(pipe?.matchWatermark));
-    html += di('Processed by Match', num(pipe?.matchTotalProcessed));
-    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
-    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
-    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
-    html += '</div>';
-    html += sug('PiXL.Match stores identity resolution results from usp_MatchVisits. Resolved matches have an IndividualKey + AddressKey from the AutoConsumer lookup. Pending matches had email but no AutoConsumer hit. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
-    openModal('MATCH / IDENTITY', html);
-  }
+function ratioColor(r) {
+  if (r >= 1) return 'var(--green)';
+  if (r >= 0.75) return 'var(--yellow)';
+  return 'var(--red)';
 }
 
-//  Drill-Down: Pipeline Table cell 
-function drillPipelineTable(table) {
-  const pipe = lastData.infra?.pipeline;
-  if (!pipe) return;
-  let html = '<div class="detail-grid">';
-  if (table === 'test') {
-    html += di('Rows', num(pipe.testRows));
-    html += di('Max ID', num(pipe.maxTestId));
-    html += di('Latest', pipe.testLatest ? timeAgo(pipe.testLatest) : '--');
-    html += di('Parse Watermark', num(pipe.parseWatermark));
-    html += '</div>';
-    openModal('PiXL.Test', html);
-  } else if (table === 'parsed') {
-    html += di('Rows', num(pipe.parsedRows));
-    html += di('Parse Lag', pipe.parseLag + ' rows', pipe.parseLag > 10000 ? 'warn' : 'ok');
-    html += di('Latest', pipe.parsedLatest ? timeAgo(pipe.parsedLatest) : '--');
-    html += di('Total Processed', num(pipe.parseTotalProcessed));
-    html += '</div>';
-    openModal('PiXL.Parsed', html);
-  } else if (table === 'device') {
-    html += di('Rows', num(pipe.deviceRows), 'cyan');
-    html += di('In Visits', num(pipe.uniqueDevicesInVisits));
-    html += di('Latest', pipe.deviceLatest ? timeAgo(pipe.deviceLatest) : '--');
-    html += '</div>';
-    openModal('PiXL.Device', html);
-  } else if (table === 'ip') {
-    html += di('Rows', num(pipe.ipRows), 'cyan');
-    html += di('In Visits', num(pipe.uniqueIpsInVisits));
-    html += di('Latest', pipe.ipLatest ? timeAgo(pipe.ipLatest) : '--');
-    html += '</div>';
-    openModal('PiXL.IP', html);
-  } else if (table === 'visit') {
-    html += di('Rows', num(pipe.visitRows));
-    html += di('Max Visit ID', num(pipe.maxVisitId));
-    html += di('With Email', num(pipe.visitsWithEmail));
-    html += di('Latest', pipe.visitLatest ? timeAgo(pipe.visitLatest) : '--');
-    html += '</div>';
-    openModal('PiXL.Visit', html);
-  } else if (table === 'match') {
-    html += di('Rows', num(pipe.matchRows));
-    html += di('Resolved', num(pipe.matchesResolved), 'ok');
-    html += di('Pending', num(pipe.matchesPending), pipe.matchesPending > 0 ? 'warn' : 'ok');
-    html += di('Latest', pipe.matchLatest ? timeAgo(pipe.matchLatest) : '--');
-    html += '</div>';
-    openModal('PiXL.Match', html);
-  }
-}
-
-//  Drill-Down: Status Chips 
-function drillStatus(type) {
-  const infra = lastData.infra;
-  const health = lastData.health;
-  if (!infra && !health) return;
-  let html = '<div class="detail-grid">';
-
-  if (type === 'overall') {
-    html += di('Status', infra?.overallStatus?.toUpperCase() || '--', infra?.overallStatus === 'healthy' ? 'ok' : infra?.overallStatus === 'critical' ? 'bad' : 'warn');
-    html += di('Probe Time', (infra?.probeTimeMs || 0) + 'ms');
-    const svcUp = (infra?.services || []).filter(s => s.isRunning).length;
-    const svcTotal = (infra?.services || []).length;
-    html += di('Services', `${svcUp}/${svcTotal} running`, svcUp === svcTotal ? 'ok' : 'bad');
-    const webUp = (infra?.websites || []).filter(w => w.isHealthy).length;
-    const webTotal = (infra?.websites || []).length;
-    html += di('Endpoints', `${webUp}/${webTotal} healthy`, webUp === webTotal ? 'ok' : 'bad');
-    html += di('SQL', infra?.sql?.isConnected ? 'Connected' : 'Disconnected', infra?.sql?.isConnected ? 'ok' : 'bad');
-    html += di('Data Flow', infra?.dataFlow?.isFlowing ? 'Active' : 'Stopped', infra?.dataFlow?.isFlowing ? 'ok' : 'bad');
-    html += '</div>';
-    openModal('SYSTEM OVERVIEW', html);
-  }
-  else if (type === 'dataflow') {
-    const df = infra?.dataFlow;
-    html += di('Is Flowing', df?.isFlowing ? 'YES' : 'NO', df?.isFlowing ? 'ok' : 'bad');
-    html += di('Hits Last 5m', df?.hitsLast5Min ?? '--');
-    html += di('Hits Last Hour', df?.hitsLastHour ?? '--');
-    html += di('Queue Depth', df?.queueDepth ?? '--');
-    html += di('Max Test ID', num(df?.maxTestId));
-    html += di('Since Last Insert', df?.secondsSinceLastInsert != null ? formatDuration(df.secondsSinceLastInsert) : '--');
-    html += di('ETL Lag', df?.etlLag != null ? df.etlLag + ' rows' : '--');
-    html += di('Last Insert UTC', df?.lastInsertUtc || '--');
-    html += '</div>';
-    openModal('DATA FLOW DETAIL', html);
-  }
-  else if (type === 'sql') {
-    const s = infra?.sql;
-    html += di('Connected', s?.isConnected ? 'YES' : 'NO', s?.isConnected ? 'ok' : 'bad');
-    html += di('Instance', s?.dataSource || '--');
-    html += di('Database', s?.database || '--');
-    html += di('Response', s?.responseMs != null ? s.responseMs + 'ms' : '--');
-    html += di('PiXL.Test', num(s?.testRows) + ' rows');
-    html += di('PiXL.Parsed', num(s?.parsedRows) + ' rows');
-    html += di('Watermark', num(s?.watermark));
-    html += di('Last ETL', s?.lastEtlRun ? timeAgo(s.lastEtlRun) : '--');
-    html += '</div>';
-    if (s?.error) html += `<div class="full-text" style="color:var(--red)">${s.error}</div>`;
-    openModal('SQL SERVER DETAIL', html);
-  }
-  else if (type === 'iis') {
-    const sites = infra?.websites || [];
-    html = '<div style="display:flex;flex-direction:column;gap:8px;">';
-    sites.forEach(w => {
-      const ok = w.isHealthy;
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(0,243,255,0.03);border:1px solid ${ok ? 'rgba(0,255,136,0.15)' : 'rgba(255,45,85,0.2)'};border-radius:4px;">
-        <div class="infra-dot ${ok ? 'up' : 'down'}"></div>
-        <div style="flex:1;"><div style="font-weight:bold;">${w.name}</div><div style="font-size:0.75rem;color:var(--text-dim)">${w.url || ''}</div></div>
-        <div style="color:${ok ? 'var(--green)' : 'var(--red)'}">${ok ? 'HTTP ' + w.statusCode : (w.error || 'HTTP ' + w.statusCode)}</div>
-        <div style="color:var(--cyan-dim)">${w.responseMs}ms</div>
-      </div>`;
-    });
-    html += '</div>';
-    openModal('IIS ENDPOINTS', html);
-  }
-  else if (type === 'etl') {
-    html += di('Watermark', num(health?.etL_Watermark));
-    html += di('Total Processed', num(health?.etL_TotalProcessed));
-    html += di('Parsed Rows', num(health?.totalHits));
-    html += di('Last Run', health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--');
-    html += di('Lag', infra?.dataFlow?.etlLag != null ? infra.dataFlow.etlLag + ' rows' : '--');
-    html += di('Synthetic Hits', num(health?.syntheticHits));
-    html += '</div>';
-    openModal('ETL DETAIL', html);
-  }
-  else if (type === 'match') {
-    const pipe = infra?.pipeline;
-    html += di('Total Matches', num(pipe?.matchRows), 'cyan');
-    html += di('Resolved', num(pipe?.matchesResolved), pipe?.matchesResolved > 0 ? 'ok' : '');
-    html += di('Pending', num(pipe?.matchesPending), pipe?.matchesPending > 0 ? 'warn' : 'ok');
-    html += di('Match Watermark', num(pipe?.matchWatermark));
-    html += di('Total Matched', num(pipe?.matchTotalMatched), 'ok');
-    html += di('Match Lag', pipe?.matchLag != null ? pipe.matchLag + ' rows' : '--', pipe?.matchLag > 50 ? 'warn' : 'ok');
-    html += di('Visits With Email', num(pipe?.visitsWithEmail));
-    html += di('Last Match Run', pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--');
-    html += '</div>';
-    html += sug('Identity resolution matches Visit emails against the AutoConsumer database (421M rows). Resolved = IndividualKey found. Pending = email present but no AutoConsumer match. Run manually:<br><code style="color:var(--cyan)">EXEC ETL.usp_MatchVisits @BatchSize=1000</code>');
-    openModal('MATCH / IDENTITY', html);
-  }
-  else if (type === 'lasthit') {
-    html += di('Time Since Last', health?.secondsSinceLastHit != null ? formatDuration(health.secondsSinceLastHit) : '--');
-    html += di('24h Hits', num(health?.hits_24h));
-    html += di('1h Hits', num(health?.hits_1h));
-    html += di('7d Hits', num(health?.hits_7d));
-    html += di('Bots 24h', num(health?.bots_24h));
-    html += di('Bot Rate', health?.botPct_24h != null ? health.botPct_24h.toFixed(1) + '%' : '--');
-    html += '</div>';
-    openModal('TRAFFIC DETAIL', html);
-  }
-}
-
-//  Drill-Down: Error Entry 
-function drillError(idx) {
-  const errors = lastData.infra?.recentErrors?.errors;
-  if (!errors || !errors[idx]) return;
-  const e = errors[idx];
-  let html = '<div class="detail-grid">';
-  html += di('Source', e.source || 'Unknown');
-  html += di('Count', e.count || 1);
-  html += di('Last Seen', e.lastSeenUtc ? timeAgo(e.lastSeenUtc) : '--');
-  html += di('Status', e.isStale ? 'Stale' : 'Active', e.isStale ? 'warn' : 'bad');
-  html += '</div>';
-  html += '<div class="full-text">' + (e.message || 'No message') + '</div>';
-  openModal('ERROR DETAIL', html);
-}
-
-//  Drill-Down: Critical Issue 
-function drillIssue(idx) {
-  const issues = lastData._issues;
-  if (!issues || !issues[idx]) return;
-  const issue = issues[idx];
-  let html = '<div class="detail-grid">';
-  html += di('Severity', esc((issue.severity || 'unknown').toUpperCase()), issue.severity === 'critical' ? 'bad' : 'warn');
-  html += di('Detected', issue.time ? timeAgo(issue.time) : 'Current');
-  html += '</div>';
-  html += '<div style="margin-top:16px;font-size:0.85rem;line-height:1.6;color:var(--text);">' + esc(issue.detail) + '</div>';
-  const fixes = getFixSuggestion(issue);
-  if (fixes) html += sug(fixes);
-  openModal(issue.title, html);
-}
-
-function getFixSuggestion(issue) {
-  const t = issue.title.toLowerCase();
-  if (t.includes('sql') && t.includes('disconnect')) return 'Check SQL Server service:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>If stopped, start it:<br><code style="color:var(--cyan)">Start-Service MSSQL$SQL2025</code>';
-  if (t.includes('data not flowing')) return 'Check that the TrackingPixel process is running and that the IIS app pool identity has SQL permissions.<br><code style="color:var(--cyan)">Get-Process TrackingPixel</code>';
-  if (t.includes('service down')) return 'Restart the service from PowerShell:<br><code style="color:var(--cyan)">Start-Service "ServiceName"</code>';
-  if (t.includes('endpoint down') || t.includes('endpoint unhealthy')) return 'Check IIS application pool status:<br><code style="color:var(--cyan)">Get-WebAppPoolState "Smartpixl.info"</code><br>If stopped:<br><code style="color:var(--cyan)">Start-WebAppPool "Smartpixl.info"</code>';
-  if (t.includes('error')) return 'Check the application log for details:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50</code>';
-  if (t.includes('etl lag')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
-  if (t.includes('match lag')) return 'Run the match proc manually:<br><code style="color:var(--cyan)">sqlcmd -S "localhost\\SQL2025" -d SmartPiXL -Q "EXEC ETL.usp_MatchVisits @BatchSize=1000"</code>';
-  if (t.includes('parse lag') && t.includes('pipeline')) return 'Check the Forge service is running and ProcessDimensions watermark is advancing:<br><code style="color:var(--cyan)">SELECT * FROM ETL.Watermark WHERE ProcessName = \'ProcessDimensions\'</code>';
-  if (t.includes('no recent hit')) return 'Verify traffic is reaching the server. Send a test hit:<br><code style="color:var(--cyan)">Invoke-WebRequest "http://192.168.88.176/TEST/verify_SMART.GIF" -UseBasicParsing</code>';
-  if (t.includes('xavier') && t.includes('failed')) return 'Check Xavier connectivity and Windows Auth trust:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL login on Xavier.';
-  if (t.includes('xavier') && t.includes('never')) return 'The sync service may not have run yet. Restart the app to trigger it:<br><code style="color:var(--cyan)">Stop-WebAppPool "Smartpixl.info"; Start-WebAppPool "Smartpixl.info"</code>';
-  if (t.includes('xavier') && t.includes('stale')) return 'The sync is overdue. Check if the background service is running:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50 | Select-String "Sync"</code>';
-  return null;
-}
-
-//  Critical Issues Engine 
-function buildIssues(health, infra) {
-  const issues = [];
-  if (infra) {
-    if (infra.overallStatus === 'critical')
-      issues.push({ severity: 'critical', title: 'Infrastructure Critical', detail: 'One or more core services are down. See infrastructure panel below.', time: infra.checkedAt });
-    if (infra.dataFlow && !infra.dataFlow.isFlowing)
-      issues.push({ severity: 'critical', title: 'Data Not Flowing', detail: `No data ingested in ${formatDuration(infra.dataFlow.secondsSinceLastInsert || 0)}. Queue: ${infra.dataFlow.queueDepth}. Check SQL connection and write service.`, time: infra.checkedAt });
-    if (infra.sql && !infra.sql.isConnected)
-      issues.push({ severity: 'critical', title: 'SQL Server Disconnected', detail: infra.sql.error || 'Cannot connect to SQL Server.', time: infra.checkedAt });
-    if (infra.services) {
-      infra.services.filter(s => !s.isRunning && s.critical).forEach(s => issues.push({ severity: 'critical', title: `Service Down: ${s.name}`, detail: s.error || 'Critical service not running.', time: infra.checkedAt }));
-      infra.services.filter(s => !s.isRunning && !s.critical).forEach(s => issues.push({ severity: 'warning', title: `Service Stopped: ${s.name}`, detail: s.error || s.status, time: infra.checkedAt }));
-    }
-    if (infra.websites) {
-      infra.websites.filter(w => !w.isHealthy && w.critical).forEach(w => issues.push({ severity: 'critical', title: `Endpoint Down: ${w.name}`, detail: w.error || `HTTP ${w.statusCode}`, time: infra.checkedAt }));
-      infra.websites.filter(w => !w.isHealthy && !w.critical).forEach(w => issues.push({ severity: 'warning', title: `Endpoint Unhealthy: ${w.name}`, detail: w.error || `HTTP ${w.statusCode}`, time: infra.checkedAt }));
-    }
-    if (infra.recentErrors && infra.recentErrors.hasRecentErrors) {
-      const re = infra.recentErrors;
-      issues.push({ severity: 'warning', title: `${re.recentErrorCount} Active Error${re.recentErrorCount > 1 ? 's' : ''} in Log`, detail: `Most recent: ${re.errors[0]?.message?.substring(0,100) || 'Unknown'}`, time: re.lastErrorUtc });
-    }
-    if (infra.dataFlow && infra.dataFlow.etlLag > 50000)
-      issues.push({ severity: 'warning', title: 'ETL Lag High', detail: `Watermark is ${infra.dataFlow.etlLag} rows behind. Parsed data may be stale.`, time: infra.checkedAt });
-    if (infra.dataFlow && infra.dataFlow.queueDepth > 100)
-      issues.push({ severity: 'warning', title: 'Write Queue Backing Up', detail: `Queue depth: ${infra.dataFlow.queueDepth}. Writes may be slow.`, time: infra.checkedAt });
-    if (infra.pipeline && infra.pipeline.isAvailable) {
-      if (infra.pipeline.matchLag > 100)
-        issues.push({ severity: 'warning', title: 'Match Lag High', detail: `Match watermark is ${infra.pipeline.matchLag} visits behind. Identity resolution may be delayed.`, time: infra.checkedAt });
-      if (infra.pipeline.parseLag > 50000)
-        issues.push({ severity: 'warning', title: 'Parse Lag High (Pipeline)', detail: `Parse watermark is ${infra.pipeline.parseLag} rows behind. Device/IP/Visit tables may be stale.`, time: infra.checkedAt });
-    }
-  }
-  if (health) {
-    const secSince = health.secondsSinceLastHit ?? 9999;
-    if (secSince > 3600)
-      issues.push({ severity: 'warning', title: 'No Recent Hits', detail: `Last hit ${formatDuration(secSince)} ago. Traffic may have stopped or ingestion is broken.`, time: null });
-  }
-  // Xavier sync issues
-  const xSync = lastData.xavierSync;
-  if (xSync && Array.isArray(xSync)) {
-    xSync.forEach(s => {
-      const friendlyNames = { IpGeo: 'IP Geolocation', Company: 'Company', Pixel: 'PiXL Config' };
-      const name = friendlyNames[s.syncType] || s.syncType;
-      if (s.lastStatus === 'Error') {
-        issues.push({ severity: 'critical', title: `Xavier ${name} Sync Failed`, detail: s.lastError ? s.lastError.substring(0, 120) : 'Sync ended with error.', time: s.lastSyncStarted });
-      } else if (!s.lastSyncStarted) {
-        issues.push({ severity: 'warning', title: `Xavier ${name} Never Synced`, detail: `${s.targetTable} has ${typeof s.localRows === 'number' ? num(s.localRows) : '?'} local rows but no sync history.`, time: null });
-      } else if (s.secondsSinceLastRun > 90000) {
-        issues.push({ severity: 'warning', title: `Xavier ${name} Sync Stale`, detail: `Last sync ${formatDuration(s.secondsSinceLastRun)} ago. Data may be outdated.`, time: s.lastSyncStarted });
-      }
-    });
-  }
-  issues.sort((a, b) => {
-    const sevOrder = { critical: 0, warning: 1 };
-    return (sevOrder[a.severity] || 2) - (sevOrder[b.severity] || 2);
-  });
-  return issues;
-}
-
-let previousIssueCount = -1;
-
-function renderCriticalZone(issues) {
-  const zone = document.getElementById('critical-zone');
-  lastData._issues = issues;
-
-  if (!issues || issues.length === 0) {
-    zone.innerHTML = `<div class="all-clear"><div class="all-clear-dot"></div><div class="all-clear-text">ALL SYSTEMS OPERATIONAL</div><div class="all-clear-sub">No issues detected</div></div>`;
-    previousIssueCount = 0;
-    return;
-  }
-
-  const critCount = issues.filter(i => i.severity === 'critical').length;
-  const warnCount = issues.filter(i => i.severity === 'warning').length;
-  const hasCritical = critCount > 0;
-  const panelStyle = hasCritical ? '' : 'style="border-color:rgba(255,225,77,0.3);background:rgba(255,225,77,0.03);"';
-  const iconClass = hasCritical ? '' : 'warning';
-  const titleClass = hasCritical ? '' : 'warning';
-  const titleText = hasCritical ? 'CRITICAL ISSUES DETECTED' : 'WARNINGS';
-  const countText = `${critCount ? critCount + ' CRITICAL' : ''}${critCount && warnCount ? ' · ' : ''}${warnCount ? warnCount + ' WARNING' : ''}`;
-  const shouldAnimate = previousIssueCount !== issues.length;
-  zone.className = shouldAnimate ? 'slide-in' : '';
-
-  zone.innerHTML = `
-    <div class="critical-panel" ${panelStyle}>
-      <div class="critical-header">
-        <div class="critical-icon ${iconClass}"></div>
-        <div class="critical-title ${titleClass}">${titleText}</div>
-        <div class="critical-count">${countText}</div>
-      </div>
-      ${issues.map((issue, i) => `
-        <div class="critical-issue ${issue.severity === 'warning' ? 'warning' : ''}" onclick="drillIssue(${i})">
-          <div class="issue-severity ${issue.severity}">${esc(issue.severity.toUpperCase())}</div>
-          <div class="issue-body">
-            <div class="issue-title">${esc(issue.title)}</div>
-            <div class="issue-detail">${esc(issue.detail)}</div>
-          </div>
-          <div class="issue-time">${issue.time ? timeAgo(issue.time) : ''}</div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-  previousIssueCount = issues.length;
-}
-
-//  System Health Boxes 
-function renderSystemBoxes(health, infra) {
-  // Prefer health tree when available; fall back to legacy infra-driven boxes
-  const tree = lastData.healthTree;
-  if (tree?.root?.children) {
-    renderTreeSystemBoxes(tree);
-    return;
-  }
-  renderSystemBox('sysbox-edge', computeEdgeSubsystems(health, infra));
-  renderSystemBox('sysbox-forge', computeForgeSubsystems(health, infra));
-  renderSystemBox('sysbox-sql', computeSqlSubsystems(infra));
-  renderSystemBox('sysbox-sentinel', computeSentinelSubsystems(health, infra));
-}
-
-function renderTreeSystemBoxes(tree) {
-  const root = tree.root;
-  const systems = root.children || [];
-  const grid = document.getElementById('system-boxes');
-
-  // Rebuild box elements to match tree systems
-  grid.innerHTML = systems.map((sys, i) => {
-    const id = `sysbox-tree-${i}`;
-    return `<div class="system-box" id="${id}">`
-      + `<div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">${esc(sys.name)}</div><div class="system-box-badge">--</div></div>`
-      + `<div class="subsystem-list"></div></div>`;
-  }).join('');
-
-  systems.forEach((sys, i) => {
-    const kids = sys.children || [];
-    const items = kids.map(child => {
-      const isProbe = child.nodeType === 'probe';
-      const dot = treeNodeDot(child);
-      let value, cls;
-      if (isProbe) {
-        const st = child.status;
-        value = st === 'healthy' ? 'Healthy' : st === 'unhealthy' ? 'Unhealthy' : st === 'unreachable' ? 'Unreachable' : 'Pending';
-        cls = child.health === 1 ? 'ok' : child.health === 0 ? 'bad' : '';
-      } else {
-        value = `${child.healthy}/${child.total}`;
-        cls = child.ratio >= 1 ? 'ok' : child.ratio >= 0.5 ? 'warn' : child.total > 0 ? 'bad' : '';
-      }
-      return { name: child.name, status: dot, value, valueCls: cls };
-    });
-    renderSystemBox(`sysbox-tree-${i}`, { name: sys.name, items });
-  });
-
-  // Platform summary line
-  const pctText = root.total > 0 ? `${root.healthy}/${root.total} (${Math.round((root.ratio ?? 0) * 100)}%)` : '--';
-  const existing = document.getElementById('tree-platform-summary');
-  if (existing) {
-    existing.querySelector('.sub-value').textContent = pctText;
-  } else {
-    const summary = document.createElement('div');
-    summary.id = 'tree-platform-summary';
-    summary.className = 'subsystem-item';
-    summary.style.cssText = 'justify-content:flex-end;gap:8px;padding:4px 12px 0;opacity:0.6;font-size:0.72rem;';
-    summary.innerHTML = `<span style="color:var(--text-dim);font-family:var(--display);letter-spacing:2px;text-transform:uppercase">PLATFORM</span>`
-      + `<span class="sub-value ${root.ratio >= 1 ? 'ok' : root.ratio >= 0.8 ? 'warn' : 'bad'}">${pctText}</span>`;
-    grid.parentNode.insertBefore(summary, grid.nextSibling);
-  }
-}
-
-function treeNodeDot(node) {
-  if (node.nodeType === 'probe') return node.health === 1 ? 'up' : node.health === 0 ? 'down' : 'idle';
-  if (node.total === 0) return 'idle';
-  if (node.ratio >= 1) return 'up';
-  if (node.ratio >= 0.5) return 'warn';
-  return 'down';
-}
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-function renderSystemBox(boxId, data) {
-  const box = document.getElementById(boxId);
-  if (!box) return;
-
-  const statuses = data.items.map(i => i.status);
-  const hasCritical = statuses.includes('down');
-  const hasWarn = statuses.includes('warn');
-  const overall = hasCritical ? 'critical' : hasWarn ? 'degraded' : 'healthy';
-
-  box.className = `system-box sys-${overall}`;
-
-  const iconCls = overall === 'healthy' ? 'up' : overall === 'degraded' ? 'warn' : 'down';
-  const badgeCls = overall === 'healthy' ? 'ok' : overall === 'degraded' ? 'warn' : 'bad';
-  const badgeText = overall === 'healthy' ? 'NOMINAL' : overall === 'degraded' ? 'DEGRADED' : 'CRITICAL';
-
-  const header = box.querySelector('.system-box-header');
-  header.innerHTML = `
-    <div class="system-box-icon ${iconCls}"></div>
-    <div class="system-box-name">${esc(data.name)}</div>
-    <div class="system-box-badge ${badgeCls}">${badgeText}</div>
-  `;
-
-  const list = box.querySelector('.subsystem-list');
-  list.innerHTML = data.items.map(item => `
-    <div class="subsystem-item">
-      <div class="sub-dot ${item.status}"></div>
-      <div class="sub-name">${esc(item.name)}</div>
-      <div class="sub-value ${item.valueCls || ''}">${esc(item.value)}</div>
-    </div>
-  `).join('');
-}
-
-function computeEdgeSubsystems(health, infra) {
-  const items = [];
-
-  const iisSvc = infra?.services?.find(s => s.serviceName === 'W3SVC');
-  items.push({
-    name: 'IIS App Pool',
-    status: iisSvc?.isRunning ? 'up' : iisSvc ? 'down' : 'idle',
-    value: iisSvc?.isRunning ? 'Running' : iisSvc?.status || '--',
-    valueCls: iisSvc?.isRunning ? 'ok' : iisSvc ? 'bad' : ''
-  });
-
-  const httpSite = infra?.websites?.find(w => w.name?.includes('HTTP'));
-  items.push({
-    name: 'HTTP Health',
-    status: httpSite?.isHealthy ? 'up' : httpSite ? 'down' : 'idle',
-    value: httpSite?.isHealthy ? `${httpSite.statusCode} \u00b7 ${httpSite.responseMs}ms` : httpSite?.error || '--',
-    valueCls: httpSite?.isHealthy ? 'ok' : httpSite ? 'bad' : ''
-  });
-
-  const pixelSite = infra?.websites?.find(w => w.name?.includes('Pixel'));
-  items.push({
-    name: 'Pixel Endpoint',
-    status: pixelSite?.isHealthy ? 'up' : pixelSite ? 'down' : 'idle',
-    value: pixelSite?.isHealthy ? `${pixelSite.statusCode} \u00b7 ${pixelSite.responseMs}ms` : pixelSite?.error || '--',
-    valueCls: pixelSite?.isHealthy ? 'ok' : pixelSite ? 'bad' : ''
-  });
-
-  const qd = infra?.dataFlow?.queueDepth ?? infra?.app?.queueDepth ?? null;
-  const qdWarn = qd !== null && qd > 100;
-  const qdCrit = qd !== null && qd > 5000;
-  items.push({
-    name: 'Write Queue',
-    status: qd === null ? 'idle' : qdCrit ? 'down' : qdWarn ? 'warn' : 'up',
-    value: qd !== null ? num(qd) + ' queued' : '--',
-    valueCls: qdCrit ? 'bad' : qdWarn ? 'warn' : qd !== null ? 'ok' : ''
-  });
-
-  const pipeOk = infra?.dataFlow?.isFlowing;
-  items.push({
-    name: 'Named Pipe',
-    status: pipeOk === true ? 'up' : pipeOk === false ? 'down' : 'idle',
-    value: pipeOk === true ? 'Connected' : pipeOk === false ? 'Disconnected' : '--',
-    valueCls: pipeOk === true ? 'ok' : pipeOk === false ? 'bad' : ''
-  });
-
-  const df = infra?.dataFlow;
-  const h5m = df?.hitsLast5Min ?? null;
-  items.push({
-    name: 'Data Ingest',
-    status: h5m === null ? 'idle' : h5m > 0 ? 'up' : 'warn',
-    value: h5m !== null ? `${h5m}/5m \u00b7 ${df.hitsLastHour ?? 0}/hr` : '--',
-    valueCls: h5m === null ? '' : h5m > 0 ? 'ok' : 'warn'
-  });
-
-  return { name: 'PiXL Edge', items };
-}
-
-function computeForgeSubsystems(health, infra) {
-  const items = [];
-
-  const forgeSvc = infra?.services?.find(s => s.serviceName === 'SmartPiXL-Forge');
-  items.push({
-    name: 'Windows Service',
-    status: forgeSvc?.isRunning ? 'up' : forgeSvc ? 'down' : 'idle',
-    value: forgeSvc?.isRunning ? 'Running' : forgeSvc?.status || '--',
-    valueCls: forgeSvc?.isRunning ? 'ok' : forgeSvc ? 'bad' : ''
-  });
-
-  const pipe = infra?.pipeline;
-  const parseLag = pipe?.parseLag ?? null;
-  items.push({
-    name: 'ETL Parse',
-    status: parseLag === null ? 'idle' : parseLag > 50000 ? 'down' : parseLag > 10000 ? 'warn' : 'up',
-    value: parseLag !== null ? `lag ${parseLag}` + (pipe?.parseLastRunAt ? ' \u00b7 ' + timeAgo(pipe.parseLastRunAt) : '') : '--',
-    valueCls: parseLag === null ? '' : parseLag > 50000 ? 'bad' : parseLag > 10000 ? 'warn' : 'ok'
-  });
-
-  const matchLag = pipe?.matchLag ?? null;
-  items.push({
-    name: 'ETL Match',
-    status: matchLag === null ? 'idle' : matchLag > 100 ? 'down' : matchLag > 50 ? 'warn' : 'up',
-    value: matchLag !== null ? `lag ${matchLag}` + (pipe?.matchLastRunAt ? ' \u00b7 ' + timeAgo(pipe.matchLastRunAt) : '') : '--',
-    valueCls: matchLag === null ? '' : matchLag > 100 ? 'bad' : matchLag > 50 ? 'warn' : 'ok'
-  });
-
-  const df = infra?.dataFlow;
-  const secSince = df?.secondsSinceLastInsert ?? null;
-  items.push({
-    name: 'SQL Writer',
-    status: secSince === null ? 'idle' : secSince > 1800 ? 'down' : secSince > 300 ? 'warn' : 'up',
-    value: secSince !== null ? (secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago') : '--',
-    valueCls: secSince === null ? '' : secSince > 1800 ? 'bad' : secSince > 300 ? 'warn' : 'ok'
-  });
-
-  const devRows = pipe?.deviceRows ?? null;
-  const ipRows = pipe?.ipRows ?? null;
-  items.push({
-    name: 'Dimensions',
-    status: pipe?.isAvailable ? 'up' : devRows !== null ? 'warn' : 'idle',
-    value: devRows !== null ? `${num(devRows)} dev \u00b7 ${num(ipRows || 0)} ip` : '--',
-    valueCls: pipe?.isAvailable ? 'ok' : ''
-  });
-
-  const resolved = pipe?.matchesResolved ?? 0;
-  const matchRows = pipe?.matchRows ?? 0;
-  items.push({
-    name: 'Match Resolution',
-    status: !pipe?.isAvailable ? 'idle' : resolved > 0 ? 'up' : matchRows > 0 ? 'warn' : 'idle',
-    value: pipe?.isAvailable ? `${num(resolved)}/${num(matchRows)} resolved` : '--',
-    valueCls: resolved > 0 ? 'ok' : matchRows > 0 ? 'warn' : ''
-  });
-
-  return { name: 'Forge', items };
-}
-
-function computeSqlSubsystems(infra) {
-  const items = [];
-
-  const sqlSvc = infra?.services?.find(s => s.serviceName === 'MSSQL$SQL2025');
-  items.push({
-    name: 'SQL Server Service',
-    status: sqlSvc?.isRunning ? 'up' : sqlSvc ? 'down' : 'idle',
-    value: sqlSvc?.isRunning ? 'Running' : sqlSvc?.status || '--',
-    valueCls: sqlSvc?.isRunning ? 'ok' : sqlSvc ? 'bad' : ''
-  });
-
-  const agentSvc = infra?.services?.find(s => s.serviceName === 'SQLAgent$SQL2025');
-  items.push({
-    name: 'SQL Agent',
-    status: agentSvc?.isRunning ? 'up' : agentSvc ? 'warn' : 'idle',
-    value: agentSvc?.isRunning ? 'Running' : agentSvc?.status || '--',
-    valueCls: agentSvc?.isRunning ? 'ok' : agentSvc ? 'warn' : ''
-  });
-
-  const sql = infra?.sql;
-  const ms = sql?.responseMs;
-  items.push({
-    name: 'Connectivity',
-    status: sql?.isConnected ? 'up' : sql ? 'down' : 'idle',
-    value: sql?.isConnected ? `${ms}ms \u00b7 ${sql.dataSource}` : sql?.error?.substring(0, 60) || '--',
-    valueCls: sql?.isConnected ? (ms > 200 ? 'warn' : 'ok') : sql ? 'bad' : ''
-  });
-
-  items.push({
-    name: 'PiXL.Raw',
-    status: sql?.isConnected ? 'up' : 'idle',
-    value: sql?.testRows != null ? num(sql.testRows) + ' rows' : '--',
-    valueCls: sql?.isConnected ? 'ok' : ''
-  });
-
-  items.push({
-    name: 'PiXL.Parsed',
-    status: sql?.isConnected ? 'up' : 'idle',
-    value: sql?.parsedRows != null ? num(sql.parsedRows) + ' rows' : '--',
-    valueCls: sql?.isConnected ? 'ok' : ''
-  });
-
-  items.push({
-    name: 'ETL Watermark',
-    status: sql?.isConnected ? 'up' : 'idle',
-    value: sql?.watermark != null ? '#' + num(sql.watermark) : '--',
-    valueCls: sql?.isConnected ? 'ok' : ''
-  });
-
-  return { name: 'SQL Server', items };
-}
-
-function computeSentinelSubsystems(health, infra) {
-  const items = [];
-
-  const app = infra?.app;
-  if (app) {
-    const uptimeSec = app.uptime ? (app.uptime.totalSeconds || (app.uptime.hours * 3600 + app.uptime.minutes * 60 + app.uptime.seconds) || 0) : 0;
-    const uptimeStr = uptimeSec > 86400 ? Math.floor(uptimeSec/86400) + 'd ' + Math.floor((uptimeSec%86400)/3600) + 'h' :
-                      uptimeSec > 3600 ? Math.floor(uptimeSec/3600) + 'h ' + Math.floor((uptimeSec%3600)/60) + 'm' :
-                      Math.floor(uptimeSec/60) + 'm';
-    items.push({
-      name: 'App Runtime',
-      status: 'up',
-      value: `PID ${app.processId} \u00b7 ${uptimeStr}`,
-      valueCls: 'ok'
-    });
-
-    items.push({
-      name: 'Memory',
-      status: app.workingSetMB > 1024 ? 'warn' : 'up',
-      value: `${app.workingSetMB} MB \u00b7 GC ${app.gcHeapMB} MB`,
-      valueCls: app.workingSetMB > 1024 ? 'warn' : 'ok'
-    });
-
-    items.push({
-      name: 'Threads',
-      status: app.threadCount > 200 ? 'warn' : 'up',
-      value: `${app.threadCount} threads`,
-      valueCls: app.threadCount > 200 ? 'warn' : 'ok'
-    });
-  } else {
-    items.push({ name: 'App Runtime', status: 'idle', value: '--', valueCls: '' });
-  }
-
-  if (app?.dotNetVersion) {
-    items.push({
-      name: '.NET Runtime',
-      status: 'up',
-      value: `v${app.dotNetVersion}`,
-      valueCls: 'ok'
-    });
-  }
-
-  const xSync = lastData.xavierSync;
-  if (xSync && Array.isArray(xSync)) {
-    const failedCount = xSync.filter(s => s.lastStatus === 'Error').length;
-    const staleCount = xSync.filter(s => !s.lastSyncStarted || s.secondsSinceLastRun > 90000).length;
-    const totalSyncs = xSync.length;
-    items.push({
-      name: 'Xavier Sync',
-      status: failedCount > 0 ? 'down' : staleCount > 0 ? 'warn' : totalSyncs > 0 ? 'up' : 'idle',
-      value: failedCount > 0 ? `${failedCount}/${totalSyncs} failed` : staleCount > 0 ? `${staleCount}/${totalSyncs} stale` : `${totalSyncs}/${totalSyncs} synced`,
-      valueCls: failedCount > 0 ? 'bad' : staleCount > 0 ? 'warn' : totalSyncs > 0 ? 'ok' : ''
-    });
-  } else {
-    items.push({ name: 'Xavier Sync', status: 'idle', value: '--', valueCls: '' });
-  }
-
-  const secSince = health?.secondsSinceLastHit ?? null;
-  items.push({
-    name: 'Last Hit',
-    status: secSince === null ? 'idle' : secSince < 300 ? 'up' : secSince < 3600 ? 'warn' : 'down',
-    value: secSince === null ? '--' : secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago',
-    valueCls: secSince === null ? '' : secSince < 300 ? 'ok' : secSince < 3600 ? 'warn' : 'bad'
-  });
-
-  return { name: 'Sentinel', items };
-}
-
-//  Ops: Status Strip 
-function renderStatusStrip(health, infra) {
-  const strip = document.getElementById('status-strip');
-  const chips = [];
-
-  const os = infra?.overallStatus || 'unknown';
-  const osDot = os === 'healthy' ? 'up' : os === 'degraded' ? 'warn' : os === 'critical' ? 'down' : 'idle';
-  const osVal = os === 'healthy' ? 'ok' : os === 'degraded' ? 'warn' : os === 'critical' ? 'bad' : '';
-  chips.push(`<div class="status-chip ${os}" onclick="drillStatus('overall')"><div class="chip-dot ${osDot}"></div><div class="chip-label">OVERALL</div><div class="chip-value ${osVal}">${os.toUpperCase()}</div></div>`);
-
-  const df = infra?.dataFlow;
-  const flowOk = df?.isFlowing;
-  chips.push(`<div class="status-chip ${flowOk ? 'healthy' : df ? 'critical' : ''}" onclick="drillStatus('dataflow')"><div class="chip-dot ${flowOk ? 'up' : df ? 'down' : 'idle'}"></div><div class="chip-label">DATA FLOW</div><div class="chip-value ${flowOk ? 'ok' : df ? 'bad' : ''}">${flowOk ? `${df.hitsLast5Min}/5m` : df ? 'STOPPED' : '--'}</div></div>`);
-
-  const sqlOk = infra?.sql?.isConnected;
-  const sqlMs = infra?.sql?.responseMs;
-  chips.push(`<div class="status-chip ${sqlOk ? 'healthy' : infra?.sql ? 'critical' : ''}" onclick="drillStatus('sql')"><div class="chip-dot ${sqlOk ? 'up' : infra?.sql ? 'down' : 'idle'}"></div><div class="chip-label">SQL</div><div class="chip-value ${sqlOk ? (sqlMs > 200 ? 'warn' : 'ok') : infra?.sql ? 'bad' : ''}">${sqlOk ? `${sqlMs}ms` : infra?.sql ? 'DOWN' : '--'}</div></div>`);
-
-  const sites = infra?.websites || [];
-  const iisDown = sites.filter(w => !w.isHealthy);
-  chips.push(`<div class="status-chip ${iisDown.length ? 'critical' : sites.length ? 'healthy' : ''}" onclick="drillStatus('iis')"><div class="chip-dot ${sites.length === 0 ? 'idle' : iisDown.length === 0 ? 'up' : 'down'}"></div><div class="chip-label">IIS</div><div class="chip-value ${sites.length === 0 ? '' : iisDown.length === 0 ? 'ok' : 'bad'}">${sites.length === 0 ? '--' : iisDown.length === 0 ? `${sites.length}/${sites.length} UP` : `${iisDown.length} DOWN`}</div></div>`);
-
-  const etlLag = df?.etlLag ?? null;
-  chips.push(`<div class="status-chip ${etlLag > 10000 ? 'degraded' : etlLag !== null ? 'healthy' : ''}" onclick="drillStatus('etl')"><div class="chip-dot ${etlLag === null ? 'idle' : etlLag > 10000 ? 'warn' : 'up'}"></div><div class="chip-label">ETL</div><div class="chip-value ${etlLag === null ? '' : etlLag > 10000 ? 'warn' : 'ok'}">${etlLag === null ? '--' : `LAG ${etlLag}`}</div></div>`);
-
-  // Match chip -- shows resolved/total
-  const pipe = infra?.pipeline;
-  const matchOk = pipe?.isAvailable && pipe?.matchRows > 0;
-  const matchResolved = pipe?.matchesResolved ?? 0;
-  const matchTotal = pipe?.matchRows ?? 0;
-  const matchLag = pipe?.matchLag ?? null;
-  const matchDot = !pipe?.isAvailable ? 'idle' : matchLag > 50 ? 'warn' : matchResolved > 0 ? 'up' : 'idle';
-  const matchChipCls = !pipe?.isAvailable ? '' : matchLag > 50 ? 'degraded' : 'healthy';
-  const matchValCls = !pipe?.isAvailable ? '' : matchResolved > 0 ? 'ok' : matchTotal > 0 ? 'warn' : '';
-  const matchText = !pipe?.isAvailable ? '--' : `${matchResolved}/${matchTotal}`;
-  chips.push(`<div class="status-chip ${matchChipCls}" onclick="drillStatus('match')"><div class="chip-dot ${matchDot}"></div><div class="chip-label">MATCH</div><div class="chip-value ${matchValCls}">${matchText}</div></div>`);
-
-  const secSince = health?.secondsSinceLastHit ?? null;
-  const hitDot = secSince === null ? 'idle' : secSince < 300 ? 'up' : secSince < 3600 ? 'warn' : 'down';
-  const hitVal = secSince === null ? '--' : secSince < 60 ? `${secSince}s ago` : formatDuration(secSince) + ' ago';
-  const hitCls = secSince === null ? '' : secSince < 300 ? 'ok' : secSince < 3600 ? 'warn' : 'bad';
-  const hitChipCls = secSince === null ? '' : secSince < 300 ? 'healthy' : secSince < 3600 ? 'degraded' : 'critical';
-  chips.push(`<div class="status-chip ${hitChipCls}" onclick="drillStatus('lasthit')"><div class="chip-dot ${hitDot}"></div><div class="chip-label">LAST HIT</div><div class="chip-value ${hitCls}">${hitVal}</div></div>`);
-
-  strip.innerHTML = chips.join('');
-}
-
-//  Ops: Pipeline 
-function renderPipeline(health, infra) {
-  const df = infra?.dataFlow;
-  const sql = infra?.sql;
-  const pipe = infra?.pipeline;
-
-  // Node 1: INGEST
-  const queueDepth = df?.queueDepth ?? (infra?.app?.queueDepth ?? '--');
-  document.getElementById('pipe-ingest-val').textContent = queueDepth;
-  document.getElementById('pipe-ingest-sub').textContent = 'in queue';
-  document.getElementById('pipe-ingest').className = 'pipe-node' + (queueDepth > 100 ? ' stale' : queueDepth !== '--' ? ' healthy' : '');
-
-  // Node 2: SQL WRITE
-  const maxTestId = pipe?.maxTestId ?? (df?.maxTestId ?? (sql?.testRows ?? '--'));
-  document.getElementById('pipe-sql-val').textContent = typeof maxTestId === 'number' ? num(maxTestId) : maxTestId;
-  document.getElementById('pipe-sql-sub').textContent = 'PiXL.Test';
-  document.getElementById('pipe-sql').className = 'pipe-node' + (sql?.isConnected === false ? ' down' : sql?.isConnected ? ' healthy' : '');
-  document.getElementById('pipe-arrow-1').className = 'pipe-arrow' + (sql?.isConnected === false ? ' dead' : '');
-
-  // Node 3: ETL PARSE
-  const parsedRows = pipe?.parsedRows ?? (sql?.parsedRows ?? (health?.totalHits ?? '--'));
-  document.getElementById('pipe-etl-val').textContent = typeof parsedRows === 'number' ? num(parsedRows) : parsedRows;
-  document.getElementById('pipe-etl-sub').textContent = pipe ? `lag ${pipe.parseLag}` : 'PiXL.Parsed';
-  const parseLag = pipe?.parseLag ?? (df?.etlLag ?? null);
-  document.getElementById('pipe-etl').className = 'pipe-node' + (parseLag > 10000 ? ' stale' : parseLag !== null ? ' healthy' : '');
-  document.getElementById('pipe-arrow-2').className = 'pipe-arrow' + (parseLag > 10000 ? ' dead' : '');
-
-  // Node 4: DIMENSIONS (Device + IP)
-  const devCount = pipe?.deviceRows ?? '--';
-  const ipCount = pipe?.ipRows ?? '--';
-  document.getElementById('pipe-dim-val').textContent = typeof devCount === 'number' ? `${num(devCount)}+${num(ipCount)}` : '--';
-  document.getElementById('pipe-dim-sub').textContent = 'Device · IP';
-  document.getElementById('pipe-dim').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
-  document.getElementById('pipe-arrow-3').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
-
-  // Node 5: VISITS
-  const visitCount = pipe?.visitRows ?? '--';
-  document.getElementById('pipe-visit-val').textContent = typeof visitCount === 'number' ? num(visitCount) : visitCount;
-  document.getElementById('pipe-visit-sub').textContent = pipe ? `${num(pipe.visitsWithEmail||0)} w/email` : 'linked';
-  document.getElementById('pipe-visit').className = 'pipe-node' + (pipe?.isAvailable ? ' healthy' : '');
-  document.getElementById('pipe-arrow-4').className = 'pipe-arrow' + (pipe?.isAvailable === false ? ' dead' : '');
-
-  // Node 6: MATCH
-  const matchTotal = pipe?.matchRows ?? '--';
-  const matchResolved = pipe?.matchesResolved ?? 0;
-  document.getElementById('pipe-match-val').textContent = typeof matchTotal === 'number' ? num(matchTotal) : matchTotal;
-  document.getElementById('pipe-match-sub').textContent = pipe ? `${matchResolved} resolved` : 'resolved';
-  const matchLag = pipe?.matchLag ?? null;
-  const matchOk = pipe?.isAvailable && matchLag !== null;
-  document.getElementById('pipe-match').className = 'pipe-node' + (matchLag > 50 ? ' stale' : matchOk ? ' healthy' : '');
-  document.getElementById('pipe-arrow-5').className = 'pipe-arrow' + (matchLag > 50 ? ' dead' : '');
-
-  // Flow stats bar
-  if (df) {
-    const staleStr = df.secondsSinceLastInsert > 0 ? formatDuration(df.secondsSinceLastInsert) + ' ago' : 'just now';
-    document.getElementById('flow-5min').textContent = df.hitsLast5Min;
-    document.getElementById('flow-5min').className = 'etl-val' + (df.hitsLast5Min === 0 ? ' bad' : '');
-    document.getElementById('flow-1hr').textContent = df.hitsLastHour;
-    document.getElementById('flow-1hr').className = 'etl-val' + (df.hitsLastHour === 0 ? ' warn' : '');
-    document.getElementById('flow-last-insert').textContent = staleStr;
-    document.getElementById('flow-last-insert').className = 'etl-val' + (df.secondsSinceLastInsert > 300 ? ' warn' : '');
-    document.getElementById('flow-last-insert').style.fontSize = '0.8rem';
-  }
-}
-
-//  Ops: Error Log 
-function renderErrorLog(infra) {
-  const el = document.getElementById('error-log');
-  const re = infra?.recentErrors;
-  if (!re || !re.hasErrors) {
-    el.innerHTML = '<div style="color:var(--green); font-size:0.82rem; padding: 16px; text-align:center; letter-spacing: 2px;">NO ERRORS TODAY</div>';
-    return;
-  }
-  el.innerHTML = re.errors.map((e, i) => {
-    const isStale = e.isStale;
-    const countBadge = e.count > 1 ? `<span class="error-count">x${e.count}</span>` : '';
-    const ageStr = e.lastSeenUtc ? timeAgo(e.lastSeenUtc) : '';
-    return `<div class="error-entry ${isStale ? 'stale' : ''}" onclick="drillError(${i})">
-      <div class="error-source">${e.source || '?'}</div>
-      <div class="error-msg ${isStale ? 'stale' : ''}">${e.message?.substring(0, 150) || 'Unknown error'}${e.message?.length > 150 ? '...' : ''}</div>
-      ${countBadge}
-      <div class="error-age">${ageStr}</div>
-    </div>`;
-  }).join('');
-}
-
-//  Ops: ETL Health 
-function renderOpsETL(health, infra) {
-  const el = document.getElementById('etl-details');
-  const pipe = infra?.pipeline;
-  if (!health && !pipe) { el.innerHTML = '<div style="color:var(--text-dim)">No health data</div>'; return; }
-
-  const parseLag = pipe?.parseLag ?? 0;
-  const matchLag = pipe?.matchLag ?? 0;
-  const parseLagCls = parseLag > 50000 ? ' bad' : parseLag > 10000 ? ' warn' : '';
-  const matchLagCls = matchLag > 50 ? ' warn' : matchLag > 100 ? ' bad' : '';
-
-  el.innerHTML = `
-    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">PARSE (usp_ProcessDimensions)</div>
-    <div class="etl-grid">
-      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseTotalProcessed || health?.etL_TotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
-      <div class="etl-stat"><div class="etl-val">${num(pipe?.parseWatermark || health?.etL_Watermark || 0)}</div><div class="etl-lbl">WATERMARK</div></div>
-      <div class="etl-stat"><div class="etl-val${parseLagCls}">${parseLag}</div><div class="etl-lbl">PARSE LAG</div></div>
-    </div>
-    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin:6px 0 14px;">Last run: ${pipe?.parseLastRunAt ? timeAgo(pipe.parseLastRunAt) : (health?.etL_LastRunAt ? timeAgo(health.etL_LastRunAt) : '--')}</div>
-    <div style="font-family:var(--display);font-size:0.7rem;font-weight:600;letter-spacing:2px;color:var(--cyan-dim);margin-bottom:8px;">MATCH (usp_MatchVisits)</div>
-    <div class="etl-grid">
-      <div class="etl-stat"><div class="etl-val">${num(pipe?.matchTotalProcessed || 0)}</div><div class="etl-lbl">PROCESSED</div></div>
-      <div class="etl-stat"><div class="etl-val" style="color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${num(pipe?.matchTotalMatched || 0)}</div><div class="etl-lbl">MATCHED</div></div>
-      <div class="etl-stat"><div class="etl-val${matchLagCls}">${matchLag}</div><div class="etl-lbl">MATCH LAG</div></div>
-    </div>
-    <div style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:6px;">Last run: ${pipe?.matchLastRunAt ? timeAgo(pipe.matchLastRunAt) : '--'}</div>
-  `;
-}
-
-//  Ops: Pipeline Tables 
-function renderPipelineTables(infra) {
-  const el = document.getElementById('pipeline-tables');
-  const pipe = infra?.pipeline;
-  if (!pipe?.isAvailable) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:20px;text-align:center;">Pipeline data unavailable</div>'; return; }
-
-  const tbl = (label, rows, latest, color) => {
-    const age = latest ? timeAgo(latest) : '--';
-    return `<div class="etl-stat" style="cursor:pointer;" onclick="drillPipelineTable('${label.toLowerCase()}')">
-      <div class="etl-val" style="color:${color}">${num(rows)}</div>
-      <div class="etl-lbl">${label}</div>
-      <div style="font-size:0.62rem;color:var(--text-dim);margin-top:2px;">${age}</div>
-    </div>`;
-  };
-
-  el.innerHTML = `
-    <div class="etl-grid" style="grid-template-columns:repeat(3,1fr);">
-      ${tbl('TEST', pipe.testRows, pipe.testLatest, 'var(--text)')}
-      ${tbl('PARSED', pipe.parsedRows, pipe.parsedLatest, 'var(--cyan)')}
-      ${tbl('DEVICE', pipe.deviceRows, pipe.deviceLatest, 'var(--cyan)')}
-      ${tbl('IP', pipe.ipRows, pipe.ipLatest, 'var(--cyan)')}
-      ${tbl('VISIT', pipe.visitRows, pipe.visitLatest, 'var(--cyan)')}
-      ${tbl('MATCH', pipe.matchRows, pipe.matchLatest, 'var(--green)')}
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-top:10px;padding:8px 12px;background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);border-radius:4px;">
-      <div style="text-align:center;flex:1;">
-        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--green);text-shadow:0 0 10px rgba(0,255,136,0.2)">${pipe.matchesResolved}</div>
-        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">RESOLVED</div>
-      </div>
-      <div style="text-align:center;flex:1;">
-        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--yellow)">${pipe.matchesPending}</div>
-        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">PENDING</div>
-      </div>
-      <div style="text-align:center;flex:1;">
-        <div style="font-family:var(--display);font-size:1.1rem;font-weight:700;color:var(--cyan)">${num(pipe.visitsWithEmail)}</div>
-        <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;">W/ EMAIL</div>
-      </div>
-    </div>
-    <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:6px;">${num(pipe.uniqueDevicesInVisits)} unique devices · ${num(pipe.uniqueIpsInVisits)} unique IPs in visits</div>
-  `;
-}
-
-
-// --- Ops: Xavier Sync Panel ---
-function renderXavierSync(data) {
-  const el = document.getElementById('xavier-sync-panel');
-  if (!data || !Array.isArray(data) || data.length === 0) {
-    el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:20px;text-align:center;">Xavier sync data unavailable</div>';
-    return;
-  }
-
-  const friendlyNames = { IpGeo: 'IP GEOLOCATION', Company: 'COMPANY', Pixel: 'PiXL CONFIG' };
-  const friendlyTargets = { IpGeo: 'IPAPI.IP \u2190 Xavier IPGEO', Company: 'PiXL.Company \u2190 Xavier', Pixel: 'PiXL.Pixel \u2190 Xavier' };
-
-  function getSyncClass(s) {
-    if (!s.lastSyncStarted) return 'sync-never';
-    if (s.lastStatus === 'Error') return 'sync-error';
-    if (s.secondsSinceLastRun > 90000) return 'sync-stale';
-    return 'sync-ok';
-  }
-
-  function getDotClass(s) {
-    if (!s.lastSyncStarted) return 'never';
-    if (s.lastStatus === 'Error') return 'error';
-    if (s.secondsSinceLastRun > 90000) return 'stale';
-    return 'ok';
-  }
-
-  function getStatusLabel(s) {
-    if (!s.lastSyncStarted) return 'NEVER RUN';
-    if (s.lastStatus === 'Error') return 'FAILED';
-    if (s.lastStatus === 'Running') return 'RUNNING';
-    if (s.secondsSinceLastRun > 90000) return 'STALE';
-    return 'SYNCED';
-  }
-
-  function getStatusCls(s) {
-    if (!s.lastSyncStarted) return 'never';
-    if (s.lastStatus === 'Error') return 'error';
-    if (s.secondsSinceLastRun > 90000) return 'stale';
-    return 'ok';
-  }
-
-  el.innerHTML = `<div class="sync-cards">${data.map((s, i) => {
-    const name = friendlyNames[s.syncType] || s.syncType;
-    const target = friendlyTargets[s.syncType] || s.targetTable;
-    const cls = getSyncClass(s);
-    const dot = getDotClass(s);
-    const statusLabel = getStatusLabel(s);
-    const statusCls = getStatusCls(s);
-    const lastRun = s.lastSyncStarted ? timeAgo(s.lastSyncStarted) : '--';
-    const durSec = s.lastDurationMs ? (s.lastDurationMs / 1000).toFixed(1) + 's' : '--';
-    const rows = typeof s.localRows === 'number' ? num(s.localRows) : '--';
-    const fresh = s.latestRecord ? timeAgo(s.latestRecord) : '--';
-    const ins = s.lastInserted ?? 0;
-    const upd = s.lastUpdated ?? 0;
-    const del = s.lastDeleted ?? 0;
-    const changeText = s.lastSyncStarted ? `+${ins} ~${upd} -${del}` : '--';
-    const errHtml = s.lastError ? `<div class="sync-card-error" title="${s.lastError}">${s.lastError.substring(0, 80)}${s.lastError.length > 80 ? '\u2026' : ''}</div>` : '';
-
-    return `<div class="sync-card ${cls}" onclick="drillXavierSync(${i})">
-      <div class="sync-card-header">
-        <div class="sync-card-dot ${dot}"></div>
-        <div class="sync-card-name">${name}</div>
-        <div class="sync-card-status ${statusCls}">${statusLabel}</div>
-      </div>
-      <div style="font-size:0.62rem;color:var(--text-dim);font-family:var(--mono);margin-bottom:10px;">${target}</div>
-      <div class="sync-card-grid">
-        <div><div class="sync-stat-label">LOCAL ROWS</div><div class="sync-stat-value">${rows}</div></div>
-        <div><div class="sync-stat-label">LAST RUN</div><div class="sync-stat-value${statusCls === 'error' ? ' bad' : statusCls === 'stale' ? ' warn' : ''}">${lastRun}</div></div>
-        <div><div class="sync-stat-label">DURATION</div><div class="sync-stat-value">${durSec}</div></div>
-        <div><div class="sync-stat-label">CHANGES</div><div class="sync-stat-value">${changeText}</div></div>
-        <div><div class="sync-stat-label">FRESHEST</div><div class="sync-stat-value">${fresh}</div></div>
-        <div><div class="sync-stat-label">WATERMARK</div><div class="sync-stat-value">${s.watermarkBefore ? timeAgo(s.watermarkBefore) : '--'}</div></div>
-      </div>
-      ${errHtml}
-    </div>`;
-  }).join('')}</div>`;
-
-  // Also update the status strip XAVIER chip
-  renderXavierChip(data);
-}
-
-function renderXavierChip(data) {
-  const chip = document.getElementById('xavier-chip');
-  if (!chip || !data) return;
-  const hasError = data.some(s => s.lastStatus === 'Error');
-  const hasNever = data.some(s => !s.lastSyncStarted);
-  const hasStale = data.some(s => s.secondsSinceLastRun > 90000);
-  const allOk = !hasError && !hasNever && !hasStale;
-
-  let dot, val, valCls, chipCls;
-  if (hasError) {
-    dot = 'down'; val = 'FAILED'; valCls = 'bad'; chipCls = 'critical';
-  } else if (hasNever) {
-    dot = 'warn'; val = 'NEVER'; valCls = 'warn'; chipCls = 'degraded';
-  } else if (hasStale) {
-    dot = 'warn'; val = 'STALE'; valCls = 'warn'; chipCls = 'degraded';
-  } else {
-    dot = 'up'; val = `${data.length}/${data.length} OK`; valCls = 'ok'; chipCls = 'healthy';
-  }
-  chip.className = `status-chip ${chipCls}`;
-  chip.innerHTML = `<div class="chip-dot ${dot}"></div><div class="chip-label">XAVIER</div><div class="chip-value ${valCls}">${val}</div>`;
-}
-
-function drillXavierSync(idx) {
-  const data = lastData.xavierSync;
-  if (!data || !data[idx]) return;
-  const s = data[idx];
-  const friendlyNames = { IpGeo: 'IP Geolocation Sync', Company: 'Company Sync', Pixel: 'PiXL Config Sync' };
-  const name = friendlyNames[s.syncType] || s.syncType;
-  const statusColor = s.lastStatus === 'Error' ? 'var(--red)' : s.lastStatus === 'Success' ? 'var(--green)' : 'var(--yellow)';
-
-  let html = `<div class="detail-grid">`;
-  html += di('Sync Type', s.syncType);
-  html += di('Target Table', s.targetTable);
-  html += di('Status', `<span style="color:${statusColor};font-weight:600">${s.lastStatus || 'Never Run'}</span>`);
-  html += di('Local Row Count', typeof s.localRows === 'number' ? num(s.localRows) : '--');
-  html += di('Latest Record', s.latestRecord ? new Date(s.latestRecord).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
-  html += di('Last Sync Started', s.lastSyncStarted ? new Date(s.lastSyncStarted).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : 'Never');
-  html += di('Last Sync Completed', s.lastSyncCompleted ? new Date(s.lastSyncCompleted).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
-  html += di('Duration', s.lastDurationMs ? (s.lastDurationMs / 1000).toFixed(1) + 's' : '--');
-  html += di('Rows Inserted', s.lastInserted ?? '--');
-  html += di('Rows Updated', s.lastUpdated ?? '--');
-  html += di('Rows Deleted', s.lastDeleted ?? '--');
-  html += di('Watermark Before', s.watermarkBefore ? new Date(s.watermarkBefore).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
-  html += di('Watermark After', s.watermarkAfter ? new Date(s.watermarkAfter).toISOString().replace('T', ' ').substring(0, 19) + ' UTC' : '--');
-  html += di('Seconds Since Last Run', s.secondsSinceLastRun ? num(s.secondsSinceLastRun) + 's (' + formatDuration(s.secondsSinceLastRun) + ')' : '--');
-  html += `</div>`;
-
-  if (s.lastError) {
-    html += `<div style="margin-top:16px;padding:12px;border-radius:4px;background:rgba(255,45,85,0.06);border:1px solid rgba(255,45,85,0.3);">
-      <div style="font-family:var(--display);font-size:0.68rem;color:var(--red);letter-spacing:2px;margin-bottom:6px;">ERROR MESSAGE</div>
-      <div style="font-family:var(--mono);font-size:0.78rem;color:var(--red);word-break:break-all;">${s.lastError}</div>
-    </div>`;
-  }
-
-  if (s.lastStatus === 'Error') {
-    const syncType = s.syncType;
-    let fix = '';
-    if (s.lastError?.includes('Login failed')) {
-      fix = 'The Xavier connection is failing authentication. Check Windows Auth trust between servers:<br><code style="color:var(--cyan)">Test-NetConnection -ComputerName 192.168.88.35 -Port 1433</code><br>Verify the service account has SQL access on Xavier.';
-    } else if (s.lastError?.includes('Timeout')) {
-      fix = 'The sync query timed out. Xavier may be under heavy load. Try running during off-peak.';
-    } else {
-      fix = 'Check the application log for detailed error info:<br><code style="color:var(--cyan)">Get-Content "C:\\inetpub\\Smartpixl.info\\Log\\*.log" -Tail 50 | Select-String "' + syncType + '"</code>';
-    }
-    html += sug(fix);
-  }
-
-  openModal(name, html);
-}
-
-//  Ops: Infrastructure Detail 
-function renderInfraDetail(infra) {
-  const el = document.getElementById('infra-detail');
-  if (!infra) { el.innerHTML = '<div style="color:var(--text-dim)">Infrastructure probe unavailable</div>'; return; }
-  let html = '<div class="infra-grid">';
-
-  html += '<div>';
-  html += '<div class="infra-group-title">Windows Services</div>';
-  if (infra.services && infra.services.length) {
-    infra.services.forEach(s => {
-      const dotCls = s.isRunning ? 'up' : 'down';
-      const detail = s.isRunning ? s.status : (s.error || s.status);
-      const critTag = s.critical ? ' <span style="color:var(--red);font-size:0.65rem;font-weight:600;">CRITICAL</span>' : '';
-      html += `<div class="infra-item"><div class="infra-dot ${dotCls}"></div><div class="infra-item-name">${s.name}${critTag}</div><div class="infra-item-detail">${detail}</div></div>`;
-    });
-  } else { html += '<div style="color:var(--text-dim);font-size:0.78rem;">No service data</div>'; }
-  html += '</div>';
-
-  html += '<div>';
-  html += '<div class="infra-group-title">Website Endpoints</div>';
-  if (infra.websites && infra.websites.length) {
-    infra.websites.forEach(w => {
-      const dotCls = w.isHealthy ? 'up' : 'down';
-      const statusTxt = w.isHealthy ? `${w.statusCode} OK` : (w.error || `HTTP ${w.statusCode}`);
-      const critTag = w.critical ? ' <span style="color:var(--red);font-size:0.65rem;font-weight:600;">CRITICAL</span>' : '';
-      html += `<div class="infra-item"><div class="infra-dot ${dotCls}"></div><div class="infra-item-name">${w.name}${critTag}</div><div class="infra-item-detail">${statusTxt}</div><div class="infra-item-ms">${w.responseMs}ms</div></div>`;
-    });
-  } else { html += '<div style="color:var(--text-dim);font-size:0.78rem;">No website data</div>'; }
-  html += '</div>';
-
-  html += '<div>';
-  html += '<div class="infra-group-title">SQL Server</div>';
-  if (infra.sql) {
-    const s = infra.sql;
-    html += `<div class="infra-item"><div class="infra-dot ${s.isConnected ? 'up' : 'down'}"></div><div class="infra-item-name">${s.dataSource || 'SQL Server'} / ${s.database || '?'}</div><div class="infra-item-ms">${s.responseMs}ms</div></div>`;
-    if (s.isConnected) {
-      html += `<div style="font-size:0.78rem;color:var(--text-dim);padding:4px 0 0 18px;">PiXL.Test: ${num(s.testRows)} · PiXL.Parsed: ${num(s.parsedRows)} · Watermark: ${num(s.watermark)}</div>`;
-      if (s.lastEtlRun) html += `<div style="font-size:0.72rem;color:var(--text-dim);padding:2px 0 0 18px;">Last ETL: ${timeAgo(s.lastEtlRun)}</div>`;
-    } else {
-      html += `<div style="font-size:0.78rem;color:var(--red);padding:4px 0 0 18px;">${s.error || 'Connection failed'}</div>`;
-    }
-  }
-  html += '</div>';
-
-  html += '<div>';
-  html += '<div class="infra-group-title">App Runtime</div>';
-  if (infra.app) {
-    const a = infra.app;
-    const uptimeSec = a.uptime ? (a.uptime.totalSeconds || (a.uptime.hours * 3600 + a.uptime.minutes * 60 + a.uptime.seconds) || 0) : 0;
-    const uptimeStr = uptimeSec > 86400 ? Math.floor(uptimeSec/86400) + 'd ' + Math.floor((uptimeSec%86400)/3600) + 'h' :
-                      uptimeSec > 3600 ? Math.floor(uptimeSec/3600) + 'h ' + Math.floor((uptimeSec%3600)/60) + 'm' :
-                      Math.floor(uptimeSec/60) + 'm';
-    html += `<div class="infra-app-grid">
-      <div class="infra-app-stat"><div class="infra-app-val">${a.processId}</div><div class="infra-app-lbl">PID</div></div>
-      <div class="infra-app-stat"><div class="infra-app-val">${uptimeStr}</div><div class="infra-app-lbl">UPTIME</div></div>
-      <div class="infra-app-stat"><div class="infra-app-val">${a.workingSetMB}</div><div class="infra-app-lbl">MEM (MB)</div></div>
-      <div class="infra-app-stat"><div class="infra-app-val">${a.threadCount}</div><div class="infra-app-lbl">THREADS</div></div>
-      <div class="infra-app-stat"><div class="infra-app-val">${a.gcHeapMB}</div><div class="infra-app-lbl">GC HEAP</div></div>
-      <div class="infra-app-stat"><div class="infra-app-val" style="${a.queueDepth > 100 ? 'color:var(--yellow)' : ''}">${a.queueDepth}</div><div class="infra-app-lbl">WRITE QUEUE</div></div>
-    </div>`;
-    html += `<div style="font-size:0.68rem;color:var(--text-dim);margin-top:6px;">${a.machineName} · .NET ${a.dotNetVersion}</div>`;
-  }
-  html += '</div>';
-  html += '</div>';
-
-  const checkedAt = infra.checkedAt ? new Date(infra.checkedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) + ' UTC' : '--';
-  html += `<div style="text-align:right;font-size:0.68rem;color:var(--text-dim);margin-top:12px;letter-spacing:1px;">Probed in ${infra.probeTimeMs || 0}ms · ${checkedAt}</div>`;
-  el.innerHTML = html;
-}
-
-//  Ops: Compact Live Feed 
-function renderOpsFeed(data) {
-  const tbody = document.getElementById('ops-feed-body');
-  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">No recent hits</td></tr>'; return; }
-  tbody.innerHTML = data.slice(0, 15).map((r, i) => {
-    const t = r.threatLevel || 'OK';
-    const badgeClass = t === 'HIGH' ? 'high' : t === 'MED' ? 'med' : t === 'LOW' ? 'low' : 'ok';
-    const time = r.receivedAt ? new Date(r.receivedAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '--';
-    return `<tr onclick="drillHit(${i})">
-      <td>${time}</td>
-      <td>${r.ipAddress || '--'}</td>
-      <td><span class="badge ${badgeClass}">${t}</span></td>
-      <td>${r.botScore ?? '--'}</td>
-      <td>${r.platform || '--'}</td>
-      <td>${r.browser || '--'}</td>
-      <td style="color:var(--cyan)">${r.fP_Short || '--'}</td>
-    </tr>`;
-  }).join('');
-}
-
-//  Ops: Header Beacon 
-function updateOpsBeacon(health, infra) {
+function renderHealthTree(data) {
+  if (!data || !data.root) return;
+  const root = data.root;
+  const pct = Math.round(root.ratio * 100);
+  const color = ratioColor(root.ratio);
+
+  // --- Beacon ---
   const beacon = document.getElementById('beacon');
   const statusEl = document.getElementById('system-status');
+  if (root.ratio >= 1) {
+    beacon.className = 'beacon-dot'; statusEl.textContent = 'ALL PROBES HEALTHY'; statusEl.style.color = 'var(--green)';
+  } else if (root.ratio >= 0.75) {
+    beacon.className = 'beacon-dot warn'; statusEl.textContent = root.healthy + '/' + root.total + ' DEGRADED'; statusEl.style.color = 'var(--yellow)';
+  } else {
+    beacon.className = 'beacon-dot danger'; statusEl.textContent = root.healthy + '/' + root.total + ' CRITICAL'; statusEl.style.color = 'var(--red)';
+  }
 
-  if (infra?.overallStatus === 'critical') {
-    beacon.className = 'beacon-dot danger';
-    statusEl.textContent = 'CRITICAL';
-    statusEl.style.color = 'var(--red)';
-  } else if (infra?.overallStatus === 'degraded') {
-    beacon.className = 'beacon-dot warn';
-    statusEl.textContent = 'DEGRADED';
-    statusEl.style.color = 'var(--yellow)';
-  } else if (health) {
-    const secSince = health.secondsSinceLastHit ?? 9999;
-    if (secSince < 300) {
-      beacon.className = 'beacon-dot';
-      statusEl.textContent = 'ONLINE';
-      statusEl.style.color = '';
-    } else if (secSince < 3600) {
-      beacon.className = 'beacon-dot warn';
-      statusEl.textContent = 'IDLE -- ' + formatDuration(secSince);
-      statusEl.style.color = 'var(--yellow)';
+  // --- Hero ring (SVG stroke-dashoffset) ---
+  const ring = document.querySelector('.hero-ring-fg');
+  const circumf = 2 * Math.PI * 52; // 326.73
+  if (ring) {
+    ring.style.strokeDashoffset = circumf - (circumf * root.ratio);
+    ring.style.stroke = color === 'var(--green)' ? '#00ff88' : color === 'var(--yellow)' ? '#ffe14d' : '#ff2d55';
+  }
+  const pctEl = document.querySelector('.hero-pct');
+  if (pctEl) pctEl.textContent = pct + '%';
+  const heroName = document.querySelector('.hero-name');
+  if (heroName) heroName.textContent = esc(root.name).toUpperCase();
+  const heroCounts = document.querySelector('.hero-counts');
+  if (heroCounts) heroCounts.textContent = root.healthy + ' / ' + root.total + ' probes healthy';
+  const heroMeta = document.querySelector('.hero-meta');
+  if (heroMeta) heroMeta.textContent = 'Checked ' + timeAgo(data.checkedAt) + '  ·  ' + data.probeTimeMs + 'ms probe time';
+
+  // --- ETL header (from health tree metadata if available) ---
+  const etlEl = document.getElementById('etl-status');
+  if (etlEl) etlEl.textContent = root.healthy + '/' + root.total;
+
+  // --- System cards ---
+  const cardsEl = document.getElementById('system-cards');
+  if (cardsEl) {
+    cardsEl.innerHTML = (root.children || []).map((sys, i) => {
+      const sp = Math.round(sys.ratio * 100);
+      const sc = ratioColor(sys.ratio);
+      // Reachability from top-level result
+      const slugLower = (sys.slug || sys.name || '').toLowerCase();
+      let reachHtml = '';
+      if (slugLower === 'edge' && data.edgeReachable != null) {
+        reachHtml = '<div class="sys-card-reach ' + (data.edgeReachable ? 'up' : 'down') + '">' + (data.edgeReachable ? 'REACHABLE' : 'UNREACHABLE') + '</div>';
+      } else if (slugLower === 'forge' && data.forgeReachable != null) {
+        reachHtml = '<div class="sys-card-reach ' + (data.forgeReachable ? 'up' : 'down') + '">' + (data.forgeReachable ? 'REACHABLE' : 'UNREACHABLE') + '</div>';
+      }
+      return '<div class="sys-card" style="--sys-color:' + sc + '">' +
+        '<div class="sys-card-head"><span class="sys-card-name">' + esc(sys.name) + '</span><span class="sys-card-pct" style="color:' + sc + '">' + sp + '%</span></div>' +
+        '<div class="sys-card-bar"><div class="sys-card-bar-fill" style="width:' + sp + '%;background:' + sc + '"></div></div>' +
+        '<div class="sys-card-counts">' + sys.healthy + ' / ' + sys.total + ' probes healthy</div>' +
+        reachHtml +
+        '</div>';
+    }).join('');
+  }
+
+  // --- Tree detail ---
+  const detailEl = document.getElementById('tree-detail');
+  if (detailEl) {
+    detailEl.innerHTML = (root.children || []).map(sys => renderTreeSys(sys)).join('');
+  }
+}
+
+function renderTreeSys(sys) {
+  const pct = Math.round(sys.ratio * 100);
+  const color = ratioColor(sys.ratio);
+  let html = '<div class="tree-sys">' +
+    '<div class="tree-sys-head" style="border-color:' + color + '">' +
+    '<span class="tree-sys-name">' + esc(sys.name) + '</span>' +
+    '<span class="tree-sys-ratio" style="color:' + color + '">' + sys.healthy + '/' + sys.total + ' (' + pct + '%)</span>' +
+    '</div><div class="tree-children">';
+
+  for (const child of (sys.children || [])) {
+    if (child.children && child.children.length > 0) {
+      html += renderTreeSubsystem(child);
     } else {
-      beacon.className = 'beacon-dot danger';
-      statusEl.textContent = 'STALE -- ' + formatDuration(secSince);
-      statusEl.style.color = 'var(--red)';
+      html += renderTreeProbe(child);
     }
   }
+  html += '</div></div>';
+  return html;
+}
 
-  if (health) {
-    document.getElementById('etl-status').textContent =
-      health.etL_Watermark ? `#${num(health.etL_Watermark)}` : '--';
+function renderTreeSubsystem(sub) {
+  const pct = Math.round(sub.ratio * 100);
+  const color = ratioColor(sub.ratio);
+  const collapsed = sub.ratio >= 1;
+
+  let html = '<div class="tree-sub' + (collapsed ? ' collapsed' : '') + '">' +
+    '<div class="tree-sub-head" onclick="this.parentElement.classList.toggle(\'collapsed\')">' +
+    '<span class="tree-toggle">▾</span>' +
+    '<span class="tree-sub-name">' + esc(sub.name) + '</span>' +
+    '<span class="tree-sub-bar"><span class="tree-sub-bar-fill" style="width:' + pct + '%;background:' + color + '"></span></span>' +
+    '<span class="tree-sub-ratio" style="color:' + color + '">' + sub.healthy + '/' + sub.total + '</span>' +
+    '</div><div class="tree-sub-probes">';
+
+  for (const probe of (sub.children || [])) {
+    if (probe.children && probe.children.length > 0) {
+      html += renderTreeSubsystem(probe); // handle deeper nesting
+    } else {
+      html += renderTreeProbe(probe);
+    }
   }
+  html += '</div></div>';
+  return html;
+}
+
+function renderTreeProbe(probe) {
+  const ok = probe.health === 1;
+  const dotCls = ok ? 'up' : 'down';
+  const statusColor = ok ? 'var(--green)' : 'var(--red)';
+  const label = ok ? 'Healthy' : (probe.status || 'Unhealthy');
+
+  let metricsHtml = '';
+  if (probe.metrics && typeof probe.metrics === 'object') {
+    const parts = [];
+    for (const [k, v] of Object.entries(probe.metrics)) {
+      parts.push('<span class="probe-metric">' + esc(k) + ': ' + (typeof v === 'number' ? num(v) : esc(String(v))) + '</span>');
+    }
+    if (parts.length) metricsHtml = '<div class="probe-metrics">' + parts.join('') + '</div>';
+  }
+
+  return '<div class="tree-probe' + (ok ? '' : ' unhealthy') + '">' +
+    '<span class="probe-dot ' + dotCls + '"></span>' +
+    '<span class="probe-name">' + esc(probe.name) + '</span>' +
+    (probe.description ? '<span class="probe-desc">' + esc(probe.description) + '</span>' : '') +
+    '<span class="probe-status" style="color:' + statusColor + '">' + esc(label) + '</span>' +
+    '</div>' + metricsHtml;
+}
+
+// DrillDown for probe detail (click to see metrics in modal)
+function drillProbe(nodeId) {
+  const tree = lastData.healthTree;
+  if (!tree || !tree.root) return;
+  const node = findNode(tree.root, nodeId);
+  if (!node) return;
+  let html = '<div class="detail-grid">';
+  html += di('Name', node.name);
+  html += di('Type', node.nodeType);
+  html += di('Status', node.health === 1 ? 'Healthy' : 'Unhealthy', node.health === 1 ? 'ok' : 'bad');
+  if (node.description) html += di('Description', node.description);
+  if (node.metrics) {
+    for (const [k, v] of Object.entries(node.metrics)) {
+      html += di(k, typeof v === 'number' ? num(v) : String(v));
+    }
+  }
+  html += '</div>';
+  openModal(node.name.toUpperCase(), html);
+}
+
+function findNode(node, nodeId) {
+  if (node.nodeId === nodeId) return node;
+  for (const c of (node.children || [])) {
+    const found = findNode(c, nodeId);
+    if (found) return found;
+  }
+  return null;
 }
 
 // ============================================================================
@@ -4125,90 +3105,16 @@ function renderSubnets(rows) {
     }</tbody></table>`;
 }
 
-function renderPipelineHealth(data) {
-    const el = document.getElementById('pipeline-health');
-    if (!el || !data) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No pipeline data</p>'; return; }
-    const pairs = [
-        ['Raw Rows', data.rawRows],
-        ['Parsed Rows', data.parsedRows],
-        ['Device Rows', data.deviceRows],
-        ['IP Rows', data.ipRows],
-        ['Match Rows', data.matchRows],
-        ['Matches Pending', data.matchesPending],
-        ['Matches Resolved', data.matchesResolved],
-        ['Parse Lag', data.parseLag],
-        ['Match Lag', data.matchLag],
-        ['Parse Last Run', data.parseLastRunAt],
-        ['Match Last Run', data.matchLastRunAt],
-    ];
-    el.innerHTML = `<table class="feed-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${
-        pairs.map(([k,v])=>`<tr><td>${k}</td><td>${v != null ? (typeof v==='number' ? num(v) : v) : '--'}</td></tr>`).join('')
-    }</tbody></table>`;
-}
-
-function renderRemediations(rows) {
-    const el = document.getElementById('remediation-log');
-    if (!el || !rows || !rows.length) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No remediations</p>'; return; }
-    const cols = ['id','issueType','description','detectedAtUtc','executedAtUtc','executedBy'];
-    const labels = ['ID','Issue','Description','Detected','Executed','By'];
-    el.innerHTML = `<table class="feed-table"><thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${
-        rows.slice(0,50).map(r=>`<tr>${cols.map(c=>`<td>${r[c] != null ? r[c] : '--'}</td>`).join('')}</tr>`).join('')
-    }</tbody></table>`;
-}
-
 // ============================================================================
 // REFRESH LOOP -- Only active view fetches & renders
-// ============================================================================
-// ============================================================================
-// STAGGERED API ORCHESTRA -- Sequential calls, progressive rendering, grid orbs
-// Each API call fires in sequence. On completion its data renders immediately
-// and a named Tron light-cycle orb spawns on the grid background.
 // ============================================================================
 const REFRESH_INTERVAL = 10;
 let countdown = REFRESH_INTERVAL;
 
-// Ops view: 7 sequential calls - one cycle per service health tile
+// Ops view: single health-tree fetch drives the entire view
 const OPS_STEPS = [
   { name: 'TREE', contestant: 'CROM', fn: API.healthTree, key: 'healthTree',
-    render() { /* stored in lastData.healthTree — consumed by INFRA render */ }},
-  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
-    render() {
-      const h = lastData.health;
-      if (h) document.getElementById('etl-status').textContent = h.etL_Watermark ? `#${num(h.etL_Watermark)}` : '--';
-    }},
-  { name: 'INFRA', contestant: 'CLU', fn: API.infra, key: 'infra',
-    render() {
-      const { health, infra } = lastData;
-      renderCriticalZone(buildIssues(health, infra));
-      renderStatusStrip(health, infra);
-      renderSystemBoxes(health, infra);
-      renderPipeline(health, infra);
-      renderErrorLog(infra);
-    }},
-  { name: 'SQL', contestant: 'RINZLER', fn: () => Promise.resolve(lastData.infra), key: '_sqlReuse',
-    render() {
-      renderOpsETL(lastData.health, lastData.infra);
-    }},
-  { name: 'IIS', contestant: 'QUORRA', fn: () => Promise.resolve(lastData.infra), key: '_iisReuse',
-    render() {
-      renderInfraDetail(lastData.infra);
-    }},
-  { name: 'ETL', contestant: 'SARK', fn: () => Promise.resolve(lastData.infra), key: '_etlReuse',
-    render() {
-      renderPipelineTables(lastData.infra);
-    }},
-  { name: 'MATCH', contestant: 'YORI', fn: () => Promise.resolve(lastData.infra), key: '_matchReuse',
-    render() {
-      updateOpsBeacon(lastData.health, lastData.infra);
-    }},
-  { name: 'XAVIER', contestant: 'FLYNN', fn: API.xavierSync, key: 'xavierSync',
-    render() { renderXavierSync(lastData.xavierSync); }},
-  { name: 'FEED', contestant: 'GEM', fn: API.recent, key: 'recent',
-    render() { renderOpsFeed(lastData.recent); }},
-  { name: 'PIPELINE', contestant: 'DUMONT', fn: API.pipeline, key: 'pipeline',
-    render() { renderPipelineHealth(lastData.pipeline); }},
-  { name: 'REMEDIATE', contestant: 'BECK', fn: API.remediations, key: 'remediations',
-    render() { renderRemediations(lastData.remediations); }},
+    render() { renderHealthTree(lastData.healthTree); }},
 ];
 
 // Analytics view: 10 sequential calls -- each section pops in as data arrives
