@@ -2048,17 +2048,17 @@ body::before {
 
   <!-- METRICS VIEW -->
   <div id="view-analytics" class="view-content">
-    <!-- Hero Cards  Pipeline Metrics -->
+    <!-- Hero KPI Cards — snapshot + health + pipeline -->
     <div class="hero-grid" id="hero-grid">
-      <div class="hero-card"><div class="hero-label">RAW HITS</div><div class="hero-value" id="h-raw">--</div><div class="hero-sub" id="h-raw-sub"></div></div>
-      <div class="hero-card"><div class="hero-label">PARSED</div><div class="hero-value" id="h-parsed">--</div><div class="hero-sub" id="h-parsed-sub"></div></div>
-      <div class="hero-card"><div class="hero-label">VISITS</div><div class="hero-value" id="h-visits">--</div><div class="hero-sub" id="h-visits-sub"></div></div>
-      <div class="hero-card"><div class="hero-label">IP MATCHES</div><div class="hero-value" id="h-matches">--</div><div class="hero-sub" id="h-matches-sub"></div></div>
-      <div class="hero-card"><div class="hero-label">MATCH RATE</div><div class="hero-value" id="h-rate">--</div><div class="hero-sub" id="h-rate-sub"></div></div>
-      <div class="hero-card"><div class="hero-label">RESOLVED</div><div class="hero-value good" id="h-resolved">--</div><div class="hero-sub" id="h-resolved-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">HITS / HOUR</div><div class="hero-value" id="h-throughput">--</div><div class="hero-sub" id="h-throughput-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">24H VOLUME</div><div class="hero-value" id="h-volume">--</div><div class="hero-sub" id="h-volume-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">UNIQUE IPs</div><div class="hero-value" id="h-ips">--</div><div class="hero-sub" id="h-ips-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">BOT RATE</div><div class="hero-value" id="h-botrate">--</div><div class="hero-sub" id="h-botrate-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">MATCH RATE</div><div class="hero-value" id="h-matchrate">--</div><div class="hero-sub" id="h-matchrate-sub"></div></div>
+      <div class="hero-card"><div class="hero-label">IDENTITIES</div><div class="hero-value good" id="h-identities">--</div><div class="hero-sub" id="h-identities-sub"></div></div>
     </div>
 
-    <!-- Full Pipeline Visualization -->
+    <!-- Pipeline Flow Visualization -->
     <div class="pipeline" id="a-pipeline" style="margin-bottom:24px;">
       <div class="pipe-node"><div class="pipe-node-label">RAW</div><div class="pipe-node-value" id="a-pipe-raw">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-raw-ts"></div></div>
       <div class="pipe-arrow"><div class="pipe-lag" id="a-lag-parse"></div></div>
@@ -2071,33 +2071,45 @@ body::before {
       <div class="pipe-node"><div class="pipe-node-label">RESOLVED</div><div class="pipe-node-value" id="a-pipe-resolved" style="color:var(--green);">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-resolved-ts"></div></div>
     </div>
 
-    <!-- Hourly Traffic + ETL Watermarks -->
+    <!-- Hourly Traffic + Evasion Intelligence -->
     <div class="panel-grid">
       <div class="panel">
-        <div class="panel-title">HOURLY TRAFFIC</div>
+        <div class="panel-title">HOURLY TRAFFIC <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; 48h</span></div>
         <div class="chart-container" id="hourly-chart"><div class="loading">LOADING</div></div>
       </div>
+      <div class="panel">
+        <div class="panel-title">EVASION INTELLIGENCE</div>
+        <div class="evasion-grid" id="evasion-grid"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- Bot Signals + Behavioral Analysis -->
+    <div class="panel-grid half">
+      <div class="panel">
+        <div class="panel-title">TOP BOT SIGNALS</div>
+        <div class="signal-list" id="signal-list"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">BEHAVIORAL ANALYSIS</div>
+        <div class="behavior-compare" id="behavior-compare"><div class="loading">LOADING</div></div>
+      </div>
+    </div>
+
+    <!-- ETL Watermarks + Identity Resolution -->
+    <div class="panel-grid half">
       <div class="panel">
         <div class="panel-title">ETL WATERMARKS</div>
         <div id="a-watermarks" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
-    </div>
-
-    <!-- Match Breakdown + Table Counts -->
-    <div class="panel-grid half">
       <div class="panel">
-        <div class="panel-title">MATCH BREAKDOWN</div>
+        <div class="panel-title">IDENTITY RESOLUTION</div>
         <div id="a-match-breakdown" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
       </div>
-      <div class="panel">
-        <div class="panel-title">TABLE COUNTS</div>
-        <div id="a-table-counts" style="font-size:0.82rem;"><div class="loading">LOADING</div></div>
-      </div>
     </div>
 
-    <!-- Company Match Breakdown  per-company match-type counts + entitlements -->
+    <!-- Company Match Breakdown -->
     <div class="panel" style="margin-top:24px;">
-      <div class="panel-title">COMPANY MATCH BREAKDOWN <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; current: IP only &middot; uplift available: Email + Geo</span></div>
+      <div class="panel-title">COMPANY MATCH BREAKDOWN <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">&mdash; per-customer IP, Email &amp; Geo resolution</span></div>
       <div id="a-company-matches" style="font-size:0.78rem;max-height:400px;overflow-y:auto;"><div class="loading">LOADING</div></div>
     </div>
   </div>
@@ -2252,10 +2264,14 @@ function renderCachedData(view) {
   if (view === 'ops') {
     if (lastData.healthTree) renderHealthTree(lastData.healthTree);
   } else if (view === 'analytics') {
-    const { health } = lastData;
-    if (health) updateAnalyticsBeacon(health);
-    if (lastData.pipeline) renderAnalyticsPipeline(lastData.pipeline);
-    if (lastData.hourly) renderHourlyChart(lastData.hourly);
+    if (lastData.health) updateAnalyticsBeacon(lastData.health);
+    renderMetricsHero();
+    if (lastData.pipeline) { renderPipelineStrip(lastData.pipeline); renderWatermarks(lastData.pipeline); renderMatchBreakdown(lastData.pipeline); }
+    if (lastData.hourlyStats) renderHourlyChart(lastData.hourlyStats);
+    if (lastData.evasion) renderEvasion(lastData.evasion);
+    if (lastData.signals) renderSignals(lastData.signals);
+    if (lastData.behavior) renderBehavior(lastData.behavior);
+    if (lastData.matchBreakdown) renderCompanyMatches(lastData.matchBreakdown);
   }
 }
 
@@ -2650,38 +2666,63 @@ function drillHour(idx) {
   if (!rows || !rows[idx]) return;
   const r = rows[idx];
   let html = '<div class="detail-grid">';
-  html += di('Hour', r.hourBucket);
+  html += di('Hour', r.hourBucket || r.hourUtc);
   html += di('Total Hits', num(r.totalHits));
   html += di('Bot Hits', num(r.botHits), r.botHits > 0 ? 'bad' : 'ok');
   html += di('Human Hits', num((r.totalHits||0) - (r.botHits||0)), 'ok');
+  if (r.uniqueIPs != null) html += di('Unique IPs', num(r.uniqueIPs));
+  if (r.uniqueDevices != null) html += di('Unique Devices', num(r.uniqueDevices));
+  if (r.avgBotScore != null) html += di('Avg Bot Score', r.avgBotScore.toFixed(1), r.avgBotScore > 50 ? 'bad' : r.avgBotScore > 20 ? 'warn' : 'ok');
   html += '</div>';
   openModal('HOURLY DETAIL', html);
 }
 
-//  Analytics: Hero 
-function renderAnalyticsPipeline(p) {
-  if (!p) return;
+//  Analytics: Metrics Hero KPIs (snapshot + health + pipeline) 
+function renderMetricsHero() {
+  const s = lastData.snapshot;
+  const h = lastData.health;
+  const p = lastData.pipeline;
   const set = (id, val, sub) => {
     const el = document.getElementById(id);
     if (el && val !== undefined) el.textContent = val;
     const subEl = document.getElementById(id + '-sub');
     if (subEl && sub !== undefined) subEl.textContent = sub;
   };
-  set('h-raw', num(p.rawRows), `max ID ${num(p.maxRawId)}`);
-  set('h-parsed', num(p.parsedRows), `lag ${num(p.parseLag)}`);
-  set('h-visits', num(p.visitRows), `${num(p.uniqueIpsInVisits)} unique IPs`);
-  set('h-matches', num(p.ipMatchCount || 0), `${num(p.legacyMatchProcessed)} processed`);
 
-  const rate = p.legacyMatchProcessed > 0 ? (100 * (p.legacyMatchMatched || 0) / p.legacyMatchProcessed).toFixed(1) : '0.0';
-  const rateEl = document.getElementById('h-rate');
-  if (rateEl) { rateEl.textContent = rate + '%'; rateEl.className = 'hero-value' + (parseFloat(rate) > 10 ? ' good' : ' warn'); }
-  set('h-rate', undefined, `${num(p.legacyMatchMatched)} of ${num(p.legacyMatchProcessed)}`);
+  if (s) {
+    set('h-throughput', num(s.hitsLastHour), '~' + num(Math.round((s.hitsLast5Min || 0) / 5)) + '/min rolling');
+    set('h-volume', num(s.hits24h), num(s.humanHits24h || 0) + ' human \u00b7 ' + num(s.botHits24h || 0) + ' bot');
+    set('h-ips', num(s.uniqueIPs24h), num(s.uniqueDevices24h || 0) + ' devices');
+  }
 
-  const resolvedEl = document.getElementById('h-resolved');
-  if (resolvedEl) resolvedEl.textContent = num(p.matchesResolved);
-  set('h-resolved', undefined, `${num(p.matchesPending)} pending`);
+  if (h) {
+    const pct = (h.botPct_24h ?? 0).toFixed(1);
+    const botEl = document.getElementById('h-botrate');
+    if (botEl) {
+      botEl.textContent = pct + '%';
+      botEl.className = 'hero-value' + (parseFloat(pct) > 5 ? ' danger' : parseFloat(pct) > 1 ? ' warn' : '');
+    }
+    set('h-botrate', undefined, num(h.bots_24h || 0) + ' detected \u00b7 avg ' + (h.avgBotScore_24h ?? 0).toFixed(0));
+  }
 
-  // Pipeline bar
+  if (p) {
+    const matched = p.legacyMatchMatched || 0;
+    const processed = p.legacyMatchProcessed || 0;
+    const rate = processed > 0 ? (100 * matched / processed).toFixed(1) : '0.0';
+    const rateEl = document.getElementById('h-matchrate');
+    if (rateEl) {
+      rateEl.textContent = rate + '%';
+      rateEl.className = 'hero-value' + (parseFloat(rate) > 10 ? ' good' : parseFloat(rate) > 1 ? '' : ' warn');
+    }
+    set('h-matchrate', undefined, num(matched) + ' of ' + num(processed));
+    set('h-identities', num(p.uniqueIndividuals || 0), num(s?.matchesPending || 0) + ' pending');
+  }
+}
+
+//  Analytics: Pipeline Strip 
+function renderPipelineStrip(p) {
+  if (!p) return;
+
   document.getElementById('a-pipe-raw').textContent = num(p.rawRows);
   document.getElementById('a-pipe-parsed').textContent = num(p.parsedRows);
   document.getElementById('a-pipe-visits').textContent = num(p.visitRows);
@@ -2690,7 +2731,6 @@ function renderAnalyticsPipeline(p) {
   resEl.textContent = num(p.matchesResolved);
   resEl.style.color = p.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
 
-  // Pipeline timestamps
   const ts = (id, dt) => { const el = document.getElementById(id); if (el && dt) el.textContent = timeAgo(dt); };
   ts('a-pipe-raw-ts', p.rawLatest);
   ts('a-pipe-parsed-ts', p.parsedLatest);
@@ -2698,7 +2738,6 @@ function renderAnalyticsPipeline(p) {
   ts('a-pipe-match-ts', p.legacyMatchLastRunAt);
   ts('a-pipe-resolved-ts', p.matchLatest);
 
-  // Pipeline lag indicators
   const lagEl = (id, lag) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -2709,11 +2748,6 @@ function renderAnalyticsPipeline(p) {
   };
   lagEl('a-lag-parse', p.parseLag);
   lagEl('a-lag-match', p.legacyMatchLag);
-
-  // Watermarks, breakdown, table counts
-  renderWatermarks(p);
-  renderMatchBreakdown(p);
-  renderTableCounts(p);
 }
 
 function updateAnalyticsBeacon(h) {
@@ -2742,7 +2776,7 @@ function renderWatermarks(p) {
   const wmRow = (name, wm, total, matched, lastRun, lag) => {
     const lagColor = lag === 0 ? 'var(--green)' : lag < 10000 ? 'var(--green)' : lag < 1000000 ? 'var(--yellow)' : 'var(--red)';
     return `<tr>
-      <td style="color:var(--cyan)">${name}</td>
+      <td style="color:var(--cyan)">${esc(name)}</td>
       <td>${num(wm || 0)}</td>
       <td>${num(total || 0)}</td>
       <td>${matched != null ? num(matched) : '--'}</td>
@@ -2758,7 +2792,23 @@ function renderWatermarks(p) {
       ${wmRow('MatchLegacyVisits', p.legacyMatchWatermark, p.legacyMatchProcessed, p.legacyMatchMatched, p.legacyMatchLastRunAt, p.legacyMatchLag)}
       ${wmRow('MatchGeoVisits', p.geoMatchWatermark, p.geoMatchProcessed, p.geoMatchMatched, p.geoMatchLastRunAt, p.geoMatchLag)}
     </tbody>
-  </table>`;
+  </table>
+  <div style="margin-top:12px;border-top:1px solid var(--panel-border);padding-top:12px;">
+    <div style="font-size:0.70rem;font-weight:600;letter-spacing:2px;color:var(--cyan);margin-bottom:8px;text-transform:uppercase;">Table Counts</div>
+    <table class="feed-table" style="font-size:0.78rem;">
+      <thead><tr><th>TABLE</th><th>ROWS</th><th>LATEST</th></tr></thead>
+      <tbody>${[
+        ['PiXL.Raw', p.rawRows, p.rawLatest],
+        ['PiXL.Parsed', p.parsedRows, p.parsedLatest],
+        ['PiXL.Visit', p.visitRows, p.visitLatest],
+        ['PiXL.Match', p.matchRows, p.matchLatest],
+        ['PiXL.Device', p.deviceRows, p.deviceLatest],
+        ['PiXL.IP', p.ipRows, p.ipLatest],
+      ].map(([name, count, latest]) =>
+        '<tr><td style="color:var(--cyan)">' + name + '</td><td>' + num(count||0) + '</td><td>' + (latest ? timeAgo(latest) : '--') + '</td></tr>'
+      ).join('')}</tbody>
+    </table>
+  </div>`;
 }
 
 function renderMatchBreakdown(p) {
@@ -2781,33 +2831,14 @@ function renderMatchBreakdown(p) {
     </div>`;
 }
 
-function renderTableCounts(p) {
-  const el = document.getElementById('a-table-counts');
-  if (!el || !p) return;
-  const rows = [
-    ['PiXL.Raw', p.rawRows, p.rawLatest],
-    ['PiXL.Parsed', p.parsedRows, p.parsedLatest],
-    ['PiXL.Visit', p.visitRows, p.visitLatest],
-    ['PiXL.Match', p.matchRows, p.matchLatest],
-    ['PiXL.Device', p.deviceRows, p.deviceLatest],
-    ['PiXL.IP', p.ipRows, p.ipLatest],
-  ];
-  el.innerHTML = `<table class="feed-table" style="font-size:0.78rem;">
-    <thead><tr><th>TABLE</th><th>ROWS</th><th>LATEST</th></tr></thead>
-    <tbody>${rows.map(([name, count, latest]) =>
-      `<tr><td style="color:var(--cyan)">${name}</td><td>${num(count||0)}</td><td>${latest ? timeAgo(latest) : '--'}</td></tr>`
-    ).join('')}</tbody>
-  </table>`;
-}
-
 function renderCompanyMatches(data) {
   const el = document.getElementById('a-company-matches');
   if (!el) return;
   if (!data || !data.length) { el.innerHTML = '<div class="loading" style="color:var(--text-dim)">NO DATA</div>'; return; }
 
   const badge = (entitled, label) => entitled
-    ? `<span style="color:var(--green);font-size:0.7rem">&#x2713; ${label}</span>`
-    : `<span style="color:var(--text-dim);font-size:0.7rem">&#x2717; ${label}</span>`;
+    ? `<span style="color:var(--green);font-size:0.7rem">&#x2713; ${esc(label)}</span>`
+    : `<span style="color:var(--text-dim);font-size:0.7rem">&#x2717; ${esc(label)}</span>`;
 
   const rows = data.map(c => {
     const xavier = c.isXavierLegacy;
@@ -2819,7 +2850,7 @@ function renderCompanyMatches(data) {
     const nameStyle = xavier ? 'color:var(--orange)' : 'color:var(--cyan)';
     const tag = xavier ? ' <span style="background:var(--orange);color:#000;padding:1px 5px;border-radius:3px;font-size:0.65rem;font-weight:700">XAVIER</span>' : '';
     return `<tr>
-      <td style="${nameStyle}">${c.companyName || c.companyID}${tag}</td>
+      <td style="${nameStyle}">${esc(c.companyName || c.companyID)}${tag}</td>
       <td style="text-align:right">${num(ip)}</td>
       <td style="text-align:right;color:var(--green)">${num(ipRes)}</td>
       <td style="text-align:right;${email > 0 ? 'color:var(--cyan)' : 'color:var(--text-dim)'}">${num(email)}</td>
@@ -2844,7 +2875,7 @@ function renderCompanyMatches(data) {
 }
 
 
-//  Analytics: Hourly Chart 
+//  Analytics: Hourly Chart (supports hourly + hourlyStats format) 
 function renderHourlyChart(data) {
   const container = document.getElementById('hourly-chart');
   if (!data || !data.length) { container.innerHTML = '<div class="loading">NO DATA</div>'; return; }
@@ -2857,9 +2888,11 @@ function renderHourlyChart(data) {
     const humans = total - bots;
     const humanH = Math.max(1, (humans / maxHits) * 180);
     const botH = Math.max(0, (bots / maxHits) * 180);
-    const hour = new Date(r.hourBucket).getUTCHours();
-    const label = hour === 0 ? new Date(r.hourBucket).toLocaleDateString('en',{month:'short',day:'numeric',timeZone:'UTC'}) : `${hour}h`;
-    return `<div class="chart-bar-group" title="${total} hits (${bots} bots) at ${r.hourBucket}" onclick="drillHour(${i})">
+    const bucket = r.hourBucket || r.hourUtc;
+    const hour = new Date(bucket).getUTCHours();
+    const label = hour === 0 ? new Date(bucket).toLocaleDateString('en',{month:'short',day:'numeric',timeZone:'UTC'}) : `${hour}h`;
+    const ips = r.uniqueIPs != null ? ' \u00b7 ' + r.uniqueIPs + ' IPs' : '';
+    return `<div class="chart-bar-group" title="${num(total)} hits (${num(bots)} bots${ips}) at ${bucket}">
       <div class="chart-bar bot" style="height:${botH}px"></div>
       <div class="chart-bar human" style="height:${humanH}px"></div>
       ${hour % 6 === 0 ? `<div class="chart-label">${label}</div>` : ''}
@@ -3124,15 +3157,23 @@ const OPS_STEPS = [
     render() { renderHealthTree(lastData.healthTree); }},
 ];
 
-// Analytics view: 10 sequential calls -- each section pops in as data arrives
+// Analytics view: 8 parallel calls -- each section renders as data arrives
 const ANALYTICS_STEPS = [
-  { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
-    render() { updateAnalyticsBeacon(lastData.health); }},
-  { name: 'PIPELINE', contestant: 'CLU', fn: API.pipeline, key: 'pipeline',
-    render() { renderAnalyticsPipeline(lastData.pipeline); }},
-  { name: 'HOURLY', contestant: 'GEM', fn: () => API.hourly(48), key: 'hourly',
-    render() { renderHourlyChart(lastData.hourly); }},
-  { name: 'MATCHES', contestant: 'QUORRA', fn: API.matchBreakdown, key: 'matchBreakdown',
+  { name: 'SNAPSHOT', contestant: 'TRON', fn: API.snapshot, key: 'snapshot',
+    render() { renderMetricsHero(); }},
+  { name: 'HEALTH', contestant: 'CLU', fn: API.health, key: 'health',
+    render() { updateAnalyticsBeacon(lastData.health); renderMetricsHero(); }},
+  { name: 'PIPELINE', contestant: 'GEM', fn: API.pipeline, key: 'pipeline',
+    render() { renderMetricsHero(); renderPipelineStrip(lastData.pipeline); renderWatermarks(lastData.pipeline); renderMatchBreakdown(lastData.pipeline); }},
+  { name: 'HOURLY', contestant: 'QUORRA', fn: API.hourlyStats, key: 'hourlyStats',
+    render() { renderHourlyChart(lastData.hourlyStats); }},
+  { name: 'EVASION', contestant: 'SARK', fn: API.evasion, key: 'evasion',
+    render() { renderEvasion(lastData.evasion); }},
+  { name: 'SIGNALS', contestant: 'RINZLER', fn: API.signals, key: 'signals',
+    render() { renderSignals(lastData.signals); }},
+  { name: 'BEHAVIOR', contestant: 'YORI', fn: API.behavior, key: 'behavior',
+    render() { renderBehavior(lastData.behavior); }},
+  { name: 'MATCHES', contestant: 'DUMONT', fn: API.matchBreakdown, key: 'matchBreakdown',
     render() { renderCompanyMatches(lastData.matchBreakdown); }},
 ];
 
