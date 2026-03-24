@@ -2079,6 +2079,7 @@ body::before {
 // DATA LAYER
 // ============================================================================
 const API = {
+  healthTree:   () => fetchJson('/api/health-tree'),
   health:       () => fetchJson('/api/dash/health'),
   infra:        () => fetchJson('/api/dash/infra'),
   recent:       () => fetchJson('/api/dash/recent'),
@@ -2723,11 +2724,75 @@ function renderCriticalZone(issues) {
 
 //  System Health Boxes 
 function renderSystemBoxes(health, infra) {
+  // Prefer health tree when available; fall back to legacy infra-driven boxes
+  const tree = lastData.healthTree;
+  if (tree?.root?.children) {
+    renderTreeSystemBoxes(tree);
+    return;
+  }
   renderSystemBox('sysbox-edge', computeEdgeSubsystems(health, infra));
   renderSystemBox('sysbox-forge', computeForgeSubsystems(health, infra));
   renderSystemBox('sysbox-sql', computeSqlSubsystems(infra));
   renderSystemBox('sysbox-sentinel', computeSentinelSubsystems(health, infra));
 }
+
+function renderTreeSystemBoxes(tree) {
+  const root = tree.root;
+  const systems = root.children || [];
+  const grid = document.getElementById('system-boxes');
+
+  // Rebuild box elements to match tree systems
+  grid.innerHTML = systems.map((sys, i) => {
+    const id = `sysbox-tree-${i}`;
+    return `<div class="system-box" id="${id}">`
+      + `<div class="system-box-header"><div class="system-box-icon"></div><div class="system-box-name">${esc(sys.name)}</div><div class="system-box-badge">--</div></div>`
+      + `<div class="subsystem-list"></div></div>`;
+  }).join('');
+
+  systems.forEach((sys, i) => {
+    const kids = sys.children || [];
+    const items = kids.map(child => {
+      const isProbe = child.nodeType === 'probe';
+      const dot = treeNodeDot(child);
+      let value, cls;
+      if (isProbe) {
+        const st = child.status;
+        value = st === 'healthy' ? 'Healthy' : st === 'unhealthy' ? 'Unhealthy' : st === 'unreachable' ? 'Unreachable' : 'Pending';
+        cls = child.health === 1 ? 'ok' : child.health === 0 ? 'bad' : '';
+      } else {
+        value = `${child.healthy}/${child.total}`;
+        cls = child.ratio >= 1 ? 'ok' : child.ratio >= 0.5 ? 'warn' : child.total > 0 ? 'bad' : '';
+      }
+      return { name: child.name, status: dot, value, valueCls: cls };
+    });
+    renderSystemBox(`sysbox-tree-${i}`, { name: sys.name, items });
+  });
+
+  // Platform summary line
+  const pctText = root.total > 0 ? `${root.healthy}/${root.total} (${Math.round((root.ratio ?? 0) * 100)}%)` : '--';
+  const existing = document.getElementById('tree-platform-summary');
+  if (existing) {
+    existing.querySelector('.sub-value').textContent = pctText;
+  } else {
+    const summary = document.createElement('div');
+    summary.id = 'tree-platform-summary';
+    summary.className = 'subsystem-item';
+    summary.style.cssText = 'justify-content:flex-end;gap:8px;padding:4px 12px 0;opacity:0.6;font-size:0.72rem;';
+    summary.innerHTML = `<span style="color:var(--text-dim);font-family:var(--display);letter-spacing:2px;text-transform:uppercase">PLATFORM</span>`
+      + `<span class="sub-value ${root.ratio >= 1 ? 'ok' : root.ratio >= 0.8 ? 'warn' : 'bad'}">${pctText}</span>`;
+    grid.parentNode.insertBefore(summary, grid.nextSibling);
+  }
+}
+
+function treeNodeDot(node) {
+  if (node.nodeType === 'probe') return node.health === 1 ? 'up' : node.health === 0 ? 'down' : 'idle';
+  if (node.total === 0) return 'idle';
+  if (node.ratio >= 1) return 'up';
+  if (node.ratio >= 0.5) return 'warn';
+  return 'down';
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function renderSystemBox(boxId, data) {
   const box = document.getElementById(boxId);
@@ -4104,6 +4169,8 @@ let countdown = REFRESH_INTERVAL;
 
 // Ops view: 7 sequential calls - one cycle per service health tile
 const OPS_STEPS = [
+  { name: 'TREE', contestant: 'CROM', fn: API.healthTree, key: 'healthTree',
+    render() { /* stored in lastData.healthTree — consumed by INFRA render */ }},
   { name: 'HEALTH', contestant: 'TRON', fn: API.health, key: 'health',
     render() {
       const h = lastData.health;
