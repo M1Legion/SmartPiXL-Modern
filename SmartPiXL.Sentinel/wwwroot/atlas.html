@@ -64,12 +64,13 @@
             --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-            /* Category accent colors */
-            --cat-architecture: #8b5cf6;
-            --cat-subsystems: #3b82f6;
-            --cat-database: #10b981;
-            --cat-operations: #f59e0b;
-            --cat-deepdives: #06b6d4;
+            /* Category accent colors — mirrors Health.Node tree tiers */
+            --cat-platform: #8b5cf6;
+            --cat-systems: #3b82f6;
+            --cat-subsystems: #06b6d4;
+            --cat-components: #10b981;
+            --cat-pixlscript: #f59e0b;
+            --cat-reference: #64748b;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -455,12 +456,13 @@
         .feature-card.active { border-color: var(--border-active); background: var(--bg-card-hover); }
         .feature-card.active::before { opacity: 1; }
 
-        /* Category-colored top bar */
-        .feature-card[data-category="Architecture"]::before { background: var(--cat-architecture); }
+        /* Category-colored top bar — mirrors Health.Node tree tiers */
+        .feature-card[data-category="Platform"]::before { background: var(--cat-platform); }
+        .feature-card[data-category="Systems"]::before { background: var(--cat-systems); }
         .feature-card[data-category="Subsystems"]::before { background: var(--cat-subsystems); }
-        .feature-card[data-category="Database"]::before { background: var(--cat-database); }
-        .feature-card[data-category="Operations"]::before { background: var(--cat-operations); }
-        .feature-card[data-category="Deep Dives"]::before { background: var(--cat-deepdives); }
+        .feature-card[data-category="Components"]::before { background: var(--cat-components); }
+        .feature-card[data-category="PiXL Script"]::before { background: var(--cat-pixlscript); }
+        .feature-card[data-category="Reference"]::before { background: var(--cat-reference); }
 
         .card-header {
             display: flex;
@@ -1027,8 +1029,8 @@
         <div class="hero-content">
             <h1>SmartPiXL Atlas</h1>
             <p class="hero-subtitle">
-                Platform documentation. Every subsystem, every enrichment step, every schema &mdash; 
-                organized in four depth tiers from overview to implementation detail.
+                Platform documentation mirroring the Health Tree &mdash; from platform overview 
+                through systems, subsystems, and components across four audience tiers.
             </p>
             <div class="hero-metrics" id="heroMetrics"></div>
         </div>
