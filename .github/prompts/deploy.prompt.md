@@ -52,6 +52,6 @@ Get-Service SmartPiXL-Forge
 ## Post-Deploy Checks
 
 1. Check app logs for errors
-2. Verify PiXL.Raw is receiving new rows
+2. Verify PiXL.Parsed is receiving new rows
 3. Check ETL watermarks are advancing
 4. Check Failover/ directory — no new JSONL files accumulating

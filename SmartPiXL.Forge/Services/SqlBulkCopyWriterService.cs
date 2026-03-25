@@ -18,10 +18,9 @@ namespace SmartPiXL.Forge.Services;
 //   SqlBulkCopy → PiXL.Parsed (all 230 columns in a single write)
 //
 // PREVIOUS ARCHITECTURE (eliminated):
-//   Forge → SqlBulkCopy → PiXL.Raw (9 cols) → ParsedBulkInsertService →
-//   PiXL.Parsed (229 cols). That two-step pipeline is gone. PiXL.Raw is no
-//   longer written to by the Forge. QueryString and HeadersJson are now stored
-//   directly in PiXL.Parsed for re-parse capability.
+//   Forge → SqlBulkCopy → PiXL.Parsed (229 cols). The former two-step pipeline
+//   is gone. Data flows directly into PiXL.Parsed. QueryString and HeadersJson
+//   are stored directly in PiXL.Parsed for re-parse capability.
 //
 // KEY DESIGN DECISIONS:
 //   • Parse inline: ParsedRecordParser.Parse() runs ~1μs/record — negligible

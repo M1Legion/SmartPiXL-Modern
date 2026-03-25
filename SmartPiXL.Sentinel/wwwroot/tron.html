@@ -2014,10 +2014,8 @@ body::before {
 
     <!-- Pipeline Flow Visualization -->
     <div class="pipeline" id="p-pipeline" style="margin-bottom:24px;">
-      <div class="pipe-node"><div class="pipe-node-label">RAW</div><div class="pipe-node-value" id="p-pipe-raw">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="p-pipe-raw-ts"></div></div>
-      <div class="pipe-arrow"><div class="pipe-lag" id="p-lag-parse"></div></div>
       <div class="pipe-node"><div class="pipe-node-label">PARSED</div><div class="pipe-node-value" id="p-pipe-parsed">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="p-pipe-parsed-ts"></div></div>
-      <div class="pipe-arrow"></div>
+      <div class="pipe-arrow"><div class="pipe-lag" id="p-lag-parse"></div></div>
       <div class="pipe-node"><div class="pipe-node-label">VISITS</div><div class="pipe-node-value" id="p-pipe-visits">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="p-pipe-visits-ts"></div></div>
       <div class="pipe-arrow"><div class="pipe-lag" id="p-lag-match"></div></div>
       <div class="pipe-node"><div class="pipe-node-label">IP MATCH</div><div class="pipe-node-value" id="p-pipe-match">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="p-pipe-match-ts"></div></div>
@@ -2677,7 +2675,6 @@ function renderInsightsHero() {
 function renderPipelineStrip(p) {
   if (!p) return;
 
-  document.getElementById('p-pipe-raw').textContent = num(p.rawRows);
   document.getElementById('p-pipe-parsed').textContent = num(p.parsedRows);
   document.getElementById('p-pipe-visits').textContent = num(p.visitRows);
   document.getElementById('p-pipe-match').textContent = num(p.matchRows);
@@ -2686,7 +2683,6 @@ function renderPipelineStrip(p) {
   resEl.style.color = p.matchesResolved > 0 ? 'var(--green)' : 'var(--text-dim)';
 
   const ts = (id, dt) => { const el = document.getElementById(id); if (el && dt) el.textContent = timeAgo(dt); };
-  ts('p-pipe-raw-ts', p.rawLatest);
   ts('p-pipe-parsed-ts', p.parsedLatest);
   ts('p-pipe-visits-ts', p.visitLatest);
   ts('p-pipe-match-ts', p.legacyMatchLastRunAt);
@@ -2752,7 +2748,6 @@ function renderWatermarks(p) {
     <table class="feed-table" style="font-size:0.78rem;">
       <thead><tr><th>TABLE</th><th>ROWS</th><th>LATEST</th></tr></thead>
       <tbody>${[
-        ['PiXL.Raw', p.rawRows, p.rawLatest],
         ['PiXL.Parsed', p.parsedRows, p.parsedLatest],
         ['PiXL.Visit', p.visitRows, p.visitLatest],
         ['PiXL.Match', p.matchRows, p.matchLatest],

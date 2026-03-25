@@ -3,12 +3,10 @@
 --
 -- Targets the PiXL.* / ETL.* schema layout (post-17B).
 -- These procedures handle:
---   - Raw data purge (PiXL.Raw rows already parsed)
 --   - Statistics / monitoring
 --   - Index maintenance
 --
 -- Schedule Recommendations (SQL Agent or Windows Task Scheduler):
---   - ETL.usp_PurgeRawData        : Daily at 3 AM
 --   - ETL.usp_IndexMaintenance    : Weekly on Sunday at 4 AM
 --   - ETL.usp_PipelineStatistics  : On demand
 --
@@ -19,74 +17,10 @@
 USE SmartPiXL;
 GO
 
--- (SECTION 1 REMOVED — PiXL.Archive dropped per migration 38.
---  PiXL.Raw is the permanent archive. See 38_DropArchiveCleanup.sql.)
+-- (SECTION 1 REMOVED — PiXL.Archive dropped per migration 38.)
 GO
 
--- =============================================
--- SECTION 2: PURGE RAW DATA
--- Deletes rows from PiXL.Raw that have already been parsed
--- (Id <= ETL.Watermark.LastProcessedId) and are older than
--- the retention window.
--- =============================================
-IF OBJECT_ID('ETL.usp_PurgeRawData', 'P') IS NOT NULL
-    DROP PROCEDURE ETL.usp_PurgeRawData;
-GO
-
-CREATE PROCEDURE ETL.usp_PurgeRawData
-    @DaysToKeep     INT = 7,        -- Keep raw rows for N days after parsing
-    @BatchSize      INT = 5000,     -- Delete in batches to limit lock duration
-    @MaxBatches     INT = 200       -- Safety cap per execution
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @CutoffDate     DATETIME2 = DATEADD(DAY, -@DaysToKeep, GETUTCDATE());
-    DECLARE @WatermarkId    BIGINT;
-    DECLARE @TotalDeleted   INT = 0;
-    DECLARE @BatchDeleted   INT = 1;
-    DECLARE @BatchCount     INT = 0;
-
-    -- Only purge rows the ETL has already processed
-    SELECT @WatermarkId = LastProcessedId FROM ETL.Watermark
-    WHERE ProcessName = 'ParseNewHits';
-
-    IF @WatermarkId IS NULL
-    BEGIN
-        PRINT 'No watermark found — nothing to purge.';
-        RETURN;
-    END
-
-    WHILE @BatchDeleted > 0 AND @BatchCount < @MaxBatches
-    BEGIN
-        DELETE TOP (@BatchSize)
-        FROM PiXL.Raw
-        WHERE Id <= @WatermarkId
-          AND ReceivedAt < @CutoffDate;
-
-        SET @BatchDeleted = @@ROWCOUNT;
-        SET @TotalDeleted = @TotalDeleted + @BatchDeleted;
-        SET @BatchCount   = @BatchCount + 1;
-
-        IF @BatchDeleted = @BatchSize
-            WAITFOR DELAY '00:00:00.100';   -- yield between batches
-    END
-
-    SELECT
-        @TotalDeleted   AS RecordsPurged,
-        @CutoffDate     AS CutoffDate,
-        @WatermarkId    AS WatermarkAtExecution,
-        @BatchCount     AS BatchesProcessed,
-        CASE WHEN @BatchCount >= @MaxBatches
-             THEN 'MoreRemaining' ELSE 'Complete' END AS [Status];
-END
-GO
-
-PRINT 'Created ETL.usp_PurgeRawData.';
-GO
-
--- (SECTION 3 REMOVED — usp_ArchiveParsedData dropped per migration 38.
---  PiXL.Raw is the permanent archive; no parsed-to-archive flow needed.)
+-- (SECTION 2 REMOVED — usp_PurgeRawData dropped. PiXL.Raw has been removed.)
 GO
 
 -- =============================================
@@ -118,22 +52,22 @@ BEGIN
     GROUP BY s.name, t.name
     ORDER BY SizeMB DESC;
 
-    -- 2. ETL lag (un-parsed rows)
+    -- 2. ETL lag (un-processed rows)
     SELECT
         'ETL_Lag'                       AS Category,
-        (SELECT MAX(Id) FROM PiXL.Raw)                              AS MaxRawId,
+        (SELECT MAX(SourceId) FROM PiXL.Parsed)                     AS MaxParsedSourceId,
         (SELECT LastProcessedId FROM ETL.Watermark
-         WHERE ProcessName = 'ParseNewHits')                        AS WatermarkId,
-        (SELECT MAX(Id) FROM PiXL.Raw)
+         WHERE ProcessName = 'ProcessDimensions')                   AS WatermarkId,
+        ISNULL((SELECT MAX(SourceId) FROM PiXL.Parsed), 0)
             - ISNULL((SELECT LastProcessedId FROM ETL.Watermark
-                      WHERE ProcessName = 'ParseNewHits'), 0)      AS UnparsedRows;
+                      WHERE ProcessName = 'ProcessDimensions'), 0)  AS UnprocessedRows;
 
     -- 3. Insert rate — last hour, per minute
     SELECT
         'InsertRate'                                AS Category,
         DATEADD(MINUTE, DATEDIFF(MINUTE, 0, ReceivedAt), 0) AS MinuteBucket,
         COUNT(*)                                    AS RecordsPerMinute
-    FROM PiXL.Raw WITH (NOLOCK)
+    FROM PiXL.Parsed WITH (NOLOCK)
     WHERE ReceivedAt >= DATEADD(HOUR, -1, GETUTCDATE())
     GROUP BY DATEADD(MINUTE, DATEDIFF(MINUTE, 0, ReceivedAt), 0)
     ORDER BY MinuteBucket DESC;
@@ -141,11 +75,11 @@ BEGIN
     -- 4. Top companies today
     SELECT TOP 10
         'TopCompaniesToday'     AS Category,
-        CompanyID,
+        CompanyId,
         COUNT(*)                AS PixelFires
-    FROM PiXL.Raw WITH (NOLOCK)
+    FROM PiXL.Parsed WITH (NOLOCK)
     WHERE ReceivedAt >= CAST(GETUTCDATE() AS DATE)
-    GROUP BY CompanyID
+    GROUP BY CompanyId
     ORDER BY COUNT(*) DESC;
 END
 GO

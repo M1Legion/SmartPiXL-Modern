@@ -36,7 +36,7 @@ Most issues are completely transparent to end users. The failover system catches
 
 ### No Data After Deploy
 
-**Symptom**: Tracking pixel requests are returning 200/GIF but no rows appear in PiXL.Raw.
+**Symptom**: Tracking pixel requests are returning 200/GIF but no rows appear in PiXL.Parsed.
 
 **Diagnostic steps**:
 
@@ -68,7 +68,7 @@ Most issues are completely transparent to end users. The failover system catches
 
 ### ETL Not Processing
 
-**Symptom**: PiXL.Raw has rows but PiXL.Parsed doesn't grow.
+**Symptom**: Forge is running but PiXL.Parsed row count is not growing (Forge writes directly to PiXL.Parsed — no Raw→Parsed ETL step).
 
 **Diagnostic steps**:
 
@@ -250,8 +250,8 @@ The Forge's `SelfHealingService` monitors the Edge circuit via `GET /internal/he
 ### Watermark Gotcha After Backup Restore
 
 If the database is restored from backup:
-- PiXL.Raw may have rows beyond what the watermark has processed
-- OR the watermark may be ahead of the max Raw ID (if backup is older than current watermark)
+- PiXL.Parsed may have rows beyond what the watermark has processed
+- OR the watermark may be ahead of the max Parsed ID (if backup is older than current watermark)
 
 After restore:
 ```sql

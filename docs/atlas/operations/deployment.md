@@ -226,4 +226,4 @@ For initial server setup:
 7. Deploy Edge (publish + verify web.config + verify appsettings.json)
 8. Register and deploy Forge service
 9. Register and deploy Sentinel service
-10. Send test traffic and verify end-to-end: Edge → Forge → PiXL.Raw → ETL → PiXL.Parsed
+10. Send test traffic and verify end-to-end: Edge → Forge → PiXL.Parsed

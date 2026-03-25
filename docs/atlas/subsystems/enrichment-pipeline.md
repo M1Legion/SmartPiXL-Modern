@@ -78,7 +78,7 @@ FailoverCatchupService ───────────────────
                                                           ↓
                                                  ForgeChannels.SqlWriter
                                                           ↓
-                                                 SqlBulkCopyWriterService → PiXL.Raw
+                                                 SqlBulkCopyWriterService → PiXL.Parsed
 ```
 
 Two Channel<TrackingData> instances connect the pipeline stages:
@@ -189,7 +189,7 @@ If any enrichment throws, the exception is caught per-record and the record is s
 
 Every enrichment result is appended to `TrackingData.QueryString` as `_srv_*` parameters. This is architecturally intentional:
 
-1. **PiXL.Raw has only 9 columns** — adding a column for every enrichment would mean 50+ columns and constant schema migrations
+1. **PiXL.Parsed has 231 columns** — Forge writes all enrichment data directly as individual columns via SqlBulkCopy
 2. **The ETL (usp_ParseNewHits) already extracts params** — it parses the querystring into PiXL.Parsed's 300+ columns, so Forge enrichments automatically flow into the parsed table
 3. **Append-only is safe** — enrichments can't corrupt original browser data since they use the `_srv_` prefix namespace
 
@@ -219,7 +219,7 @@ if (!mmResult.Asn.HasValue)
 
 `ForgeChannels.Enrichment` uses `BoundedChannelFullMode.Wait`, meaning the pipe listener blocks when the enrichment channel is full. This is correct behavior — the pipe listener should apply backpressure to the Edge rather than dropping records.
 
-However, `SqlBulkCopyWriterService` uses `TryWrite` to write to the SQL channel, which means if SQL is down and the channel fills up, records are dropped with a warning log. This is a deliberate trade-off: SQL being down shouldn't block enrichment processing for records that can still be enriched. The dropped records exist in PiXL.Raw (they were already written by the Edge's failover path) and can be re-enriched.
+However, `SqlBulkCopyWriterService` uses `TryWrite` to write to the SQL channel, which means if SQL is down and the channel fills up, records are dropped with a warning log. This is a deliberate trade-off: SQL being down shouldn't block enrichment processing for records that can still be enriched. The dropped records exist in PiXL.Parsed (written by Edge's failover/direct path) and can be re-enriched.
 
 ### LeadQualityScoring Position
 

@@ -22,12 +22,12 @@ namespace SmartPiXL.Forge.Services;
 //   See SmartPiXL/SQL/61_FixDeviceIpUpsert.sql for the source-of-truth mapping.
 //
 // USAGE:
-//   - ParsedBulkInsertService: backfill from PiXL.Raw
+//   - ParsedBulkInsertService: backfill (retired)
 //   - SqlBulkCopyWriterService: dual-write for new Forge traffic (future)
 // ============================================================================
 
 /// <summary>
-/// Parses a PiXL.Raw record's QueryString into all 230 PiXL.Parsed columns.
+/// Parses a tracking hit's QueryString into all 230 PiXL.Parsed columns.
 /// Returns an <c>object?[]</c> array for direct consumption by <see cref="ParsedDataReader"/>.
 /// </summary>
 internal static class ParsedRecordParser
@@ -38,11 +38,11 @@ internal static class ParsedRecordParser
     /// <summary>
     /// Column names for <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> mappings.
     /// SourceId is omitted — SQL generates it via SEQUENCE DEFAULT (PiXL.HitSequence).
-    /// QueryString and HeadersJson are the raw fields merged from the former PiXL.Raw table.
+    /// QueryString and HeadersJson are the raw fields from the tracking capture.
     /// </summary>
     internal static readonly string[] ColumnNames =
     [
-        // ── Raw field: QueryString (merged from PiXL.Raw) ──────────────
+        // ── Raw field: QueryString ────────────────────────────────
         "QueryString",          // 0  — nvarchar(max) ← TrackingData.QueryString
         "CompanyID",            // 1  — int      ← Raw.CompanyID
         "PiXLID",               // 2  — int      ← Raw.PiXLID
@@ -303,7 +303,7 @@ internal static class ParsedRecordParser
         "BotBitmapValue",           // 227 — int (NULL — computed)
         "EvasionBitmapValue",       // 228 — int (NULL — computed)
 
-        // ── Raw field: HeadersJson (merged from PiXL.Raw) ──────────────
+        // ── Raw field: HeadersJson ────────────────────────────────
         "HeadersJson",              // 229 — nvarchar(max) ← TrackingData.HeadersJson
 
         // ── Phase 8E: Edge HTTP context signals (cols 231–251) ─────────
@@ -731,7 +731,7 @@ internal static class ParsedRecordParser
 
 // ============================================================================
 // PARSED DATA READER — Zero-allocation DbDataReader for SqlBulkCopy to PiXL.Parsed.
-// Same pattern as TrackingDataReader (for PiXL.Raw) in SqlBulkCopyWriterService.
+// Same pattern as TrackingDataReader in SqlBulkCopyWriterService.
 // ============================================================================
 
 /// <summary>

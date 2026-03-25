@@ -10,42 +10,15 @@ namespace SmartPiXL.Forge.Services;
 // ============================================================================
 // PARSED BULK INSERT SERVICE — .NET backfill for PiXL.Parsed.
 //
-// Replaces the ETL proc's Phases 1–8D (300+ scalar UDF calls per row) with
-// span-based .NET parsing via ParsedRecordParser. The ETL proc still handles
-// Phases 9–13 (Device/IP/Visit upserts) which are already fast.
-//
-// PIPELINE:
-//   1. Read ETL watermark (LastProcessedId)
-//   2. Read PiXL.Raw batch (50K rows)
-//   3. Parse each row's QueryString in .NET (~1μs/row vs ~7ms/row in SQL)
-//   4. SqlBulkCopy parsed records to PiXL.Parsed
-//   5. Call ETL.usp_ParseNewHits (@BatchSize matching)
-//      → Phase 1 INSERT: NOT EXISTS skips pre-parsed rows → @Inserted = 0
-//      → Phases 2–8D: skipped (no new rows to parse)
-//      → Phases 9–13: Device/IP/Visit upserts (always runs)
-//      → Watermark advanced by the proc
-//   6. Log progress (rate, remaining, ETA)
-//
-// PERFORMANCE:
-//   SQL UDF path:  50K rows in 337s (~150 rows/sec, 42h for 25M)
-//   .NET parse:    50K rows in <1s  (parsing), 5–10s (BulkCopy), 25s (Phase 9–13)
-//   Expected:      50K rows in ~35s (~1,400 rows/sec, ~5h for 25M)
-//
-// DURABILITY:
-//   If BulkCopy to Parsed succeeds but the ETL proc fails, the next iteration
-//   reads the SAME watermark (proc didn't advance it) and checks for existing
-//   Parsed rows via HashSet — duplicates are skipped. No data loss, no doubles.
-//
-// LIFECYCLE:
-//   Runs continuously. Processes batch → calls proc → repeats until caught up.
-//   When caught up, sleeps 30s then checks again. Logs rate/ETA every batch.
-//   Disable by commenting out the AddHostedService<> line in Program.cs.
+// RETIRED: PiXL.Raw has been dropped. This service was a backfill that read
+// from PiXL.Raw and parsed query strings in .NET. It is kept for reference but
+// is disabled in Program.cs. Forge now writes directly to PiXL.Parsed via
+// SqlBulkCopyWriterService.
 // ============================================================================
 
 /// <summary>
-/// Background service that reads <c>PiXL.Raw</c> in batches, parses query strings
-/// in .NET using <see cref="ParsedRecordParser"/>, bulk-inserts into <c>PiXL.Parsed</c>,
-/// then calls the ETL proc for Phase 9–13 (Device/IP/Visit processing).
+/// RETIRED: Background service that formerly read <c>PiXL.Raw</c> in batches.
+/// PiXL.Raw has been dropped. This service is disabled in Program.cs.
 /// </summary>
 public sealed class ParsedBulkInsertService : BackgroundService
 {
@@ -154,14 +127,14 @@ public sealed class ParsedBulkInsertService : BackgroundService
         var existingIds = await GetExistingParsedIdsAsync(
             conn, lastProcessedId, rangeEnd, ct);
 
-        // ── Step 3: Read from Raw + Parse in .NET ──────────────────────────
+        // ── Step 3: Read from Parsed (legacy — PiXL.Raw dropped) ──────────────
         var sw = Stopwatch.StartNew();
 
         await using var readCmd = conn.CreateCommand();
         readCmd.CommandText = """
-            SELECT Id, CompanyID, PiXLID, IPAddress, ReceivedAt,
+            SELECT Id, CompanyId, PiXLId, IPAddress, ReceivedAt,
                    RequestPath, QueryString, UserAgent, Referer
-            FROM PiXL.Raw
+            FROM PiXL.Parsed
             WHERE Id > @LastId AND Id <= @MaxId
             ORDER BY Id
             """;
@@ -245,7 +218,7 @@ public sealed class ParsedBulkInsertService : BackgroundService
 
     /// <summary>
     /// Reads the watermark only (no self-healing — we manage the range ourselves).
-    /// Returns (lastProcessedId, maxRawId).
+    /// Returns (lastProcessedId, maxParsedId).
     /// </summary>
     private static async Task<(long LastProcessedId, long MaxRawId)> GetRangeAsync(
         SqlConnection conn, CancellationToken ct)
@@ -254,7 +227,7 @@ public sealed class ParsedBulkInsertService : BackgroundService
         cmd.CommandText = """
             SELECT
                 (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = 'ParseNewHits'),
-                (SELECT ISNULL(MAX(Id), 0) FROM PiXL.Raw)
+                (SELECT ISNULL(MAX(SourceId), 0) FROM PiXL.Parsed)
             """;
         cmd.CommandTimeout = 60;
 

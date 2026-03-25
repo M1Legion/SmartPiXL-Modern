@@ -44,7 +44,7 @@ NamedPipeServerStream → PipeListenerService → Channel<TrackingData>
       Tier 1: BotDetection → UaParsing → DnsLookup → MaxMind → IpApi → Whois
       Tier 2: CrossCustomer → LeadScoring → SessionStitching → Affluence
       Tier 3: CulturalArbitrage → DeviceAge → Contradictions → BehavioralReplay → DeadInternet
-  → Channel<TrackingData> → SqlBulkCopyWriterService → PiXL.Raw
+  → Channel<TrackingData> → SqlBulkCopyWriterService → PiXL.Parsed
 ```
 
 ## Hot Path Rules (Edge)
@@ -74,8 +74,7 @@ NamedPipeServerStream → PipeListenerService → Channel<TrackingData>
 
 - `dbo.GetQueryParam()` scalar UDF is the main ETL cost (~300+ calls per row with expanded columns)
 - Consider CLR replacement (Phase 7) if it becomes bottleneck
-- PiXL.Raw: clustered on Id, minimal indexes — fast INSERT is priority
-- PiXL.Parsed: covering indexes for dashboard queries
+- PiXL.Parsed: clustered on Id, covering indexes for both INSERT speed and dashboard queries
 - Filtered indexes for `WHERE BotScore >= 50` etc.
 
 ## Anti-Patterns to Flag

@@ -39,7 +39,7 @@ Failover: JSONL to Failover/ directory if pipe unavailable
 
 | Service | Type | Role |
 |---------|------|------|
-| `DatabaseWriterService` | BackgroundService | Channel<T> → SqlBulkCopy to PiXL.Raw |
+| `DatabaseWriterService` | BackgroundService | Channel<T> → SqlBulkCopy to PiXL.Parsed |
 | `TrackingCaptureService` | Singleton | Zero-alloc HTTP request → TrackingData parser |
 | `FingerprintStabilityService` | Singleton | Per-IP fingerprint variation detection |
 | `IpBehaviorService` | Singleton | Subnet /24 velocity + rapid-fire timing |
@@ -54,7 +54,7 @@ Failover: JSONL to Failover/ directory if pipe unavailable
 |---------|------|------|
 | `PipeListenerService` | BackgroundService | Named pipe server, receives records from Edge |
 | `EnrichmentPipelineService` | BackgroundService | Tier 1-3 enrichment chain via Channel<T> |
-| `SqlBulkCopyWriterService` | BackgroundService | Channel<T> → SqlBulkCopy to PiXL.Raw |
+| `SqlBulkCopyWriterService` | BackgroundService | Channel<T> → SqlBulkCopy to PiXL.Parsed |
 | `FailoverCatchupService` | BackgroundService | Reads JSONL files when pipe was unavailable |
 | `EtlBackgroundService` | BackgroundService | Every 60s: ParseNewHits → MatchVisits |
 | `IpApiSyncService` | BackgroundService | Daily sync from Xavier → IPAPI.IP |
@@ -110,7 +110,6 @@ Get-ChildItem "C:\inetpub\Smartpixl.info\Log" | Sort-Object LastWriteTime -Desc 
 
 # Pipeline health
 Invoke-Sqlcmd -ServerInstance "localhost\SQL2025" -Database "SmartPiXL" -TrustServerCertificate -Query "
-SELECT 'PiXL.Raw' AS T, COUNT(*) AS N FROM PiXL.Raw UNION ALL
 SELECT 'PiXL.Parsed', COUNT(*) FROM PiXL.Parsed UNION ALL
 SELECT 'PiXL.Device', COUNT(*) FROM PiXL.Device UNION ALL
 SELECT 'PiXL.IP', COUNT(*) FROM PiXL.IP UNION ALL
@@ -132,7 +131,7 @@ Get-ChildItem "C:\inetpub\Smartpixl.info\Failover\*.jsonl" -ErrorAction Silently
 When data isn't flowing:
 1. **Check IIS logs** → Are requests reaching the server?
 2. **Check app logs** → Is the app running? Exceptions?
-3. **Check PiXL.Raw** → Are rows being written?
+3. **Check PiXL.Parsed** → Are rows being written?
 4. **Check named pipe** → Is the Forge receiving? Check Failover/ for JSONL files.
 5. **Check watermarks** → Is ETL processing?
 6. **Check PiXL.Parsed** → Are rows being parsed?

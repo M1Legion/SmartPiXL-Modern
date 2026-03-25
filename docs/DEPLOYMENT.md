@@ -172,7 +172,7 @@ Get-ChildItem "C:\Services\SmartPiXL-Forge\Log" | Sort-Object LastWriteTime -Des
 # Should see: "ETL parsed N rows (Id X–Y)"
 
 # Check pipeline counts
-sqlcmd -S "localhost\SQL2025" -d "SmartPiXL" -C -Q "SELECT 'PiXL.Raw' AS T, COUNT(*) AS N FROM PiXL.Raw UNION ALL SELECT 'PiXL.Parsed', COUNT(*) FROM PiXL.Parsed"
+sqlcmd -S "localhost\SQL2025" -d "SmartPiXL" -C -Q "SELECT 'PiXL.Parsed' AS T, COUNT(*) AS N FROM PiXL.Parsed"
 ```
 
 ---
@@ -293,8 +293,7 @@ Get-ChildItem $dir | Sort-Object LastWriteTime -Desc | Select-Object -First 1 | 
 
 ```powershell
 sqlcmd -S "localhost\SQL2025" -d "SmartPiXL" -C -Q "
-SELECT 'PiXL.Raw' AS T, COUNT(*) AS N FROM PiXL.Raw UNION ALL
-SELECT 'PiXL.Parsed', COUNT(*) FROM PiXL.Parsed UNION ALL
+SELECT 'PiXL.Parsed' AS T, COUNT(*) AS N FROM PiXL.Parsed UNION ALL
 SELECT 'PiXL.Device', COUNT(*) FROM PiXL.Device UNION ALL
 SELECT 'PiXL.IP', COUNT(*) FROM PiXL.IP UNION ALL
 SELECT 'PiXL.Visit', COUNT(*) FROM PiXL.Visit UNION ALL

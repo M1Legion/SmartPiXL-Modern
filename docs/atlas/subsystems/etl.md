@@ -34,7 +34,7 @@ All processing is automated and continuous — no manual data manipulation requi
 
 The Forge runs the ETL cycle automatically:
 
-1. **Parse New Hits** (`usp_ParseNewHits`) — Reads unprocessed records from PiXL.Raw (9 columns), extracts 300+ individual fields into PiXL.Parsed, creates/updates device and IP records, creates visit records. This is the heavy-lift operation.
+1. **Parse New Hits** (`usp_ParseNewHits`) — *No longer runs. PiXL.Raw has been dropped; Forge writes all 231 columns directly to PiXL.Parsed via SqlBulkCopy.* Previously this read unprocessed records from PiXL.Raw (9 columns) and extracted 300+ individual fields into PiXL.Parsed.
 
 2. **Match Visits** (`usp_MatchVisits`) — Looks at visits with email addresses, matches them to known contacts in AutoConsumer, creates identity links in PiXL.Match. This is how anonymous visitors become known leads.
 
@@ -45,9 +45,7 @@ The Forge runs the ETL cycle automatically:
 ### Data Flow
 
 ```
-PiXL.Raw (9 columns)
-    ↓ usp_ParseNewHits (13 phases)
-PiXL.Parsed (300+ columns)
+PiXL.Parsed (231 columns, written directly by Forge via SqlBulkCopy)
 PiXL.Device (one per unique device)
 PiXL.IP (one per unique IP address)
 PiXL.Visit (one per visit — the fact table)
@@ -72,7 +70,7 @@ This guarantees exactly-once processing with crash recovery.
 
 | Metric | Typical | Peak |
 |--------|---------|------|
-| PiXL.Raw rows per minute | 100-1,000 | 10,000+ during campaigns |
+| PiXL.Parsed rows per minute | 100-1,000 | 10,000+ during campaigns |
 | Parse time per batch (10K rows) | 2-5 seconds | 8 seconds (complex sessions) |
 | Match time per batch | < 1 second | 2 seconds |
 | Parsed columns populated | ~160 per typical web visit | 300+ for full-featured browsers |
@@ -106,9 +104,9 @@ TRY_CAST(dbo.GetQueryParam(p.QueryString, 'sw') AS INT)  -- Screen width
 dbo.GetQueryParam(p.QueryString, 'tz')                     -- Timezone string
 ```
 
-### PiXL.Raw → Parsed Mapping
+### PiXL.Parsed Column Layout
 
-PiXL.Raw has 9 columns. The full visitor payload is carried in `QueryString`:
+PiXL.Parsed has 231 columns. Forge writes all enrichment data directly via SqlBulkCopy. The QueryString and HeadersJson columns are preserved for raw data auditing:
 
 | Raw Column | Content |
 |-----------|---------|
@@ -175,7 +173,7 @@ Default batch size: 10,000 rows. Configurable via `ForgeSettings.EtlBatchSize`. 
 
 | Procedure | Schedule | Purpose |
 |-----------|----------|---------|
-| `ETL.usp_PurgeRawData` | Daily 3 AM | Deletes PiXL.Raw rows that are already processed (Id ≤ watermark) and older than retention period |
+| `ETL.usp_PurgeRawData` | Daily 3 AM | *Obsolete: PiXL.Raw has been dropped.* Previously deleted processed raw rows older than retention period |
 | `ETL.usp_IndexMaintenance` | Weekly Sunday 4 AM | Rebuilds/reorganizes indexes based on fragmentation |
 | `ETL.usp_PipelineStatistics` | On demand | Returns pipeline health metrics (watermark positions, lag, throughput) |
 
@@ -221,7 +219,7 @@ This is a SQL Server 2025-specific feature. The `json` type stores the result in
 
 ### Watermark Edge Cases
 
-1. **Watermark ahead of max Raw ID** — Happens if PiXL.Raw was truncated or restored from backup. Fix: `UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = 'ParseNewHits'`
+1. **Watermark ahead of max Parsed ID** — Happens if PiXL.Parsed was truncated or restored from backup. Fix: `UPDATE ETL.Watermark SET LastProcessedId = 0 WHERE ProcessName = 'ParseNewHits'`
 
 2. **Multiple Forge instances** — If two Forge instances run simultaneously (misconfiguration), they'd both read the same watermark and process duplicates. The MERGE in Phases 10-11 (Device, IP) handles duplicates gracefully. Phase 1 INSERT would create duplicate Parsed rows. This is why Forge should only ever be a single instance.
 

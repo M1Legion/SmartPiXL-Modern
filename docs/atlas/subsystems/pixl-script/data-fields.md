@@ -345,7 +345,7 @@ Each field value is `encodeURIComponent()`-encoded. Empty/null/undefined fields 
 
 ### ETL Column Mapping
 
-These 159 browser-side fields map to columns in `PiXL.Parsed` during ETL. The mapping is in `ETL.usp_ParseNewHits`, which extracts each field from the raw query string stored in `PiXL.Raw.QueryParams`.
+These 159 browser-side fields map to columns in `PiXL.Parsed`. Forge writes all columns directly via SqlBulkCopy (231 columns including QueryString and HeadersJson).
 
 Not all 159 fields become individual columns — composite fields like `botSignals` and `crossSignals` are stored as-is (comma-separated strings) and also decomposed into individual boolean columns for filtering.
 

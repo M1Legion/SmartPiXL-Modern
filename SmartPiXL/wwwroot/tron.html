@@ -1850,7 +1850,6 @@ body::before {
   <div id="view-analytics" class="view-content">
     <!-- Hero Cards — Pipeline Metrics -->
     <div class="hero-grid" id="hero-grid">
-      <div class="hero-card"><div class="hero-label">RAW HITS</div><div class="hero-value" id="h-raw">--</div><div class="hero-sub" id="h-raw-sub"></div></div>
       <div class="hero-card"><div class="hero-label">PARSED</div><div class="hero-value" id="h-parsed">--</div><div class="hero-sub" id="h-parsed-sub"></div></div>
       <div class="hero-card"><div class="hero-label">VISITS</div><div class="hero-value" id="h-visits">--</div><div class="hero-sub" id="h-visits-sub"></div></div>
       <div class="hero-card"><div class="hero-label">IP MATCHES</div><div class="hero-value" id="h-matches">--</div><div class="hero-sub" id="h-matches-sub"></div></div>
@@ -1860,7 +1859,7 @@ body::before {
 
     <!-- Full Pipeline Visualization -->
     <div class="pipeline" id="a-pipeline" style="margin-bottom:24px;">
-      <div class="pipe-node"><div class="pipe-node-label">RAW</div><div class="pipe-node-value" id="a-pipe-raw">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-raw-ts"></div></div>
+      <div class="pipe-node"><div class="pipe-node-label">PARSED</div><div class="pipe-node-value" id="a-pipe-parsed">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-parsed-ts"></div></div>
       <div class="pipe-arrow"><div class="pipe-lag" id="a-lag-parse"></div></div>
       <div class="pipe-node"><div class="pipe-node-label">PARSED</div><div class="pipe-node-value" id="a-pipe-parsed">--</div><div style="font-size:0.6rem;color:var(--text-dim)" id="a-pipe-parsed-ts"></div></div>
       <div class="pipe-arrow"></div>
@@ -2192,7 +2191,7 @@ function drillPipeline(stage) {
     if (!sql?.isConnected) {
       html += sug('SQL Server is disconnected. Check that the SQL2025 instance is running:<br><code style="color:var(--cyan)">Get-Service MSSQL$SQL2025</code><br>Verify the connection string in appsettings.json points to localhost\\SQL2025.');
     } else {
-      html += sug('SQL connection is healthy. PiXL.Test stores raw ingested hits. PiXL.Parsed contains ETL-processed rows with all 167+ signals materialized.');
+      html += sug('SQL connection is healthy. PiXL.Parsed stores ingested hits with all 167+ signals materialized.');
     }
     openModal('SQL WRITE STAGE', html);
   }
@@ -3176,7 +3175,6 @@ function renderAnalyticsPipeline(p) {
     const subEl = document.getElementById(id + '-sub');
     if (subEl && sub !== undefined) subEl.textContent = sub;
   };
-  set('h-raw', num(p.rawRows), `max ID ${num(p.maxRawId)}`);
   set('h-parsed', num(p.parsedRows), `lag ${num(p.parseLag)}`);
   set('h-visits', num(p.visitRows), `${num(p.uniqueIpsInVisits)} unique IPs`);
   set('h-matches', num(p.ipMatchCount || 0), `${num(p.legacyMatchProcessed)} processed`);
@@ -3191,7 +3189,6 @@ function renderAnalyticsPipeline(p) {
   set('h-resolved', undefined, `${num(p.matchesPending)} pending`);
 
   // Pipeline bar
-  document.getElementById('a-pipe-raw').textContent = num(p.rawRows);
   document.getElementById('a-pipe-parsed').textContent = num(p.parsedRows);
   document.getElementById('a-pipe-visits').textContent = num(p.visitRows);
   document.getElementById('a-pipe-match').textContent = num(p.matchRows);
@@ -3201,7 +3198,6 @@ function renderAnalyticsPipeline(p) {
 
   // Pipeline timestamps
   const ts = (id, dt) => { const el = document.getElementById(id); if (el && dt) el.textContent = timeAgo(dt); };
-  ts('a-pipe-raw-ts', p.rawLatest);
   ts('a-pipe-parsed-ts', p.parsedLatest);
   ts('a-pipe-visits-ts', p.visitLatest);
   ts('a-pipe-match-ts', p.legacyMatchLastRunAt);
@@ -3294,7 +3290,6 @@ function renderTableCounts(p) {
   const el = document.getElementById('a-table-counts');
   if (!el || !p) return;
   const rows = [
-    ['PiXL.Raw', p.rawRows, p.rawLatest],
     ['PiXL.Parsed', p.parsedRows, p.parsedLatest],
     ['PiXL.Visit', p.visitRows, p.visitLatest],
     ['PiXL.Match', p.matchRows, p.matchLatest],
@@ -3625,7 +3620,6 @@ function renderPipelineHealth(data) {
     const el = document.getElementById('pipeline-health');
     if (!el || !data) { if (el) el.innerHTML = '<p style="color:var(--text-dim)">No pipeline data</p>'; return; }
     const pairs = [
-        ['Raw Rows', data.rawRows],
         ['Parsed Rows', data.parsedRows],
         ['Device Rows', data.deviceRows],
         ['IP Rows', data.ipRows],

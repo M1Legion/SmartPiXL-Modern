@@ -19,7 +19,7 @@ namespace SmartPiXL.Forge.Services;
 //   FailoverCatchupService  → ForgeChannels.Enrichment
 //       → EnrichmentPipelineService (this)
 //       → ForgeChannels.SqlWriter
-//       → SqlBulkCopyWriterService → PiXL.Raw
+//       → SqlBulkCopyWriterService → PiXL.Parsed
 //
 // ENRICHMENT CHAIN (Phase 4 — Tier 1):
 //   1. BotUaDetection  — NetCrawlerDetect bot/crawler detection (inline, ~245μs)

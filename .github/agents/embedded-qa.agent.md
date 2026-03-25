@@ -110,7 +110,7 @@ When the user names a subsystem, map it to the relevant source files, endpoints,
 | **Contradiction Matrix** | `ContradictionMatrixService.cs` | Impossible device/browser/feature combinations |
 | **Behavioral Replay** | `BehavioralReplayService.cs` | Mouse path hash replay detection |
 | **Dead Internet** | `DeadInternetService.cs` | Synthetic traffic / dead internet index |
-| **SQL Writer** | `SqlBulkCopyWriterService.cs` | Bulk insert to PiXL.Raw |
+| **SQL Writer** | `SqlBulkCopyWriterService.cs` | Bulk insert to PiXL.Parsed |
 | **Failover Catchup** | `FailoverCatchupService.cs` | Read JSONL files on restart |
 | **ETL** | `EtlBackgroundService.cs` | Periodic execution of ETL stored procs |
 | **Self-Healing** | `SelfHealingService.cs`, `RemediationService.cs` | Automated detection + remediation queue |
@@ -129,7 +129,6 @@ When the user names a subsystem, map it to the relevant source files, endpoints,
 
 | Subsystem | Schema | Key Objects |
 |-----------|--------|-------------|
-| **Raw Ingest** | `PiXL` | `PiXL.Raw` table |
 | **ETL Pipeline** | `ETL` | `usp_ParseNewHits`, `usp_MatchVisits`, `usp_EnrichParsedGeo`, `ETL.Watermark` |
 | **Parsed Data** | `PiXL` | `PiXL.Parsed` (300+ columns), `PiXL.Device`, `PiXL.IP`, `PiXL.Visit`, `PiXL.Match` |
 | **IPAPI** | `IPAPI` | `IPAPI.IP` (342M+ rows) |

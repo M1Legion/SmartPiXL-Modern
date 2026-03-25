@@ -193,11 +193,11 @@ Enhance `Generate-SyntheticData.ps1` with:
 ### Verification Queries After Generation:
 ```sql
 -- Count raw hits
-SELECT CompanyID, COUNT(*) FROM PiXL.Raw
+SELECT CompanyID, COUNT(*) FROM PiXL.Parsed
 WHERE CompanyID IN ('99901','99902','99903','99904','99905')
 GROUP BY CompanyID;
 
--- Count parsed (after ETL runs)
+-- Count parsed with synthetic flag
 SELECT CompanyID, COUNT(*) FROM PiXL.Parsed
 WHERE IsSynthetic = 1
 GROUP BY CompanyID;

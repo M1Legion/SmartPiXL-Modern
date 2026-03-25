@@ -112,23 +112,19 @@ else
 }
 
 // SQL baseline: count existing rows
-long baselineRaw = 0, baselineParsed = 0;
+long baselineParsed = 0;
 try
 {
     await using var conn = new SqlConnection(settings.ConnectionString);
     await conn.OpenAsync();
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = """
-        SELECT
-            (SELECT COUNT(*) FROM PiXL.Raw WHERE CompanyID IN ('99901','99902','99903','99904','99905')) AS RawCount,
-            (SELECT COUNT(*) FROM PiXL.Parsed WHERE IsSynthetic = 1) AS ParsedCount
+        SELECT COUNT(*) FROM PiXL.Parsed WHERE IsSynthetic = 1
         """;
     await using var reader = await cmd.ExecuteReaderAsync();
     if (await reader.ReadAsync())
     {
-        baselineRaw = reader.GetInt32(0);
-        baselineParsed = reader.GetInt32(1);
-        Console.WriteLine($"  PiXL.Raw (synthetic):    {baselineRaw:N0}");
+        baselineParsed = reader.GetInt32(0);
         Console.WriteLine($"  PiXL.Parsed (synthetic): {baselineParsed:N0}");
     }
 }
@@ -248,16 +244,12 @@ try
     await conn.OpenAsync();
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = """
-        SELECT
-            (SELECT COUNT(*) FROM PiXL.Raw WHERE CompanyID IN ('99901','99902','99903','99904','99905')) AS RawCount,
-            (SELECT COUNT(*) FROM PiXL.Parsed WHERE IsSynthetic = 1) AS ParsedCount
+        SELECT COUNT(*) FROM PiXL.Parsed WHERE IsSynthetic = 1
         """;
     await using var reader = await cmd.ExecuteReaderAsync();
     if (await reader.ReadAsync())
     {
-        var finalRaw = reader.GetInt32(0);
-        var finalParsed = reader.GetInt32(1);
-        Console.WriteLine($"  PiXL.Raw (final):    {finalRaw:N0}  (+{finalRaw - baselineRaw:N0})");
+        var finalParsed = reader.GetInt32(0);
         Console.WriteLine($"  PiXL.Parsed (final): {finalParsed:N0}  (+{finalParsed - baselineParsed:N0})");
     }
 }

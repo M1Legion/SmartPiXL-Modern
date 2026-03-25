@@ -16,7 +16,7 @@ SmartPiXL is a 3-process system: Edge (pixel capture) → Forge (enrichment + SQ
 ```
 Browser → Edge (query string with email, fingerprints)
   → Named pipe → Forge (enriches with geo, identity resolution)
-  → SQL: PiXL.Raw → ETL → PiXL.Parsed → PiXL.Visit → PiXL.Match
+  → SQL: PiXL.Parsed → PiXL.Visit → PiXL.Match
   → Sentinel views (Phase 10)
 ```
 
@@ -24,10 +24,10 @@ Browser → Edge (query string with email, fingerprints)
 
 | Data | Location(s) | Classification |
 |------|-------------|---------------|
-| Email address | PiXL.Raw (QS), PiXL.Parsed, PiXL.Visit, PiXL.Match | Direct PII |
+| Email address | PiXL.Parsed, PiXL.Visit, PiXL.Match | Direct PII |
 | IndividualKey (name) | PiXL.Match (from AutoConsumer) | Direct PII |
 | AddressKey (address) | PiXL.Match (from AutoConsumer) | Direct PII |
-| IP address | PiXL.Raw, PiXL.Parsed, PiXL.IP | Personal data (GDPR) |
+| IP address | PiXL.Parsed, PiXL.IP | Personal data (GDPR) |
 | Device fingerprint | PiXL.Parsed, PiXL.Device (DeviceHash) | Pseudonymous ID |
 | Geolocation (city-level) | PiXL.Parsed, PiXL.IP, IPAPI.IP | Personal data |
 | Client params (_cp_*) | PiXL.Visit.ClientParams (JSON) | Arbitrary — may contain PII |
@@ -65,7 +65,7 @@ Browser → Edge (query string with email, fingerprints)
 
 ## Key Compliance Recommendations
 
-1. **Data retention policy** — implement automated purge for PiXL.Raw and cascade
+1. **Data retention policy** — implement automated purge for PiXL.Parsed and cascade
 2. **Right to erasure** — build stored procedure that deletes across all tables by email/device
 3. **JSONL cleanup** — ensure failover files are deleted after processing
 4. **Email in URL risk** — document as accepted risk; consider client-side hashing

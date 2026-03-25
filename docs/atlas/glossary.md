@@ -52,8 +52,7 @@ related:
 | **Column** | A SQL column. "Field" and "column" are interchangeable in SQL context | `PiXL.Parsed.ScreenWidth` |
 | **Enrichment** | Server-side data point, prefixed `_srv_` in query string | `_srv_geoCC=US` appended by Edge/Forge |
 | **Score** | Derived integer from signal weights | `botScore = sum(signal weights)` |
-| **PiXL.Raw** | 9-column raw capture table — `SqlBulkCopy` target | `CompanyID, PiXLID, IPAddress, RequestPath, QueryString, HeadersJson, UserAgent, Referer, ReceivedAt` |
-| **PiXL.Parsed** | 300+ column parsed table — ETL output | One row per hit, all fields extracted from QueryString |
+| **PiXL.Parsed** | 300+ column parsed table — sole ingestion target | One row per hit, all fields written by Forge via SqlBulkCopy |
 | **DeviceHash** | SHA-256 of 5 fingerprint fields | `HASHBYTES('SHA2_256', CanvasFP + WebGlFP + AudioFP + WebGlRenderer + Platform)` |
 | **Channel\<T\>** | `System.Threading.Channels` bounded producer-consumer queue | `BoundedChannelFullMode.DropOldest` for back-pressure |
 | **JSONL** | JSON Lines format — one JSON object per line | Used for failover files and pipe communication |

@@ -195,7 +195,7 @@ GET /api/dash/traffic    → Real-time traffic counters
 ### Health Probe Interference
 
 The `InfraHealthService` sends an HTTP GET to the Edge every 60 seconds. This creates a synthetic hit that:
-- Appears in IIS logs (but NOT in PiXL.Raw because it doesn't match the tracking endpoint pattern)
+- Appears in IIS logs (but NOT in PiXL.Parsed because it doesn't match the tracking endpoint pattern)
 - Consumes an IIS thread briefly
 - At 1 request/minute, this is negligible
 

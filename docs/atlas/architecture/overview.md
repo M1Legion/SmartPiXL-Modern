@@ -93,7 +93,7 @@ The Edge request pipeline is zero-allocation on the hot path:
 Records flow through `Channel<TrackingData>` queues:
 
 ```
-PipeListener → Channel → EnrichmentPipeline → Channel → SqlBulkCopyWriter → PiXL.Raw
+PipeListener → Channel → EnrichmentPipeline → Channel → SqlBulkCopyWriter → PiXL.Parsed
 ```
 
 Enrichment tiers:

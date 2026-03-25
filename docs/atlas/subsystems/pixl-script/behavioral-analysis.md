@@ -231,7 +231,7 @@ data.moveCountBucket = mLen < 5 ? 'low' : mLen < 20 ? 'mid' : mLen < 50 ? 'high'
 
 ### Data Flow: Browser → Forge
 
-The raw `mousePath` is transmitted to Edge, stored in `PiXL.Raw`, and forwarded to the Forge's `BehavioralReplayService`. The Forge:
+The raw `mousePath` is transmitted to Edge, written to PiXL.Parsed, and forwarded to the Forge's `BehavioralReplayService`. The Forge:
 1. Parses the `x,y,t` triples
 2. Hashes the normalized path (removing absolute position)
 3. Compares against a rolling window of recent paths across all visitors

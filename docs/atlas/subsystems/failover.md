@@ -33,7 +33,7 @@ SmartPiXL uses a layered failover strategy. If the primary path for any record i
 |-------|-------------|---------------|
 | **Browser → Edge** | HTTP request to IIS | Not applicable (browser retries natively) |
 | **Edge → Forge** | Named pipe (`SmartPiXL-Enrichment`) | JSONL file to `Failover/` directory |
-| **Forge → SQL** | SqlBulkCopy to PiXL.Raw | Channel backpressure + retry |
+| **Forge → SQL** | SqlBulkCopy to PiXL.Parsed | Channel backpressure + retry |
 | **ETL Processing** | Watermark-based — picks up where it left off | Self-healing watermark recovery |
 
 ### How JSONL Failover Works
@@ -130,7 +130,7 @@ This is a synchronous fallback — the GIF response has already been sent to the
 
 ### Edge: DatabaseWriterService (Tertiary Fallback)
 
-If both the pipe AND JSONL failover fail (disk full, permissions issue), `DatabaseWriterService` writes directly to PiXL.Raw via SQL:
+If both the pipe AND JSONL failover fail (disk full, permissions issue), `DatabaseWriterService` writes directly to PiXL.Parsed via SQL:
 
 ```csharp
 public sealed class DatabaseWriterService
@@ -139,7 +139,7 @@ public sealed class DatabaseWriterService
 }
 ```
 
-This is the fallback of last resort. It bypasses Forge enrichment entirely — the record goes to PiXL.Raw without `_srv_*` enrichment params. The ETL will still parse it, but enrichment data will be missing.
+This is the fallback of last resort. It bypasses Forge enrichment entirely — the record goes to PiXL.Parsed without `_srv_*` enrichment columns populated.
 
 ### Forge: FailoverCatchupService
 
@@ -205,7 +205,7 @@ If SQL is down:
 1. `ForgeChannels.SqlWriter` fills up
 2. `EnrichmentPipelineService.TryWrite()` returns false
 3. Enriched records are dropped with warning log
-4. BUT: the original un-enriched records exist in PiXL.Raw (written by Edge's failover/direct path)
+4. BUT: the original un-enriched records exist in PiXL.Parsed (written by Edge's failover/direct path)
 
 ### Watermark-Based ETL Recovery
 
@@ -229,7 +229,7 @@ Records that are in-flight in `ForgeChannels` (Enrichment or SqlWriter Channel<T
 2. Records in the channel but not yet written to SQL exist as JSONL on disk (the Edge wrote them before sending to the pipe)
 3. Wait… actually, the Edge sends to the pipe OR writes to JSONL, not both. So records that were successfully sent to the pipe but are sitting in the Forge's channel ARE lost if the Forge crashes.
 
-**Real data loss window**: Records received by PipeListenerService but not yet written to PiXL.Raw by SqlBulkCopyWriterService. At typical channel throughput, this is seconds of data — a few dozen to a few hundred records. 
+**Real data loss window**: Records received by PipeListenerService but not yet written to PiXL.Parsed by SqlBulkCopyWriterService. At typical channel throughput, this is seconds of data — a few dozen to a few hundred records. 
 
 **Mitigation options considered but not implemented**:
 - Write-ahead log in the Forge (adds I/O to every record — defeats the purpose of the pipe)

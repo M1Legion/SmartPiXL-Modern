@@ -178,7 +178,7 @@ public sealed partial class TrackingCaptureService
             QueryString = request.QueryString.ToString().TrimStart('?'),
             HeadersJson = headersJson,
             // Truncate User-Agent and Referer to 2000 chars to match the SQL column size
-            // (nvarchar(2000) in PiXL.Raw). Prevents SqlBulkCopy truncation errors.
+            // (nvarchar(2000) in PiXL.Parsed). Prevents SqlBulkCopy truncation errors.
             UserAgent = Truncate(headers.UserAgent.ToString(), 2000),
             Referer = Truncate(headers.Referer.ToString(), 2000)
         };

@@ -386,15 +386,15 @@ public sealed class InfraHealthService : IDisposable
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                // Column names must match usp_Dash_PipelineHealth output (updated in migration 65)
-                item.TestRows = reader.IsDBNull(reader.GetOrdinal("RawRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("RawRows")));
+                // Column names must match usp_Dash_PipelineHealth output (PiXL.Raw removed — all data is PiXL.Parsed)
+                item.TestRows = reader.IsDBNull(reader.GetOrdinal("ParsedRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParsedRows")));
                 item.ParsedRows = reader.IsDBNull(reader.GetOrdinal("ParsedRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParsedRows")));
                 item.DeviceRows = reader.IsDBNull(reader.GetOrdinal("DeviceRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("DeviceRows")));
                 item.IpRows = reader.IsDBNull(reader.GetOrdinal("IpRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("IpRows")));
                 item.VisitRows = reader.IsDBNull(reader.GetOrdinal("VisitRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("VisitRows")));
                 item.MatchRows = reader.IsDBNull(reader.GetOrdinal("MatchRows")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("MatchRows")));
 
-                item.MaxTestId = reader.IsDBNull(reader.GetOrdinal("MaxRawId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxRawId")));
+                item.MaxTestId = reader.IsDBNull(reader.GetOrdinal("MaxParsedSourceId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxParsedSourceId")));
                 item.MaxVisitId = reader.IsDBNull(reader.GetOrdinal("MaxVisitId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxVisitId")));
                 item.MaxMatchId = reader.IsDBNull(reader.GetOrdinal("MaxMatchId")) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("MaxMatchId")));
 
@@ -415,7 +415,7 @@ public sealed class InfraHealthService : IDisposable
                 item.ParseLag = reader.IsDBNull(reader.GetOrdinal("ParseLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("ParseLag")));
                 item.MatchLag = reader.IsDBNull(reader.GetOrdinal("LegacyMatchLag")) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("LegacyMatchLag")));
 
-                item.TestLatest = reader.IsDBNull(reader.GetOrdinal("RawLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("RawLatest"));
+                item.TestLatest = reader.IsDBNull(reader.GetOrdinal("ParsedLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("ParsedLatest"));
                 item.ParsedLatest = reader.IsDBNull(reader.GetOrdinal("ParsedLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("ParsedLatest"));
                 item.DeviceLatest = reader.IsDBNull(reader.GetOrdinal("DeviceLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("DeviceLatest"));
                 item.IpLatest = reader.IsDBNull(reader.GetOrdinal("IpLatest")) ? null : reader.GetDateTime(reader.GetOrdinal("IpLatest"));

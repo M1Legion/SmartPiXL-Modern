@@ -49,7 +49,7 @@ public sealed class TrackingSettings
     
     /// <summary>
     /// Maximum number of records per SqlBulkCopy write. Larger batches are more
-    /// efficient but increase memory pressure and lock duration on PiXL.Raw.
+    /// efficient but increase memory pressure and lock duration on PiXL.Parsed.
     /// 100 is a good balance for sub-1000 RPS workloads.
     /// </summary>
     public int BatchSize { get; set; } = 100;

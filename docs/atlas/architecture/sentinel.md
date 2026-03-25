@@ -188,7 +188,7 @@ Parallel probes launched simultaneously:
 | SQL Connectivity | Test query to `localhost\SQL2025` | Connection failure |
 | IIS Website | Check `Smartpixl.info` site status | Not started |
 | Edge Health | `GET http://192.168.88.176/internal/health` | Non-200 or timeout |
-| Data Flow | Compare PiXL.Raw count vs watermark vs last write time | Stale data (>5 min gap) |
+| Data Flow | Compare PiXL.Parsed count vs watermark vs last write time | Stale data (>5 min gap) |
 | Pipeline Depth | Read Forge channel depths from health endpoint | Growing backlog |
 | Log Errors | Scan today's log file for ERROR lines | New errors |
 

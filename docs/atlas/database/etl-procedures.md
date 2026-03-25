@@ -189,7 +189,7 @@ GROUP BY CompanyID;
 
 ### Maintenance Procedures
 
-**ETL.usp_PurgeRawData** — Deletes PiXL.Raw (PiXL.Test) rows that have been processed:
+**ETL.usp_PurgeRawData** — *Obsolete: PiXL.Raw has been dropped. Forge now writes directly to PiXL.Parsed.* Previously deleted processed rows from the raw ingestion table:
 
 ```sql
 DELETE FROM PiXL.Test WHERE Id <= @WatermarkId AND ReceivedAt < @CutoffDate;
@@ -214,7 +214,7 @@ Safe: only deletes rows the watermark has passed AND that are older than the ret
 
 `usp_ParseNewHits` uses `ETL.Watermark` and `usp_MatchVisits` uses `ETL.MatchWatermark` (separate table). This is because:
 
-1. Parse and Match have different ID spaces (Parse tracks PiXL.Raw.Id, Match tracks PiXL.Visit.VisitID)
+1. Parse is no longer a separate step (Forge writes directly to PiXL.Parsed); Match tracks PiXL.Visit.VisitID
 2. Match can't run until Parse creates the Visit records
 3. Match's watermark advances over ALL visit IDs (not just those with emails) to avoid re-scanning rows without emails
 
@@ -260,4 +260,4 @@ When adding new browser fields to the PiXL Script:
 3. Update migration numbering
 4. Test with: `EXEC ETL.usp_ParseNewHits @BatchSize = 100` on a small batch
 
-Do NOT add columns to PiXL.Raw — the raw table stays at 9 columns. All new fields go into the querystring and are extracted by the ETL.
+PiXL.Raw has been dropped. Forge writes all 231 columns directly to PiXL.Parsed via SqlBulkCopy. New columns are added to PiXL.Parsed and to the Forge’s `DbDataReader` column mapping.

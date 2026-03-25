@@ -103,7 +103,7 @@ public sealed class SqlHealthItem
     /// <summary>Round-trip time for the connectivity test query, in milliseconds.</summary>
     public int ResponseMs { get; set; }
     
-    /// <summary>Row count in <c>PiXL.Parsed</c> (ingest table — PiXL.Raw is retired).</summary>
+    /// <summary>Row count in <c>PiXL.Parsed</c> (ingest table).</summary>
     public int TestRows { get; set; }
     
     /// <summary>Row count in <c>PiXL.Parsed</c> (materialized warehouse).</summary>
@@ -301,7 +301,7 @@ public sealed class ErrorEntry
 /// <para>
 /// Covers five core tables (PiXL.Parsed, PiXL.Device, PiXL.IP,
 /// PiXL.Visit, PiXL.Match) and both ETL watermarks (ParseNewHits, MatchVisits).
-/// PiXL.Raw is retired — Forge writes directly to PiXL.Parsed.
+/// Forge writes directly to PiXL.Parsed.
 /// The dashboard uses this to display row counts, max IDs, watermark positions,
 /// lag indicators, and timestamp freshness in the pipeline health panel.
 /// </para>
@@ -319,7 +319,7 @@ public sealed class PipelineHealthItem
     public string? Error { get; set; }
 
     // ── Table row counts ────────────────────────────────────────────
-    /// <summary>Row count of <c>PiXL.Parsed</c> (ingest table — PiXL.Raw is retired).</summary>
+    /// <summary>Row count of <c>PiXL.Parsed</c> (ingest table).</summary>
     public int TestRows { get; set; }
 
     /// <summary>Row count of <c>PiXL.Parsed</c> (materialized warehouse table).</summary>

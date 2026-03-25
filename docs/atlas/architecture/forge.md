@@ -89,7 +89,7 @@ SmartPiXL.Forge/
     ├── ForgeChannels.cs                 # DI wrapper for 2 Channel<TrackingData>
     ├── PipeListenerService.cs           # Named pipe server (BackgroundService)
     ├── EnrichmentPipelineService.cs     # 15-step enrichment chain
-    ├── SqlBulkCopyWriterService.cs      # PiXL.Raw writer via SqlBulkCopy
+    ├── SqlBulkCopyWriterService.cs      # PiXL.Parsed writer via SqlBulkCopy
     ├── FailoverCatchupService.cs        # JSONL file catch-up (60s interval)
     ├── EtlBackgroundService.cs          # usp_ParseNewHits + usp_MatchVisits
     ├── IpApiSyncService.cs              # Xavier IPGEO delta sync

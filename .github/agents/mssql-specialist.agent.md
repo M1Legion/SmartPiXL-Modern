@@ -35,7 +35,7 @@ You are the SQL Server expert for SmartPiXL. You design schemas, optimize querie
 ### Watermark-Based Incremental Processing
 ```sql
 DECLARE @Last BIGINT = (SELECT LastProcessedId FROM ETL.Watermark WHERE ProcessName = @Name);
-DECLARE @Max BIGINT = (SELECT MAX(Id) FROM PiXL.Raw);
+DECLARE @Max BIGINT = (SELECT MAX(Id) FROM PiXL.Parsed);
 -- Process WHERE Id > @Last AND Id <= @Max
 -- Then UPDATE Watermark SET LastProcessedId = @Max
 ```
@@ -50,7 +50,7 @@ WHEN NOT MATCHED THEN INSERT (...) VALUES (...);
 ```
 
 ### QueryString Parsing
-The scalar UDF `dbo.GetQueryParam(@QueryString, @ParamName)` extracts values from URL-encoded query strings. Used extensively by `ETL.usp_ParseNewHits` to parse columns from `PiXL.Raw.QueryString`. This includes both client browser params AND `_srv_*` server-side enrichment params appended by Edge and the Forge.
+The scalar UDF `dbo.GetQueryParam(@QueryString, @ParamName)` extracts values from URL-encoded query strings. Previously used by `ETL.usp_ParseNewHits` to parse PiXL.Raw into PiXL.Parsed — that ETL step no longer exists. Forge now writes all 231 columns directly to PiXL.Parsed via SqlBulkCopy, including QueryString and HeadersJson.
 
 ## Migration Scripts
 
@@ -88,4 +88,4 @@ ETL is owned by the **Forge** process (Phase 2+), not the Worker. The Worker is 
 - `COUNT_BIG(*)` for views that might be indexed
 - Covering indexes with INCLUDE columns for dashboard views
 - Filtered indexes for common WHERE conditions (e.g., `WHERE BotScore >= 50`)
-- PiXL.Raw optimizes for INSERT speed. Everything else optimizes for READ speed.
+- PiXL.Parsed optimizes for both INSERT speed and READ speed via covering indexes.

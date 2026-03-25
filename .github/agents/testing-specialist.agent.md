@@ -74,7 +74,7 @@ Every subsystem needs coverage. Use this matrix to identify and fill gaps.
 |---------|-----------|-----------|
 | `PipeListenerService` | `PipeListenerServiceTests.cs` | JSON line deserialization, malformed line handling, concurrent connections, reconnection |
 | `EnrichmentPipelineService` | `EnrichmentPipelineServiceTests.cs` | Channel-to-channel flow, enrichment ordering, per-record isolation (one failure doesn't block others) |
-| `SqlBulkCopyWriterService` | `SqlBulkCopyWriterServiceTests.cs` | Column ordinal mapping (9 PiXL.Raw columns), batch sizing, error recovery |
+| `SqlBulkCopyWriterService` | `SqlBulkCopyWriterServiceTests.cs` | Column ordinal mapping (231 PiXL.Parsed columns), batch sizing, error recovery |
 | `FailoverCatchupService` | `FailoverCatchupServiceTests.cs` | JSONL file discovery, line-by-line processing, malformed line skip, file archival, partial file handling |
 | `EtlBackgroundService` | `EtlBackgroundServiceTests.cs` | Scheduling interval, graceful shutdown, SQL error handling |
 

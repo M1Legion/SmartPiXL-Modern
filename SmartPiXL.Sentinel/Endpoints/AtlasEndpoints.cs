@@ -133,7 +133,7 @@ public static class AtlasEndpoints
         });
 
         // ====================================================================
-        // LIVE DEMO — Returns the most recent PiXL.Raw hit for the Atlas
+        // LIVE DEMO — Returns the most recent PiXL.Parsed hit for the Atlas
         // demo pixel (company 12344, pixel 1) matching the viewer's IP.
         // The query string contains the real PiXL Script output — all 159
         // fields as collected by the live pipeline.
@@ -301,13 +301,12 @@ public static class AtlasEndpoints
     }
 
     // ========================================================================
-    // LIVE DEMO DATA — Query PiXL.Raw for Atlas demo hits (company 12344)
+    // LIVE DEMO DATA — Query PiXL.Parsed for Atlas demo hits (company 12344)
     // ========================================================================
 
     /// <summary>
-    /// Fetches the most recent Raw hit for company 12344 matching the viewer's IP,
-    /// parses the query string into a key-value dictionary, and returns the full
-    /// field set so the Atlas UI can display real pipeline output.
+    /// Fetches the most recent Parsed hit for company 12344 matching the viewer's IP.
+    /// Returns key metadata so the Atlas UI can display real pipeline output.
     /// Falls back to the most recent 12344 hit regardless of IP if no viewer match.
     /// </summary>
     private static async Task<Dictionary<string, object?>?> GetDemoDataAsync(
@@ -319,11 +318,11 @@ public static class AtlasEndpoints
         // Try viewer's IP first — personalised demo
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT TOP 1 Id, IPAddress, QueryString, UserAgent, ReceivedAt
-            FROM PiXL.Raw
-            WHERE CompanyID = '12344' AND PiXLID = '00001'
+            SELECT TOP 1 SourceId, IPAddress, UserAgent, ReceivedAt
+            FROM PiXL.Parsed
+            WHERE CompanyId = 12344 AND PiXLId = 1
               AND IPAddress = @ViewerIp
-            ORDER BY Id DESC";
+            ORDER BY SourceId DESC";
         cmd.Parameters.AddWithValue("@ViewerIp", viewerIp);
         cmd.CommandTimeout = 10;
 
@@ -336,10 +335,10 @@ public static class AtlasEndpoints
         // Fallback: return the most recent 12344 hit regardless of IP
         await using var fallback = conn.CreateCommand();
         fallback.CommandText = @"
-            SELECT TOP 1 Id, IPAddress, QueryString, UserAgent, ReceivedAt
-            FROM PiXL.Raw
-            WHERE CompanyID = '12344' AND PiXLID = '00001'
-            ORDER BY Id DESC";
+            SELECT TOP 1 SourceId, IPAddress, UserAgent, ReceivedAt
+            FROM PiXL.Parsed
+            WHERE CompanyId = 12344 AND PiXLId = 1
+            ORDER BY SourceId DESC";
         fallback.CommandTimeout = 10;
 
         await using var reader2 = await fallback.ExecuteReaderAsync();
@@ -350,40 +349,21 @@ public static class AtlasEndpoints
     }
 
     /// <summary>
-    /// Parses a PiXL.Raw row into the demo response dictionary.
+    /// Parses a PiXL.Parsed row into the demo response dictionary.
     /// </summary>
     private static Dictionary<string, object?> ParseDemoRow(SqlDataReader reader)
     {
-        var rawId = reader.GetInt64(0);
+        var sourceId = reader.GetInt64(0);
         var ip = reader.IsDBNull(1) ? "" : reader.GetString(1);
-        var qs = reader.IsDBNull(2) ? "" : reader.GetString(2);
-        var ua = reader.IsDBNull(3) ? "" : reader.GetString(3);
-        var receivedAt = reader.IsDBNull(4) ? DateTime.UtcNow : reader.GetDateTime(4);
-
-        // Parse the query string into individual fields
-        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(qs))
-        {
-            foreach (var pair in qs.Split('&', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var eqIdx = pair.IndexOf('=');
-                if (eqIdx > 0)
-                {
-                    var key = pair[..eqIdx];
-                    var value = Uri.UnescapeDataString(pair[(eqIdx + 1)..]);
-                    fields[key] = value;
-                }
-            }
-        }
+        var ua = reader.IsDBNull(2) ? "" : reader.GetString(2);
+        var receivedAt = reader.IsDBNull(3) ? DateTime.UtcNow : reader.GetDateTime(3);
 
         return new Dictionary<string, object?>
         {
-            ["rawId"] = rawId,
+            ["sourceId"] = sourceId,
             ["ip"] = ip,
             ["userAgent"] = ua,
             ["receivedAt"] = receivedAt.ToString("o"),
-            ["fieldCount"] = fields.Count,
-            ["fields"] = fields
         };
     }
 }

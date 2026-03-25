@@ -19,7 +19,7 @@ Before starting the next phase, verify the current phase is COMPLETE.
    - **SQL applied**: migration scripts executed on `localhost\SQL2025`
    - **Config synced**: all config files listed in copilot-instructions.md are consistent
    - **Deployed** (if applicable): IIS or service updated and verified
-   - **Data flowing**: PiXL.Raw receiving rows, ETL processing
+   - **Data flowing**: PiXL.Parsed receiving rows, ETL processing
 
 ## Output
 

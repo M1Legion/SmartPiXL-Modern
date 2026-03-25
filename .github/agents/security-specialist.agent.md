@@ -51,10 +51,10 @@ When the pipe is unavailable, Edge writes JSONL files to `Failover/`:
 
 ### Accepted Risks (Business Decisions)
 
-- PII stored in multiple tables (Raw, Parsed, Visit, Match) — by design
+- PII stored in multiple tables (Parsed, Visit, Match) — by design
 - Email transmitted in URL query string — accepted; pixel URL is only data channel
 - No encryption at rest — SQL Server TDE available if needed later
-- PiXL.Raw is never deleted — monthly partitioned for retention management
+- PiXL.Parsed is never deleted — monthly partitioned for retention management
 
 ## How I Work
 

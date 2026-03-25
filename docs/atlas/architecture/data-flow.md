@@ -120,10 +120,7 @@ Browser                  Edge (IIS w3wp.exe)              Forge (Windows Service
   │                            │     │                               ├──Tier 3: Replay          │
   │                            │     │                               ├──Tier 3: DeadInternet    │
   │                            │     │                               │                          │
-  │                            │     │                               ├──SqlBulkCopy────────────►│ PiXL.Raw
-  │                            │     │                               │                          │
-  │                            │     │                               │  [Every 60s]             │
-  │                            │     │                               ├──ETL.usp_ParseNewHits───►│ PiXL.Parsed
+  │                            │     │                               ├──SqlBulkCopy────────────►│ PiXL.Parsed
   │                            │     │                               │                          │ PiXL.Device
   │                            │     │                               │                          │ PiXL.IP
   │                            │     │                               │                          │ PiXL.Visit
@@ -148,7 +145,7 @@ Edge                         Disk                        Forge
   │                            │   Reads, processes,        │
   │                            │   archives files           │
   │                            │                            │
-  │                            │                     ──────►│ PiXL.Raw
+  │                            │                     ──────►│ PiXL.Parsed
 ```
 
 ### Data Record Structure
@@ -185,14 +182,7 @@ The Forge uses two bounded `Channel<TrackingData>` instances (wrapped in `ForgeC
 
 Two stored procedures run every 60 seconds via `EtlBackgroundService`:
 
-1. **`ETL.usp_ParseNewHits`** — 13-phase watermark-driven batch:
-   - Phase 1: INSERT from PiXL.Raw → PiXL.Parsed (screen, navigator, canvas fields)
-   - Phase 2-7: UPDATE passes for WebGL, audio, fonts, network, storage, performance, etc.
-   - Phase 8: IP classification and geo enrichment
-   - Phase 8B: Tier 1 `_srv_*` params (bot, UA parse, DNS, MaxMind, WHOIS)
-   - Phase 8C: Tier 2 `_srv_*` params (cross-customer, lead score, sessions, affluence)
-   - Phase 8D: Tier 3 `_srv_*` params (contradictions, cultural, device age, replay, dead internet)
-   - Phase 9-13: Bot scoring, evasion, cross-signals, behavior, dimensional updates
+1. **`ETL.usp_ParseNewHits`** — *No longer runs. PiXL.Raw has been dropped; Forge writes all 231 columns directly to PiXL.Parsed via SqlBulkCopy.* Previously this was a 13-phase watermark-driven batch that parsed QueryString fields from PiXL.Raw into PiXL.Parsed columns.
 
 2. **`ETL.usp_MatchVisits`** — Identity resolution against AutoConsumer
 
@@ -202,11 +192,11 @@ Two stored procedures run every 60 seconds via `EtlBackgroundService`:
 
 All enrichment data rides in `TrackingData.QueryString` as `_srv_*` key-value pairs rather than in separate fields on the TrackingData record. This was a deliberate architectural decision:
 
-- **PiXL.Raw stays at 9 columns** — `SqlBulkCopy` column mapping is hardcoded by ordinal. Adding columns would require syncing the custom `DbDataReader`, the `SqlBulkCopy` mapping, and the table schema. The QueryString approach means the Forge just appends text.
-- **ETL is the parser** — `dbo.GetQueryParam()` extracts any parameter by name. Adding a new enrichment means: append `_srv_foo=bar` in the Forge → add `dbo.GetQueryParam(qs, '_srv_foo')` to the ETL proc → add the column to PiXL.Parsed. No C# changes to the writer.
-- **Backward compatibility** — old records (pre-Forge enrichment) simply don't have the `_srv_*` params. `GetQueryParam` returns NULL. No migration needed for historical data.
+- **PiXL.Parsed has 231 columns** — `SqlBulkCopy` column mapping is hardcoded by ordinal in a custom `DbDataReader`. The Forge writes all enrichment data as individual columns rather than packing them into the QueryString.
+- **No ETL parse step** — Forge enrichments are written directly to PiXL.Parsed columns. Adding a new enrichment means: compute the value in the Forge → add the column to PiXL.Parsed → update the `DbDataReader` column mapping.
+- **Backward compatibility** — old records (pre-direct-write) may have NULL enrichment columns. No migration needed for historical data.
 
-The trade-off: QueryStrings can get long (4-8KB with full enrichment). The `maxQueryString="16384"` in `web.config` and `VARCHAR(MAX)` on `PiXL.Raw.QueryString` handle this, but log files become verbose.
+The QueryString and HeadersJson columns are still present on PiXL.Parsed for raw data preservation, but enrichment values are no longer extracted from the QueryString via ETL.
 
 ### `PipeClientService` Internals
 
@@ -223,7 +213,7 @@ The workplan originally specified `ValueTask EnqueueAsync()` but the implementat
 
 ### `SqlBulkCopyWriterService` Internals
 
-Uses a custom `DbDataReader` implementation (not `DataTable`) for `SqlBulkCopy`. The reader exposes the 9 PiXL.Raw columns by ordinal number. This avoids all intermediate allocation — no DataRow, no boxing of column values. The writer batches records from the channel and writes in configurable batch sizes.
+Uses a custom `DbDataReader` implementation (not `DataTable`) for `SqlBulkCopy`. The reader exposes the 231 PiXL.Parsed columns by ordinal number. This avoids all intermediate allocation — no DataRow, no boxing of column values. The writer batches records from the channel and writes in configurable batch sizes.
 
 Circuit breaker pattern: if SQL is down, records go to a dead-letter JSONL file. When the circuit resets (configurable timeout), writing resumes.
 

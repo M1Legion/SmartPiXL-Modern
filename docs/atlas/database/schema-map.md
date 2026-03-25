@@ -37,7 +37,7 @@ All data is retained according to your organization's policies and is queryable 
 | **Database** | SmartPiXL |
 | **CLR Database** | SmartPiXL_CLR (separate, for CLR assemblies) |
 | **Key Tables** | ~15 core tables across 6 schemas |
-| **Row Volume** | PiXL.Raw grows ~1,000 rows/minute (varies by traffic) |
+| **Row Volume** | PiXL.Parsed grows ~1,000 rows/minute (varies by traffic) |
 
 ### Schema Organization
 
@@ -45,7 +45,7 @@ SmartPiXL uses 6 schemas to organize tables by domain:
 
 | Schema | Purpose | Key Tables |
 |--------|---------|------------|
-| **PiXL** | Core domain — raw data, parsed fields, devices, IPs, visits, matches | Raw, Parsed, Device, IP, Visit, Match, AutoConsumer, Settings, Company |
+| **PiXL** | Core domain — parsed fields, devices, IPs, visits, matches | Parsed, Device, IP, Visit, Match, AutoConsumer, Settings, Company |
 | **ETL** | Pipeline control — watermarks, procedures | Watermark, MatchWatermark |
 | **IPAPI** | IP geolocation — synced from Xavier | IPGeo (342M+ rows) |
 | **TrafficAlert** | Visitor scoring + customer summaries | VisitorScore, CustomerSummary |
@@ -55,9 +55,9 @@ SmartPiXL uses 6 schemas to organize tables by domain:
 ### Data Flow Through Tables
 
 ```
-PiXL.Raw (capture)
-    ↓ ETL.usp_ParseNewHits
-PiXL.Parsed (300+ columns)
+Forge (SqlBulkCopy)
+    ↓
+PiXL.Parsed (300+ columns, sole ingestion table)
 PiXL.Device (device dimension)
 PiXL.IP (IP dimension)
 PiXL.Visit (fact table)
@@ -73,8 +73,7 @@ TrafficAlert.CustomerSummary
 
 | Table | Rows | Growth Rate | Notes |
 |-------|------|-------------|-------|
-| PiXL.Raw | Purged daily | ~1,000/min | Deleted after ETL processes them |
-| PiXL.Parsed | Millions | ~1,000/min | 300+ columns, largest table |
+| PiXL.Parsed | Millions | ~1,000/min | 300+ columns, sole ingestion table |
 | PiXL.Device | 100K-1M | Slow (unique devices) | Clustered on DeviceHash |
 | PiXL.IP | 100K-1M | Slow (unique IPs) | Clustered on IPAddress |
 | PiXL.Visit | Millions | ~1,000/min | 1:1 with Parsed |
@@ -87,37 +86,13 @@ TrafficAlert.CustomerSummary
 
 ### PiXL Schema — Core Tables
 
-#### PiXL.Raw (Capture Table)
+#### PiXL.Parsed (Sole Ingestion Table)
 
-The landing table for all incoming visitor data. 9 columns only.
-
-```sql
-PiXL.Raw (
-    Id              BIGINT IDENTITY PK,
-    CompanyID       INT,
-    PiXLID          INT,
-    IPAddress       VARCHAR(50),
-    UserAgent       NVARCHAR(1000),
-    Referer         NVARCHAR(2000),
-    QueryString     NVARCHAR(MAX),      -- 159 browser fields + _srv_* enrichments
-    RequestPath     NVARCHAR(500),
-    ReceivedAt      DATETIME2(3)
-)
-```
-
-Notes:
-- Written by `SqlBulkCopyWriterService` (Forge) or `DatabaseWriterService` (Edge fallback)
-- QueryString carries the entire payload — browser fields and Forge enrichments
-- Purged daily after ETL processing (watermark-safe)
-- Formerly named `PiXL.Test` (renamed via migration 28)
-
-#### PiXL.Parsed (Expanded Fields)
-
-300+ typed columns extracted from Raw.QueryString by `usp_ParseNewHits`:
+300+ typed columns written directly by Forge via `SqlBulkCopyWriterService`:
 
 ```sql
 PiXL.Parsed (
-    SourceId            BIGINT PK,          -- = PiXL.Raw.Id
+    SourceId            BIGINT PK,          -- auto-generated from PiXL.HitSequence
     CompanyID           INT,
     PiXLID              INT,
     IPAddress           VARCHAR(50),
@@ -197,7 +172,7 @@ PiXL.IP (
 
 ```sql
 PiXL.Visit (
-    VisitID             BIGINT PK CLUSTERED,    -- = PiXL.Raw.Id
+    VisitID             BIGINT PK CLUSTERED,    -- = PiXL.Parsed.SourceId
     CompanyID           INT,
     PiXLID              INT,
     DeviceId            BIGINT FK → PiXL.Device,
@@ -306,12 +281,6 @@ PiXL.Settings (SettingsId INT PK, CompanyID FK, ScriptVersion, ...)
 
 ## Atlas Private
 
-### PiXL.Test vs PiXL.Raw Naming
-
-The table is still physically named `PiXL.Test` in the database (legacy from early development). Migration 28 was supposed to rename it to `PiXL.Raw`, but the rename was deferred to avoid breaking the running ETL. All code and documentation should refer to it as `PiXL.Raw`, but the actual table name in SQL is `PiXL.Test`.
-
-The ETL proc references `PiXL.Test` in its queries. This is a known debt item — rename needs coordinated deployment with ETL proc update.
-
 ### PiXL.Parsed Column Count
 
 The 300+ columns in PiXL.Parsed are split across 8 UPDATE phases (plus the initial INSERT). This means:
@@ -354,9 +323,6 @@ Migration 28 sets up partitioning on PiXL.Parsed by SourceId ranges (100M rows p
 
 Current partition count: typically 1-2 (depending on total volume). At 1M rows/day, the first partition boundary is reached after ~100 days.
 
-### Missing FK on PiXL.Parsed
+### PiXL.Parsed.SourceId
 
-PiXL.Parsed.SourceId references PiXL.Raw.Id, but there's no FK constraint. This is intentional:
-- Raw rows are purged daily after processing
-- An FK would prevent purging (child rows in Parsed reference parent rows in Raw)
-- The relationship is maintained by ETL logic, not by database constraint
+SourceId is auto-generated from `PiXL.HitSequence` (a database SEQUENCE). There is no upstream Raw table — PiXL.Parsed is the sole ingestion target.
