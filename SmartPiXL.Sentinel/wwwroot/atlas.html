@@ -9,259 +9,309 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <style>
-/* ═══════════════════════════════════════════════════════════
-   ATLAS — Tree-driven documentation explorer
-   ═══════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════
+   ATLAS — Modern documentation portal
+   ════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-    --bg-page:     #080d19;
-    --bg-sidebar:  #0b1120;
-    --bg-content:  #0e1629;
-    --bg-hover:    #162040;
-    --bg-selected: #1a2d55;
-    --bg-elevated: #141e35;
-    --text-1:      #e8ecf4;
-    --text-2:      #94a3b8;
-    --text-3:      #5a6a80;
-    --border:      #1a2540;
-    --accent:      #38bdf8;
-    --accent-dim:  rgba(56, 189, 248, 0.15);
-    --node-platform:  #a78bfa;
-    --node-system:    #22d3ee;
-    --node-subsystem: #60a5fa;
-    --node-component: #34d399;
-    --node-probe:     #64748b;
-    --health-ok:   #22c55e;
-    --health-warn: #eab308;
-    --health-fail: #ef4444;
-    --health-none: #475569;
-    --radius:      6px;
-    --font:        'Inter', -apple-system, sans-serif;
-    --mono:        'JetBrains Mono', 'Fira Code', monospace;
+    --bg:           #060b18;
+    --bg-surface:   #0c1222;
+    --bg-card:      #111a2e;
+    --bg-hover:     #182444;
+    --bg-active:    #1c3060;
+    --text-1:       #f1f5f9;
+    --text-2:       #94a3b8;
+    --text-3:       #64748b;
+    --border:       #1e293b;
+    --accent:       #38bdf8;
+    --accent-dim:   rgba(56,189,248,0.10);
+    --green:        #22c55e;
+    --yellow:       #eab308;
+    --red:          #ef4444;
+    --edge:         #f59e0b;
+    --forge:        #8b5cf6;
+    --sentinel:     #06b6d4;
+    --font:         'Inter', system-ui, sans-serif;
+    --mono:         'JetBrains Mono', monospace;
+    --radius:       8px;
+    --radius-sm:    4px;
 }
 
-html, body { height: 100%; font-family: var(--font); background: var(--bg-page); color: var(--text-1); }
-
-/* ─── LAYOUT ──────────────────────────────────────────── */
+html, body { height: 100%; background: var(--bg); color: var(--text-1); font-family: var(--font); }
 body { display: flex; flex-direction: column; overflow: hidden; }
 
+/* ─── HEADER ──────────────────────────────────────────── */
 header {
-    display: flex; align-items: center; justify-content: space-between;
-    height: 52px; padding: 0 20px;
-    background: var(--bg-sidebar); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; z-index: 10;
+    display: flex; align-items: center; gap: 16px;
+    height: 56px; padding: 0 24px;
+    background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 100;
 }
-header .brand { font-weight: 700; font-size: 15px; letter-spacing: 0.5px; color: var(--text-2); }
-header .brand span { color: var(--accent); }
+.brand {
+    font: 600 15px/1 var(--font); color: var(--text-2);
+    cursor: pointer; display: flex; align-items: center; gap: 8px;
+    text-decoration: none; white-space: nowrap;
+}
+.brand:hover { color: var(--text-1); }
+.brand-mark { color: var(--accent); font-size: 18px; }
 
-.tier-bar { display: flex; gap: 2px; background: var(--bg-page); border-radius: var(--radius); padding: 2px; }
+/* Search */
+.search-wrap { flex: 1; max-width: 480px; position: relative; }
+.search-wrap input {
+    width: 100%; padding: 8px 12px 8px 36px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text-1); font: 400 13px var(--font); outline: none;
+}
+.search-wrap input::placeholder { color: var(--text-3); }
+.search-wrap input:focus { border-color: var(--accent); }
+.search-icon {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; color: var(--text-3); pointer-events: none;
+}
+.search-results {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius);
+    max-height: 320px; overflow-y: auto; display: none; z-index: 200;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+}
+.search-results.open { display: block; }
+.search-result {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; cursor: pointer; font-size: 13px;
+    color: var(--text-2); border-bottom: 1px solid var(--border);
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: var(--bg-hover); color: var(--text-1); }
+.sr-type {
+    font: 500 9px/1 var(--font); text-transform: uppercase;
+    color: var(--text-3); letter-spacing: 0.5px;
+}
+
+/* Tier selector */
+.tier-bar {
+    display: flex; gap: 2px; background: var(--bg); border-radius: var(--radius);
+    padding: 3px; margin-left: auto; flex-shrink: 0;
+}
 .tier-btn {
-    padding: 5px 14px; border: none; border-radius: 4px; cursor: pointer;
+    padding: 6px 14px; border: none; border-radius: 5px; cursor: pointer;
     font: 500 12px/1 var(--font); color: var(--text-3); background: transparent;
     transition: all 0.15s;
 }
 .tier-btn:hover { color: var(--text-2); }
 .tier-btn.active { background: var(--accent); color: #0c1221; }
 
-main { flex: 1; display: flex; overflow: hidden; }
-
-/* ─── SIDEBAR ─────────────────────────────────────────── */
+/* ─── LAYOUT ──────────────────────────────────────────── */
+.layout { flex: 1; display: flex; overflow: hidden; }
 #sidebar {
-    width: 310px; min-width: 310px;
-    background: var(--bg-sidebar); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
+    width: 280px; min-width: 280px; overflow-y: auto;
+    background: var(--bg-surface); border-right: 1px solid var(--border);
+    display: none; flex-direction: column; padding: 16px 0;
 }
+#sidebar.open { display: flex; }
+#content { flex: 1; overflow-y: auto; }
 
-.search-wrap {
-    padding: 12px 14px; border-bottom: 1px solid var(--border);
+/* ─── SIDEBAR NAV ─────────────────────────────────────── */
+.sb-back {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px; font-size: 13px; color: var(--text-3);
+    cursor: pointer; margin-bottom: 4px;
 }
-.search-wrap input {
-    width: 100%; padding: 7px 10px; border-radius: var(--radius);
-    border: 1px solid var(--border); background: var(--bg-page);
-    color: var(--text-1); font: 400 13px var(--font); outline: none;
+.sb-back:hover { color: var(--accent); }
+.sb-back svg { width: 14px; height: 14px; }
+.sb-heading {
+    padding: 4px 20px; font: 600 11px/1 var(--font);
+    color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px;
+    margin-top: 16px; margin-bottom: 4px;
 }
-.search-wrap input:focus { border-color: var(--accent); }
-.search-wrap input::placeholder { color: var(--text-3); }
-
-#tree-container { flex: 1; overflow-y: auto; padding: 8px 0; }
-
-/* Library section */
-#library-container { border-top: 1px solid var(--border); padding: 8px 0; overflow-y: auto; max-height: 40%; }
-.lib-header {
-    padding: 6px 14px; font: 600 11px/1 var(--font); color: var(--text-3);
-    text-transform: uppercase; letter-spacing: 0.8px; cursor: pointer;
-    display: flex; align-items: center; gap: 6px;
+.sb-heading:first-child { margin-top: 0; }
+.sb-system-name {
+    padding: 6px 20px; font: 600 14px/1 var(--font);
+    color: var(--text-1); margin-bottom: 4px;
 }
-.lib-header:hover { color: var(--text-2); }
-.lib-group-title {
-    padding: 4px 14px 2px 22px; font: 600 10px/1 var(--font); color: var(--text-3);
-    text-transform: uppercase; letter-spacing: 0.6px; margin-top: 6px;
+.sb-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 20px; font-size: 13px; color: var(--text-2);
+    cursor: pointer; transition: background 0.1s;
 }
+.sb-item:hover { background: var(--bg-hover); color: var(--text-1); }
+.sb-item.active { background: var(--bg-active); color: var(--text-1); border-right: 2px solid var(--accent); }
+.sb-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sb-dot.ok { background: var(--green); }
+.sb-dot.warn { background: var(--yellow); }
+.sb-dot.fail { background: var(--red); }
+.sb-dot.none { background: var(--text-3); }
+.sb-divider { height: 1px; background: var(--border); margin: 12px 20px; }
 
-/* ─── TREE NODES ──────────────────────────────────────── */
-.tree-row {
-    display: flex; align-items: center; gap: 4px;
-    padding: 4px 8px 4px calc(var(--depth, 0) * 18px + 8px);
-    cursor: pointer; border-radius: 0; transition: background 0.1s;
-    font-size: 13px; line-height: 1.4; min-height: 30px;
-}
-.tree-row:hover { background: var(--bg-hover); }
-.tree-row.selected { background: var(--bg-selected); }
-.tree-row.match-highlight { background: rgba(56, 189, 248, 0.08); }
+/* ─── LANDING ─────────────────────────────────────────── */
+.landing { max-width: 960px; margin: 0 auto; padding: 56px 32px 48px; }
 
-.tree-chevron {
-    width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center;
-    justify-content: center; color: var(--text-3); transition: transform 0.15s;
-    font-size: 11px;
-}
-.tree-chevron.collapsed { transform: rotate(-90deg); }
-.tree-chevron.leaf { visibility: hidden; }
-
-.health-dot {
-    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-}
-.health-dot.ok { background: var(--health-ok); }
-.health-dot.warn { background: var(--health-warn); }
-.health-dot.fail { background: var(--health-fail); }
-.health-dot.none { background: var(--health-none); }
-
-.node-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-1); }
-.tree-row:not(.selected) .node-name { color: var(--text-2); }
-
-.type-pill {
-    font: 500 9px/1 var(--font); padding: 2px 5px; border-radius: 3px;
-    text-transform: uppercase; letter-spacing: 0.3px; flex-shrink: 0; opacity: 0.7;
-}
-.type-pill.platform  { color: var(--node-platform); background: rgba(167,139,250,0.12); }
-.type-pill.system    { color: var(--node-system);   background: rgba(34,211,238,0.12); }
-.type-pill.subsystem { color: var(--node-subsystem); background: rgba(96,165,250,0.12); }
-.type-pill.component { color: var(--node-component); background: rgba(52,211,153,0.12); }
-.type-pill.probe     { color: var(--node-probe);    background: rgba(100,116,139,0.12); }
-
-.tree-children { overflow: hidden; }
-.tree-children.collapsed { display: none; }
-
-/* Library items */
-.lib-item {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 8px 4px 28px; cursor: pointer; font-size: 12px;
-    color: var(--text-2); transition: background 0.1s;
-}
-.lib-item:hover { background: var(--bg-hover); color: var(--text-1); }
-.lib-item.selected { background: var(--bg-selected); color: var(--text-1); }
-
-/* ─── CONTENT PANEL ───────────────────────────────────── */
-#content {
-    flex: 1; overflow-y: auto; padding: 40px 48px;
-    background: var(--bg-content);
-}
-
-.doc-header { margin-bottom: 28px; }
-.doc-header h1 {
-    font-size: 24px; font-weight: 700; color: var(--text-1);
-    display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
-}
-.doc-header .subtitle { font-size: 14px; color: var(--text-2); line-height: 1.6; }
-
-.doc-breadcrumb {
-    font-size: 12px; color: var(--text-3); margin-bottom: 12px;
-    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-}
-.doc-breadcrumb span { cursor: pointer; }
-.doc-breadcrumb span:hover { color: var(--accent); }
-
-.tier-indicator {
+.hero { text-align: center; margin-bottom: 48px; }
+.hero h1 { font-size: 32px; font-weight: 700; color: var(--text-1); margin-bottom: 12px; }
+.hero p { font-size: 16px; color: var(--text-2); line-height: 1.6; max-width: 560px; margin: 0 auto 24px; }
+.hero-stats { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.hero-stat {
     display: inline-flex; align-items: center; gap: 6px;
-    font: 500 11px/1 var(--font); color: var(--accent); margin-bottom: 20px;
-    padding: 4px 10px; background: var(--accent-dim); border-radius: var(--radius);
+    padding: 6px 14px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 20px; font-size: 13px; color: var(--text-2);
+}
+.hero-stat .hs-num { font-weight: 600; }
+.hero-stat.ok .hs-num { color: var(--green); }
+.hero-stat.warn .hs-num { color: var(--yellow); }
+
+/* System cards */
+.systems-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 56px; }
+.system-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 28px 24px; cursor: pointer; transition: all 0.2s;
+    position: relative; overflow: hidden;
+}
+.system-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--card-accent, var(--accent));
+}
+.system-card:hover {
+    border-color: var(--card-accent, var(--accent)); transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.sc-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 16px;
+}
+.sc-icon svg { width: 20px; height: 20px; }
+.system-card h3 { font-size: 18px; font-weight: 600; color: var(--text-1); margin-bottom: 8px; }
+.sc-desc { font-size: 13px; color: var(--text-2); line-height: 1.5; margin-bottom: 16px; min-height: 40px; }
+.sc-footer { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.sc-ratio { font-weight: 600; }
+.sc-ratio.ok { color: var(--green); }
+.sc-ratio.warn { color: var(--yellow); }
+.sc-ratio.fail { color: var(--red); }
+
+/* Reference section */
+.ref-section { margin-top: 8px; }
+.ref-section h2 {
+    font-size: 14px; font-weight: 600; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 20px;
+}
+.ref-category { margin-bottom: 24px; }
+.ref-category h3 {
+    font-size: 12px; color: var(--text-3); text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+.ref-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.ref-chip {
+    display: inline-flex; padding: 7px 16px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 20px;
+    font-size: 13px; color: var(--text-2); cursor: pointer; transition: all 0.15s;
+}
+.ref-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── DETAIL VIEW ─────────────────────────────────────── */
+.detail-wrap { max-width: 800px; padding: 40px 48px; }
+
+.breadcrumb {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text-3); margin-bottom: 24px;
+}
+.breadcrumb a { color: var(--text-3); cursor: pointer; text-decoration: none; }
+.breadcrumb a:hover { color: var(--accent); }
+
+.detail-header { margin-bottom: 28px; }
+.detail-header h1 { font-size: 28px; font-weight: 700; color: var(--text-1); margin-bottom: 8px; }
+.dh-desc { font-size: 15px; color: var(--text-2); line-height: 1.6; }
+.dh-health {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+}
+.dh-health.ok { background: rgba(34,197,94,0.08); color: var(--green); }
+.dh-health.warn { background: rgba(234,179,8,0.08); color: var(--yellow); }
+.dh-health.fail { background: rgba(239,68,68,0.08); color: var(--red); }
+
+.tier-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; background: var(--accent-dim); border-radius: var(--radius-sm);
+    font: 500 11px/1 var(--font); color: var(--accent); margin-bottom: 24px;
 }
 
-.doc-body { line-height: 1.75; color: var(--text-2); max-width: 740px; }
-.doc-body h2 { font-size: 18px; color: var(--text-1); margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-.doc-body h3 { font-size: 15px; color: var(--text-1); margin: 20px 0 8px; }
-.doc-body h4 { font-size: 13px; color: var(--text-1); margin: 16px 0 6px; }
-.doc-body p  { margin: 0 0 12px; }
-.doc-body ul, .doc-body ol { margin: 0 0 12px; padding-left: 24px; }
+/* Children grid */
+.children-section { margin-top: 36px; }
+.children-section h2 { font-size: 15px; font-weight: 600; color: var(--text-2); margin-bottom: 16px; }
+.children-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.child-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); cursor: pointer; transition: all 0.15s;
+}
+.child-card:hover { border-color: var(--accent); background: var(--bg-hover); }
+.cc-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--text-1); }
+.cc-health { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.cc-health.ok { color: var(--green); }
+.cc-health.warn { color: var(--yellow); }
+.cc-health.fail { color: var(--red); }
+
+/* Probe table */
+.probe-section { margin-top: 36px; }
+.probe-section h2 { font-size: 15px; font-weight: 600; color: var(--text-2); margin-bottom: 12px; }
+.probe-table { width: 100%; border-collapse: collapse; }
+.probe-table th {
+    text-align: left; font: 500 11px/1 var(--font); color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.probe-table td { padding: 10px 12px; font-size: 13px; color: var(--text-2); border-bottom: 1px solid var(--border); }
+.probe-table tr:hover td { background: var(--bg-hover); }
+.probe-status { display: flex; align-items: center; gap: 6px; }
+.probe-status.ok { color: var(--green); }
+.probe-status.fail { color: var(--red); }
+
+/* ─── DOC BODY (rendered markdown) ────────────────────── */
+.doc-body { line-height: 1.75; color: var(--text-2); }
+.doc-body h2 { font-size: 20px; color: var(--text-1); margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.doc-body h3 { font-size: 16px; color: var(--text-1); margin: 24px 0 8px; }
+.doc-body h4 { font-size: 14px; color: var(--text-1); margin: 18px 0 6px; }
+.doc-body p  { margin: 0 0 14px; }
+.doc-body ul, .doc-body ol { margin: 0 0 14px; padding-left: 24px; }
 .doc-body li { margin-bottom: 4px; }
 .doc-body a  { color: var(--accent); text-decoration: none; }
 .doc-body a:hover { text-decoration: underline; }
 .doc-body strong { color: var(--text-1); }
 .doc-body code {
     font-family: var(--mono); font-size: 12px;
-    background: rgba(56, 189, 248, 0.08); color: var(--accent);
+    background: rgba(56,189,248,0.08); color: var(--accent);
     padding: 1px 5px; border-radius: 3px;
 }
 .doc-body pre {
-    background: var(--bg-page); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 14px 16px; margin: 12px 0;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin: 14px 0;
     overflow-x: auto; font-size: 12px; line-height: 1.6;
 }
 .doc-body pre code { background: none; padding: 0; color: var(--text-2); }
-.doc-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
-.doc-body th { text-align: left; font-weight: 600; color: var(--text-1); padding: 8px 10px; border-bottom: 2px solid var(--border); }
-.doc-body td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text-2); }
+.doc-body table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; }
+.doc-body th { text-align: left; font-weight: 600; color: var(--text-1); padding: 10px 12px; border-bottom: 2px solid var(--border); }
+.doc-body td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .doc-body tr:hover td { background: var(--bg-hover); }
-.doc-body blockquote { border-left: 3px solid var(--accent); padding: 8px 16px; margin: 12px 0; color: var(--text-2); background: var(--accent-dim); border-radius: 0 var(--radius) var(--radius) 0; }
-.doc-body hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+.doc-body blockquote {
+    border-left: 3px solid var(--accent); padding: 10px 16px; margin: 14px 0;
+    background: var(--accent-dim); border-radius: 0 var(--radius) var(--radius) 0;
+}
+.doc-body hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+.doc-body img { max-width: 100%; border-radius: var(--radius); }
 
-/* Tier hints when no content */
-.tier-hints { margin-top: 16px; }
-.tier-hints .hint-label { font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
+/* No content fallback */
+.no-content {
+    padding: 32px; text-align: center; color: var(--text-3);
+    border: 1px dashed var(--border); border-radius: var(--radius); margin-top: 12px;
+}
+.no-content p { margin: 6px 0; }
 .tier-hint-btn {
-    display: inline-block; padding: 4px 10px; margin: 3px 4px 3px 0;
-    font: 500 11px/1 var(--font); border-radius: var(--radius);
+    display: inline-block; padding: 5px 12px; margin: 4px;
+    font: 500 11px/1 var(--font); border-radius: 20px;
     border: 1px solid var(--border); color: var(--text-2); cursor: pointer;
     background: transparent; transition: all 0.15s;
 }
 .tier-hint-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-.no-content {
-    padding: 32px; text-align: center; color: var(--text-3);
-    border: 1px dashed var(--border); border-radius: var(--radius);
-    margin-top: 8px;
-}
-.no-content p { margin: 4px 0; }
-
-/* Welcome state */
-.welcome { max-width: 560px; margin: 0 auto; padding-top: 60px; }
-.welcome h2 { font-size: 20px; color: var(--text-1); margin-bottom: 12px; }
-.welcome p { color: var(--text-2); line-height: 1.7; margin-bottom: 16px; font-size: 14px; }
-.welcome .tree-summary {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: 10px; margin: 24px 0;
-}
-.welcome .stat {
-    text-align: center; padding: 14px; background: var(--bg-elevated);
-    border-radius: var(--radius); border: 1px solid var(--border);
-}
-.welcome .stat .num { font-size: 22px; font-weight: 700; color: var(--accent); }
-.welcome .stat .label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
-.welcome .hint { font-size: 13px; color: var(--text-3); margin-top: 20px; }
-
-/* Health status bar in doc header */
-.health-bar {
-    display: flex; align-items: center; gap: 8px; margin-top: 8px;
-    font-size: 12px; color: var(--text-3);
-}
-.health-bar .ratio { font-weight: 600; }
-.health-bar .ratio.ok { color: var(--health-ok); }
-.health-bar .ratio.warn { color: var(--health-warn); }
-.health-bar .ratio.fail { color: var(--health-fail); }
-
-/* Children overview in doc */
-.children-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 8px; margin-top: 16px;
-}
-.child-card {
-    padding: 10px 12px; background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: var(--radius); cursor: pointer; transition: all 0.15s;
-    display: flex; align-items: center; gap: 8px;
-}
-.child-card:hover { border-color: var(--accent); background: var(--bg-hover); }
-.child-card .cc-name { font-size: 12px; color: var(--text-2); flex: 1; }
-.child-card .cc-type { font-size: 9px; color: var(--text-3); text-transform: uppercase; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
@@ -273,7 +323,15 @@ main { flex: 1; display: flex; overflow: hidden; }
 <body>
 
 <header>
-    <div class="brand"><span>Atlas</span> · SmartPiXL</div>
+    <a class="brand" id="homeLink">
+        <span class="brand-mark">◆</span>
+        <span>Atlas</span>
+    </a>
+    <div class="search-wrap">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="search" id="search" placeholder="Search documentation..." autocomplete="off">
+        <div id="searchResults" class="search-results"></div>
+    </div>
     <div class="tier-bar" id="tierBar">
         <button class="tier-btn active" data-tier="pitch">Overview</button>
         <button class="tier-btn" data-tier="management">Architecture</button>
@@ -282,32 +340,24 @@ main { flex: 1; display: flex; overflow: hidden; }
     </div>
 </header>
 
-<main>
-    <aside id="sidebar">
-        <div class="search-wrap">
-            <input type="text" id="searchInput" placeholder="Filter nodes…" autocomplete="off">
-        </div>
-        <div id="tree-container"></div>
-        <div id="library-container"></div>
-    </aside>
-    <article id="content">
-        <div id="doc"></div>
-    </article>
-</main>
+<div class="layout">
+    <nav id="sidebar"></nav>
+    <main id="content"></main>
+</div>
 
 <script>
 /* ═══════════════════════════════════════════════════════════
    ATLAS ENGINE
    ═══════════════════════════════════════════════════════════ */
 
-// ── STATE ──────────────────────────────────────────────
-let treeData    = null;
-let docMap      = {};
-let selectedId  = null;
-let currentTier = 'pitch';
+// ── CONSTANTS ──────────────────────────────────────────
+const TIERS = {
+    pitch:       { label: 'Overview',     field: 'pitchHtml',       desc: 'High-level overview for any audience' },
+    management:  { label: 'Architecture', field: 'managementHtml',  desc: 'Design and data flow' },
+    technical:   { label: 'Technical',    field: 'technicalHtml',   desc: 'Implementation details' },
+    walkthrough: { label: 'Deep Dive',    field: 'walkthroughHtml', desc: 'Code walkthrough and configuration' },
+};
 
-// ── TREE-NODE → DOC-SLUG mapping ──────────────────────
-// Maps Health.Node slugs to MarkdownAtlasService section slugs.
 const NODE_DOC = {
     'smartpixl':            'architecture-overview',
     'edge':                 'architecture-edge',
@@ -318,376 +368,417 @@ const NODE_DOC = {
     'forge.f5-etl':         'subsystems-etl',
 };
 
-const TIERS = {
-    pitch:       { label: 'Overview',     field: 'pitchHtml',       desc: 'High-level overview for any audience' },
-    management:  { label: 'Architecture', field: 'managementHtml',  desc: 'How it works — design and data flow' },
-    technical:   { label: 'Technical',    field: 'technicalHtml',   desc: 'Implementation details for engineers' },
-    walkthrough: { label: 'Deep Dive',    field: 'walkthroughHtml', desc: 'Code walkthrough and configuration' },
+const SYSTEM_META = {
+    'edge':     { icon: 'zap',  color: 'var(--edge)' },
+    'forge':    { icon: 'cpu',  color: 'var(--forge)' },
+    'sentinel': { icon: 'eye',  color: 'var(--sentinel)' },
 };
+
+const RELATED_DOCS = {
+    'edge':                ['subsystems-pixl-script', 'subsystems-fingerprinting', 'subsystems-bot-detection'],
+    'forge':               ['subsystems-enrichment-pipeline', 'subsystems-identity-resolution', 'subsystems-geo-intelligence', 'subsystems-traffic-alerts'],
+    'forge.f2-enrichment': ['subsystems-enrichment-pipeline', 'subsystems-identity-resolution', 'subsystems-geo-intelligence', 'subsystems-traffic-alerts'],
+    'forge.f4-failover':   ['subsystems-failover'],
+    'forge.f5-etl':        ['subsystems-etl', 'database-etl-procedures'],
+    'sentinel':            ['operations-monitoring', 'operations-troubleshooting'],
+};
+
+// ── STATE ──────────────────────────────────────────────
+let tree  = null;
+let docs  = {};
+let flat  = [];
+let view  = 'landing';
+let selected = null;
+let tier  = 'pitch';
 
 // ── INIT ───────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    const [treeResp, sectionsResp] = await Promise.all([
+    const [treeResp, sectResp] = await Promise.all([
         fetch('/api/health-tree').then(r => r.json()),
         fetch('/api/atlas/sections').then(r => r.json()),
     ]);
-
-    treeData = treeResp;
-    for (const s of sectionsResp) docMap[s.slug] = s;
-
-    renderTree();
-    renderLibrary();
-    showWelcome();
-    setupListeners();
+    tree = treeResp;
+    for (const s of sectResp) docs[s.slug] = s;
+    flattenTree(tree.root, null, []);
+    render();
+    bindEvents();
 });
 
+function flattenTree(node, parent, ancestors) {
+    if (!node) return;
+    flat.push({ node, parent, ancestors: [...ancestors] });
+    if (node.children) {
+        for (const child of node.children) flattenTree(child, node, [...ancestors, node]);
+    }
+}
+
 // ── EVENTS ─────────────────────────────────────────────
-function setupListeners() {
+function bindEvents() {
     document.querySelectorAll('.tier-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelector('.tier-btn.active')?.classList.remove('active');
             btn.classList.add('active');
-            currentTier = btn.dataset.tier;
-            if (selectedId) refreshContent();
+            tier = btn.dataset.tier;
+            render();
         });
     });
 
-    const search = document.getElementById('searchInput');
+    const input = document.getElementById('search');
+    const results = document.getElementById('searchResults');
     let t;
-    search.addEventListener('input', () => {
-        clearTimeout(t);
-        t = setTimeout(() => filterTree(search.value.trim().toLowerCase()), 150);
-    });
+    input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => runSearch(input.value.trim()), 150); });
+    input.addEventListener('focus', () => { if (input.value.trim()) runSearch(input.value.trim()); });
+    document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) results.classList.remove('open'); });
+    input.addEventListener('keydown', e => { if (e.key === 'Escape') { results.classList.remove('open'); input.blur(); } });
+
+    document.getElementById('homeLink').addEventListener('click', e => { e.preventDefault(); goHome(); });
 }
 
-// ── TREE ───────────────────────────────────────────────
-function renderTree() {
-    const c = document.getElementById('tree-container');
-    if (!treeData?.root) { c.innerHTML = '<div class="no-content"><p>Health tree unavailable</p></div>'; return; }
-    c.innerHTML = '';
-    buildNode(treeData.root, c, 0, []);
+// ── NAVIGATION ─────────────────────────────────────────
+function goHome() { view = 'landing'; selected = null; render(); }
+
+function goNode(slug) {
+    const entry = flat.find(f => f.node.slug === slug);
+    if (!entry) return;
+    if (entry.node.nodeType === 'platform') { goHome(); return; }
+    if (entry.node.nodeType === 'probe' && entry.parent) { selected = entry.parent.slug; }
+    else { selected = slug; }
+    view = 'detail';
+    render();
 }
 
-function buildNode(node, parent, depth, ancestors) {
-    const kids = node.children && node.children.length > 0;
+function goRef(slug) { view = 'reference'; selected = slug; render(); }
 
-    const row = document.createElement('div');
-    row.className = 'tree-row';
-    row.style.setProperty('--depth', depth);
-    row.dataset.slug = node.slug;
-    row.dataset.nodeType = node.nodeType;
-    row.dataset.name = (node.name || '').toLowerCase();
-
-    const chev = document.createElement('div');
-    chev.className = 'tree-chevron' + (kids ? '' : ' leaf');
-    chev.textContent = kids ? '▸' : '';
-    row.appendChild(chev);
-
-    const dot = document.createElement('div');
-    dot.className = 'health-dot ' + healthCls(node);
-    row.appendChild(dot);
-
-    const nm = document.createElement('span');
-    nm.className = 'node-name';
-    nm.textContent = node.name;
-    row.appendChild(nm);
-
-    const pill = document.createElement('span');
-    pill.className = 'type-pill ' + node.nodeType;
-    pill.textContent = node.nodeType;
-    row.appendChild(pill);
-
-    parent.appendChild(row);
-
-    let childBox = null;
-    if (kids) {
-        childBox = document.createElement('div');
-        childBox.className = 'tree-children';
-        // Auto-collapse probe-only groups at depth > 0
-        if (node.children.every(c => c.nodeType === 'probe') && depth > 0) {
-            childBox.classList.add('collapsed');
-            chev.classList.add('collapsed');
-        }
-        parent.appendChild(childBox);
-        for (const child of node.children) buildNode(child, childBox, depth + 1, [...ancestors, node]);
-    }
-
-    row.addEventListener('click', e => {
-        if (kids && e.target.closest('.tree-chevron')) {
-            chev.classList.toggle('collapsed');
-            childBox.classList.toggle('collapsed');
-            return;
-        }
-        selectTree(node, ancestors);
-    });
-    if (kids) row.addEventListener('dblclick', () => { chev.classList.toggle('collapsed'); childBox.classList.toggle('collapsed'); });
+function closeSearch() {
+    document.getElementById('searchResults').classList.remove('open');
+    document.getElementById('search').value = '';
 }
 
-function healthCls(n) {
-    if (n.ratio == null) return 'none';
-    if (n.ratio >= 1) return 'ok';
-    if (n.ratio > 0) return 'warn';
-    return 'fail';
+function switchTier(t) {
+    document.querySelector('.tier-btn.active')?.classList.remove('active');
+    document.querySelector(`.tier-btn[data-tier="${t}"]`)?.classList.add('active');
+    tier = t;
+    render();
 }
 
-function selectTree(node, ancestors) {
-    selectedId = 'tree:' + node.slug;
-    clearSel();
-    document.querySelector(`.tree-row[data-slug="${node.slug}"]`)?.classList.add('selected');
-    showTreeDoc(node, ancestors);
-}
+// ── RENDER DISPATCH ────────────────────────────────────
+function render() {
+    const sb = document.getElementById('sidebar');
+    const ct = document.getElementById('content');
 
-// ── LIBRARY ────────────────────────────────────────────
-function renderLibrary() {
-    const c = document.getElementById('library-container');
-    const mapped = new Set(Object.values(NODE_DOC));
-
-    const groups = {};
-    for (const [slug, sec] of Object.entries(docMap)) {
-        if (mapped.has(slug)) continue;
-        const cat = sec.category || 'Other';
-        (groups[cat] ??= []).push(sec);
-    }
-    if (!Object.keys(groups).length) { c.style.display = 'none'; return; }
-
-    const hdr = document.createElement('div');
-    hdr.className = 'lib-header';
-    hdr.textContent = '▾ Library';
-    c.appendChild(hdr);
-
-    const body = document.createElement('div');
-    body.id = 'library-body';
-    c.appendChild(body);
-
-    hdr.addEventListener('click', () => {
-        const hidden = body.style.display === 'none';
-        body.style.display = hidden ? '' : 'none';
-        hdr.textContent = (hidden ? '▾' : '▸') + ' Library';
-    });
-
-    const order = ['Architecture', 'Subsystems', 'Deep Dives', 'Database', 'Operations', 'Other'];
-    for (const cat of Object.keys(groups).sort((a, b) => (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b)))) {
-        const title = document.createElement('div');
-        title.className = 'lib-group-title';
-        title.textContent = cat;
-        body.appendChild(title);
-        for (const sec of groups[cat].sort((a, b) => a.sortOrder - b.sortOrder)) {
-            const item = document.createElement('div');
-            item.className = 'lib-item';
-            item.dataset.slug = sec.slug;
-            item.dataset.name = (sec.title || '').toLowerCase();
-            item.textContent = sec.title;
-            item.addEventListener('click', () => selectLib(sec));
-            body.appendChild(item);
-        }
-    }
-}
-
-function selectLib(sec) {
-    selectedId = 'lib:' + sec.slug;
-    clearSel();
-    document.querySelector(`.lib-item[data-slug="${sec.slug}"]`)?.classList.add('selected');
-    showLibDoc(sec);
-}
-
-// ── CONTENT ────────────────────────────────────────────
-function refreshContent() {
-    if (!selectedId) return;
-    if (selectedId.startsWith('tree:')) {
-        const r = findNode(treeData.root, selectedId.slice(5));
-        if (r) showTreeDoc(r.node, r.ancestors);
+    if (view === 'landing') {
+        sb.classList.remove('open');
+        ct.innerHTML = renderLanding();
+    } else if (view === 'detail') {
+        const entry = flat.find(f => f.node.slug === selected);
+        if (!entry) { goHome(); return; }
+        sb.classList.add('open');
+        sb.innerHTML = renderDetailSidebar(entry);
+        ct.innerHTML = renderDetailContent(entry);
     } else {
-        const sec = docMap[selectedId.slice(4)];
-        if (sec) showLibDoc(sec);
+        sb.classList.add('open');
+        sb.innerHTML = renderRefSidebar();
+        ct.innerHTML = renderRefContent();
     }
+
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    ct.scrollTop = 0;
 }
 
-function showTreeDoc(node, ancestors) {
-    const el = document.getElementById('doc');
-    const sec = docMap[NODE_DOC[node.slug]] || null;
-    const tier = TIERS[currentTier];
-    const html = sec ? sec[tier.field] : null;
+// ── LANDING VIEW ───────────────────────────────────────
+function renderLanding() {
+    if (!tree?.root) return '<div class="landing"><p>Loading…</p></div>';
+    const systems = tree.root.children || [];
+    const cls = tree.root.ratio >= 1 ? 'ok' : 'warn';
 
-    let out = '';
+    let h = '<div class="landing"><div class="hero">';
+    h += '<h1>SmartPiXL Atlas</h1>';
+    h += '<p>Documentation and health monitoring for every system, service, and probe — derived from a single source of truth.</p>';
+    h += '<div class="hero-stats">';
+    h += `<div class="hero-stat ${cls}"><span class="hs-num">${tree.root.healthy}/${tree.root.total}</span> probes healthy</div>`;
+    h += `<div class="hero-stat"><span class="hs-num">${systems.length}</span> systems</div>`;
+    h += `<div class="hero-stat"><span class="hs-num">${Object.keys(docs).length}</span> doc sections</div>`;
+    h += '</div></div>';
+
+    // System cards
+    h += '<div class="systems-grid">';
+    for (const sys of systems) {
+        const meta = SYSTEM_META[sys.slug] || { icon: 'box', color: 'var(--accent)' };
+        const hCls = healthClass(sys);
+        const childLabel = sys.children?.some(c => c.nodeType === 'subsystem')
+            ? `${sys.children.length} subsystems` : `${sys.children?.length || 0} probes`;
+
+        h += `<div class="system-card" style="--card-accent:${meta.color}" onclick="goNode('${sys.slug}')">`;
+        h += `<div class="sc-icon" style="background:${meta.color}15;color:${meta.color}"><i data-lucide="${meta.icon}"></i></div>`;
+        h += `<h3>${esc(sys.name)}</h3>`;
+        h += `<div class="sc-desc">${esc(sys.description || '')}</div>`;
+        h += '<div class="sc-footer">';
+        if (sys.total > 0) {
+            h += `<div class="sb-dot ${hCls}"></div>`;
+            h += `<span class="sc-ratio ${hCls}">${sys.healthy}/${sys.total}</span>`;
+            h += `<span>·</span><span>${childLabel}</span>`;
+        }
+        h += '</div></div>';
+    }
+    h += '</div>';
+
+    // Reference documentation
+    const mapped = new Set(Object.values(NODE_DOC));
+    const groups = {};
+    for (const [slug, sec] of Object.entries(docs)) {
+        if (mapped.has(slug)) continue;
+        (groups[sec.category || 'Other'] ??= []).push(sec);
+    }
+    if (Object.keys(groups).length) {
+        h += '<div class="ref-section"><h2>Reference Documentation</h2>';
+        const order = ['Architecture', 'Subsystems', 'Deep Dives', 'Database', 'Operations'];
+        for (const cat of Object.keys(groups).sort((a, b) => idx(order, a) - idx(order, b))) {
+            h += `<div class="ref-category"><h3>${esc(cat)}</h3><div class="ref-grid">`;
+            for (const sec of groups[cat].sort((a, b) => a.sortOrder - b.sortOrder)) {
+                h += `<div class="ref-chip" onclick="goRef('${sec.slug}')">${esc(sec.title)}</div>`;
+            }
+            h += '</div></div>';
+        }
+        h += '</div>';
+    }
+
+    h += '</div>';
+    return h;
+}
+
+// ── DETAIL VIEW ────────────────────────────────────────
+function renderDetailSidebar(entry) {
+    const { node, parent, ancestors } = entry;
+    let h = '';
+
+    // Back to landing
+    h += '<div class="sb-back" onclick="goHome()"><i data-lucide="arrow-left"></i> Atlas</div>';
+
+    if (node.nodeType === 'system') {
+        h += `<div class="sb-system-name">${esc(node.name)}</div>`;
+        const navKids = (node.children || []).filter(c => c.nodeType !== 'probe');
+        if (navKids.length) {
+            h += '<div class="sb-divider"></div>';
+            for (const child of navKids) {
+                h += `<div class="sb-item" onclick="goNode('${child.slug}')"><div class="sb-dot ${healthClass(child)}"></div>${esc(child.name)}</div>`;
+            }
+        }
+    } else {
+        // Find the system ancestor
+        const system = ancestors.find(a => a.nodeType === 'system');
+        if (system) {
+            h += `<div class="sb-item" onclick="goNode('${system.slug}')" style="font-weight:600;color:var(--text-1);padding:6px 20px;margin-bottom:4px">${esc(system.name)}</div>`;
+            h += '<div class="sb-divider"></div>';
+            const siblings = (system.children || []).filter(c => c.nodeType !== 'probe');
+            for (const sib of siblings) {
+                const active = sib.slug === node.slug ? ' active' : '';
+                h += `<div class="sb-item${active}" onclick="goNode('${sib.slug}')"><div class="sb-dot ${healthClass(sib)}"></div>${esc(sib.name)}</div>`;
+            }
+        }
+    }
+
+    // Related docs
+    const related = RELATED_DOCS[node.slug];
+    if (related?.length) {
+        h += '<div class="sb-divider"></div>';
+        h += '<div class="sb-heading">Related Docs</div>';
+        for (const slug of related) {
+            const doc = docs[slug];
+            if (doc) h += `<div class="sb-item" onclick="goRef('${slug}')">${esc(doc.title)}</div>`;
+        }
+    }
+
+    return h;
+}
+
+function renderDetailContent(entry) {
+    const { node, ancestors } = entry;
+    const docSlug = NODE_DOC[node.slug];
+    const sec = docs[docSlug] || null;
+    const tierInfo = TIERS[tier];
+    const html = sec ? sec[tierInfo.field] : null;
+
+    let h = '<div class="detail-wrap">';
 
     // Breadcrumb
-    if (ancestors.length) {
-        out += '<div class="doc-breadcrumb">';
-        for (const a of ancestors) out += `<span onclick="navTo('${a.slug}')">${esc(a.name)}</span> <span style="color:var(--text-3)">›</span> `;
-        out += `<span style="color:var(--text-1)">${esc(node.name)}</span></div>`;
+    h += '<div class="breadcrumb"><a onclick="goHome()">Atlas</a>';
+    for (const a of ancestors) {
+        if (a.nodeType === 'platform') continue;
+        h += ` <span class="sep">›</span> <a onclick="goNode('${a.slug}')">${esc(a.name)}</a>`;
     }
+    h += ` <span class="sep">›</span> <span style="color:var(--text-1)">${esc(node.name)}</span></div>`;
 
     // Header
-    out += '<div class="doc-header">';
-    out += `<h1>${esc(node.name)} <span class="type-pill ${node.nodeType}">${node.nodeType}</span></h1>`;
-    if (node.description) out += `<div class="subtitle">${esc(node.description)}</div>`;
-
-    // Health bar for aggregate nodes
+    h += '<div class="detail-header">';
+    h += `<h1>${esc(node.name)}</h1>`;
+    if (node.description) h += `<div class="dh-desc">${esc(node.description)}</div>`;
     if (node.total > 0) {
-        const cls = node.ratio >= 1 ? 'ok' : node.ratio > 0 ? 'warn' : 'fail';
-        out += `<div class="health-bar"><span class="ratio ${cls}">${node.healthy}/${node.total} healthy</span><span>(${Math.round((node.ratio || 0) * 100)}%)</span></div>`;
+        const cls = healthClass(node);
+        h += `<div class="dh-health ${cls}">${node.healthy}/${node.total} healthy (${Math.round((node.ratio || 0) * 100)}%)</div>`;
     } else if (node.health != null) {
         const cls = node.health === 1 ? 'ok' : 'fail';
-        out += `<div class="health-bar"><span class="ratio ${cls}">${node.health === 1 ? 'Live' : 'Down'}</span></div>`;
+        h += `<div class="dh-health ${cls}">${node.health === 1 ? 'Healthy' : 'Down'}</div>`;
     }
-    out += '</div>';
+    h += '</div>';
 
     // Tier indicator
-    out += `<div class="tier-indicator">◆ ${tier.label} — ${tier.desc}</div>`;
+    h += `<div class="tier-label">◆ ${tierInfo.label} — ${tierInfo.desc}</div>`;
 
-    // Content
+    // Doc content
     if (html) {
-        out += `<div class="doc-body">${html}</div>`;
+        h += `<div class="doc-body">${html}</div>`;
     } else {
-        out += noContent(sec, node);
+        h += renderNoContent(sec, node);
     }
 
-    // Children grid for parent nodes with no doc content
-    if (!html && node.children?.length) {
-        out += '<h3 style="margin-top:24px;font-size:14px;color:var(--text-2)">Child Nodes</h3>';
-        out += '<div class="children-grid">';
-        for (const child of node.children) {
-            out += `<div class="child-card" onclick="navTo('${child.slug}')">`;
-            out += `<div class="health-dot ${healthCls(child)}"></div>`;
-            out += `<span class="cc-name">${esc(child.name)}</span>`;
-            out += `<span class="cc-type">${child.nodeType}</span>`;
-            out += '</div>';
+    // Children (non-probe): subsystem/component cards
+    const kids = (node.children || []).filter(c => c.nodeType !== 'probe');
+    if (kids.length) {
+        h += '<div class="children-section">';
+        h += `<h2>${kids[0].nodeType === 'subsystem' ? 'Subsystems' : 'Components'}</h2>`;
+        h += '<div class="children-grid">';
+        for (const k of kids) {
+            const cls = healthClass(k);
+            h += `<div class="child-card" onclick="goNode('${k.slug}')">`;
+            h += `<div class="sb-dot ${cls}"></div>`;
+            h += `<span class="cc-name">${esc(k.name)}</span>`;
+            if (k.total > 0) h += `<span class="cc-health ${cls}">${k.healthy}/${k.total}</span>`;
+            h += '</div>';
         }
-        out += '</div>';
+        h += '</div></div>';
     }
 
-    el.innerHTML = out;
-    document.getElementById('content').scrollTop = 0;
+    // Probes table (recurse through all children to collect probes)
+    const probes = [];
+    function collectProbes(n) {
+        if (n.nodeType === 'probe') probes.push(n);
+        if (n.children) n.children.forEach(c => collectProbes(c));
+    }
+    if (node.children) node.children.forEach(c => collectProbes(c));
+
+    if (probes.length) {
+        h += '<div class="probe-section">';
+        h += `<h2>Probes (${probes.length})</h2>`;
+        h += '<table class="probe-table"><thead><tr><th>Name</th><th>Status</th><th>Description</th></tr></thead><tbody>';
+        for (const p of probes) {
+            const st = p.health === 1 ? 'ok' : p.health === 0 ? 'fail' : 'none';
+            const label = p.health === 1 ? 'Healthy' : p.health === 0 ? 'Down' : 'Unknown';
+            h += `<tr><td style="color:var(--text-1)">${esc(p.name)}</td>`;
+            h += `<td><span class="probe-status ${st}"><span class="sb-dot ${st}"></span>${label}</span></td>`;
+            h += `<td style="color:var(--text-3);font-size:12px">${esc(p.description || '—')}</td></tr>`;
+        }
+        h += '</tbody></table></div>';
+    }
+
+    h += '</div>';
+    return h;
 }
 
-function showLibDoc(sec) {
-    const el = document.getElementById('doc');
-    const tier = TIERS[currentTier];
-    const html = sec[tier.field];
-
-    let out = '';
-    out += '<div class="doc-header">';
-    out += `<h1>${esc(sec.title)} <span style="font-size:12px;color:var(--text-3);font-weight:400">${sec.category}</span></h1>`;
-    out += '</div>';
-    out += `<div class="tier-indicator">◆ ${tier.label} — ${tier.desc}</div>`;
-    out += html ? `<div class="doc-body">${html}</div>` : noContent(sec, null);
-
-    el.innerHTML = out;
-    document.getElementById('content').scrollTop = 0;
-}
-
-function noContent(sec, node) {
+function renderNoContent(sec, node) {
     const avail = [];
     if (sec) for (const [k, t] of Object.entries(TIERS)) { if (sec[t.field]) avail.push({ k, label: t.label }); }
-
     let h = '<div class="no-content">';
-    h += `<p>No <strong>${TIERS[currentTier].label}</strong> content yet for this ${node ? node.nodeType : 'section'}.</p>`;
+    h += `<p>No <strong>${TIERS[tier].label}</strong> content yet for this ${node?.nodeType || 'section'}.</p>`;
     if (avail.length) {
-        h += '<div class="tier-hints"><div class="hint-label">Available tiers:</div>';
+        h += '<p style="margin-top:10px;font-size:12px">Available tiers:</p>';
         for (const a of avail) h += `<button class="tier-hint-btn" onclick="switchTier('${a.k}')">${a.label}</button>`;
-        h += '</div>';
     } else {
-        h += '<p style="margin-top:12px;font-size:13px">Documentation is being developed. The tree provides the structure — content fills in as the platform matures.</p>';
+        h += '<p style="font-size:13px;margin-top:8px">Documentation grows as the platform matures. The tree provides the structure.</p>';
     }
     h += '</div>';
     return h;
 }
 
-function showWelcome() {
-    const el = document.getElementById('doc');
-    const c = countTypes(treeData?.root);
-
-    el.innerHTML = `
-        <div class="welcome">
-            <h2>SmartPiXL Atlas</h2>
-            <p>Atlas is the documentation layer built on the Health.Node tree — the same tree that drives infrastructure monitoring. Every tree node can carry documentation at four depth tiers, from a high-level overview down to code-level detail.</p>
-            <p>Select a node from the tree to explore, or browse the Library for deep dives and reference docs.</p>
-            <div class="tree-summary">
-                <div class="stat"><div class="num">${c.system}</div><div class="label">Systems</div></div>
-                <div class="stat"><div class="num">${c.subsystem}</div><div class="label">Subsystems</div></div>
-                <div class="stat"><div class="num">${c.component}</div><div class="label">Components</div></div>
-                <div class="stat"><div class="num">${c.probe}</div><div class="label">Probes</div></div>
-            </div>
-            <div class="tree-summary">
-                <div class="stat"><div class="num">${Object.keys(docMap).length}</div><div class="label">Sections</div></div>
-            </div>
-            <p class="hint">Use the tier selector in the header to control documentation depth.</p>
-        </div>`;
-}
-
-// ── HELPERS ─────────────────────────────────────────────
-function clearSel() { document.querySelectorAll('.tree-row.selected, .lib-item.selected').forEach(e => e.classList.remove('selected')); }
-
-function findNode(root, slug) {
-    function walk(n, anc) {
-        if (n.slug === slug) return { node: n, ancestors: anc };
-        if (n.children) for (const ch of n.children) { const r = walk(ch, [...anc, n]); if (r) return r; }
-        return null;
+// ── REFERENCE VIEW ─────────────────────────────────────
+function renderRefSidebar() {
+    let h = '<div class="sb-back" onclick="goHome()"><i data-lucide="arrow-left"></i> Atlas</div>';
+    const mapped = new Set(Object.values(NODE_DOC));
+    const groups = {};
+    for (const [slug, sec] of Object.entries(docs)) {
+        if (mapped.has(slug)) continue;
+        (groups[sec.category || 'Other'] ??= []).push(sec);
     }
-    return walk(root, []);
-}
-
-function navTo(slug) {
-    expandTo(slug);
-    const r = findNode(treeData.root, slug);
-    if (r) selectTree(r.node, r.ancestors);
-}
-
-function expandTo(slug) {
-    const row = document.querySelector(`.tree-row[data-slug="${slug}"]`);
-    if (!row) return;
-    let el = row.parentElement;
-    while (el && el.id !== 'tree-container') {
-        if (el.classList.contains('tree-children') && el.classList.contains('collapsed')) {
-            el.classList.remove('collapsed');
-            el.previousElementSibling?.querySelector('.tree-chevron')?.classList.remove('collapsed');
+    const order = ['Architecture', 'Subsystems', 'Deep Dives', 'Database', 'Operations'];
+    for (const cat of Object.keys(groups).sort((a, b) => idx(order, a) - idx(order, b))) {
+        h += `<div class="sb-heading">${esc(cat)}</div>`;
+        for (const sec of groups[cat].sort((a, b) => a.sortOrder - b.sortOrder)) {
+            const active = sec.slug === selected ? ' active' : '';
+            h += `<div class="sb-item${active}" onclick="goRef('${sec.slug}')">${esc(sec.title)}</div>`;
         }
-        el = el.parentElement;
     }
+    return h;
 }
 
-function switchTier(tier) {
-    document.querySelector('.tier-btn.active')?.classList.remove('active');
-    document.querySelector(`.tier-btn[data-tier="${tier}"]`)?.classList.add('active');
-    currentTier = tier;
-    refreshContent();
-}
+function renderRefContent() {
+    const sec = docs[selected];
+    if (!sec) return '<div class="detail-wrap"><p>Section not found.</p></div>';
+    const tierInfo = TIERS[tier];
+    const html = sec[tierInfo.field];
 
-function countTypes(n) {
-    const c = { platform: 0, system: 0, subsystem: 0, component: 0, probe: 0 };
-    if (!n) return c;
-    (function w(x) { if (c[x.nodeType] !== undefined) c[x.nodeType]++; x.children?.forEach(w); })(n);
-    return c;
+    let h = '<div class="detail-wrap">';
+    h += '<div class="breadcrumb"><a onclick="goHome()">Atlas</a>';
+    h += ` <span class="sep">›</span> <span style="color:var(--text-3)">Reference</span>`;
+    h += ` <span class="sep">›</span> <span style="color:var(--text-1)">${esc(sec.title)}</span></div>`;
+    h += '<div class="detail-header">';
+    h += `<h1>${esc(sec.title)}</h1>`;
+    h += `<div class="dh-desc" style="font-size:12px;color:var(--text-3)">${esc(sec.category)}</div>`;
+    h += '</div>';
+    h += `<div class="tier-label">◆ ${tierInfo.label} — ${tierInfo.desc}</div>`;
+    h += html ? `<div class="doc-body">${html}</div>` : renderNoContent(sec, null);
+    h += '</div>';
+    return h;
 }
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // ── SEARCH ─────────────────────────────────────────────
-function filterTree(q) {
-    document.querySelectorAll('.tree-row').forEach(r => { r.classList.remove('match-highlight'); r.style.display = ''; });
-    document.querySelectorAll('.lib-item').forEach(i => i.style.display = '');
+function runSearch(q) {
+    const el = document.getElementById('searchResults');
+    if (!q) { el.classList.remove('open'); return; }
+    q = q.toLowerCase();
+    const results = [];
 
-    if (!q) return;
-
-    document.querySelectorAll('.tree-row').forEach(row => {
-        if ((row.dataset.name || '').includes(q) || (row.dataset.slug || '').includes(q)) {
-            row.classList.add('match-highlight');
-            // Expand parents
-            let el = row.parentElement;
-            while (el && el.id !== 'tree-container') {
-                if (el.classList.contains('tree-children') && el.classList.contains('collapsed')) {
-                    el.classList.remove('collapsed');
-                    el.previousElementSibling?.querySelector('.tree-chevron')?.classList.remove('collapsed');
-                }
-                el = el.parentElement;
-            }
+    for (const { node } of flat) {
+        if (node.nodeType === 'platform') continue;
+        if (node.name.toLowerCase().includes(q) || (node.description || '').toLowerCase().includes(q)) {
+            results.push({ type: 'node', slug: node.slug, name: node.name, meta: node.nodeType });
         }
-    });
+    }
 
-    document.querySelectorAll('.lib-item').forEach(item => {
-        if (!(item.dataset.name || '').includes(q) && !(item.dataset.slug || '').includes(q)) item.style.display = 'none';
-    });
+    const mapped = new Set(Object.values(NODE_DOC));
+    for (const [slug, sec] of Object.entries(docs)) {
+        if (mapped.has(slug)) continue;
+        if (sec.title.toLowerCase().includes(q)) {
+            results.push({ type: 'ref', slug, name: sec.title, meta: sec.category });
+        }
+    }
+
+    if (!results.length) { el.classList.remove('open'); return; }
+
+    let h = '';
+    for (const r of results.slice(0, 12)) {
+        const fn = r.type === 'node' ? 'goNode' : 'goRef';
+        h += `<div class="search-result" onclick="${fn}('${r.slug}');closeSearch()">`;
+        h += `<span style="flex:1">${esc(r.name)}</span>`;
+        h += `<span class="sr-type">${esc(r.meta)}</span></div>`;
+    }
+    el.innerHTML = h;
+    el.classList.add('open');
 }
+
+// ── HELPERS ────────────────────────────────────────────
+function healthClass(n) {
+    if (n.ratio == null && n.health == null) return 'none';
+    if (n.health != null) return n.health === 1 ? 'ok' : 'fail';
+    if (n.ratio >= 1) return 'ok';
+    if (n.ratio > 0) return 'warn';
+    return 'fail';
+}
+
+function esc(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function idx(arr, val) { const i = arr.indexOf(val); return i < 0 ? 99 : i; }
 </script>
 </body>
 </html>
