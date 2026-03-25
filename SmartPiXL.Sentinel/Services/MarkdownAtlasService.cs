@@ -48,47 +48,44 @@ public sealed partial class MarkdownAtlasService
     private static partial Regex MermaidHtmlBlockRegex();
 
     // Section catalog: slug → (category, sortOrder, iconClass, title override)
-    // Mirrors the Health.Node tree: Platform → Systems → Subsystems → Components.
-    // PiXL Script deep dives and Reference docs are cross-cutting categories.
     private static readonly Dictionary<string, (string Category, int SortOrder, string Icon, string? TitleOverride)> SectionCatalog = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Platform (Health.Node: platform)
-        ["platform/smartpixl"]              = ("Platform",    1, "globe",         "SmartPiXL Platform"),
+        // Architecture
+        ["architecture/overview"]           = ("Architecture", 10, "globe",        "SmartPiXL Overview"),
+        ["architecture/data-flow"]          = ("Architecture", 11, "git-branch",   "Data Flow"),
+        ["architecture/edge"]               = ("Architecture", 12, "zap",          "PiXL Edge"),
+        ["architecture/forge"]              = ("Architecture", 13, "hammer",       "SmartPiXL Forge"),
+        ["architecture/sentinel"]           = ("Architecture", 14, "monitor",      "SmartPiXL Sentinel"),
 
-        // Systems (Health.Node: system)
-        ["systems/edge"]                    = ("Systems",    10, "zap",           "PiXL Edge"),
-        ["systems/forge"]                   = ("Systems",    11, "hammer",        "SmartPiXL Forge"),
-        ["systems/sentinel"]                = ("Systems",    12, "shield",        "SmartPiXL Sentinel"),
+        // Subsystems
+        ["subsystems/pixl-script"]          = ("Subsystems", 20, "code",           "PiXL Script"),
+        ["subsystems/fingerprinting"]       = ("Subsystems", 21, "fingerprint",    "Fingerprinting"),
+        ["subsystems/bot-detection"]        = ("Subsystems", 22, "shield",         "Bot Detection"),
+        ["subsystems/enrichment-pipeline"]  = ("Subsystems", 23, "layers",         "Enrichment Pipeline"),
+        ["subsystems/identity-resolution"]  = ("Subsystems", 24, "user-check",     "Identity Resolution"),
+        ["subsystems/etl"]                  = ("Subsystems", 25, "database",       "ETL Pipeline"),
+        ["subsystems/geo-intelligence"]     = ("Subsystems", 26, "map-pin",        "Geo Intelligence"),
+        ["subsystems/traffic-alerts"]       = ("Subsystems", 27, "bell",           "Traffic Alerts"),
+        ["subsystems/failover"]             = ("Subsystems", 28, "shield-check",   "Failover & Durability"),
 
-        // Subsystems (Health.Node: subsystem — Forge F1–F7)
-        ["subsystems/f1-ingest"]            = ("Subsystems", 20, "download",      "F1: Ingest"),
-        ["subsystems/f2-enrichment"]        = ("Subsystems", 21, "layers",        "F2: Enrichment Engine"),
-        ["subsystems/f3-sql-writer"]        = ("Subsystems", 22, "database",      "F3: SQL Writer"),
-        ["subsystems/f4-failover"]          = ("Subsystems", 23, "shield-check",  "F4: Failover & Replay"),
-        ["subsystems/f5-etl"]               = ("Subsystems", 24, "refresh-cw",    "F5: ETL Pipeline"),
-        ["subsystems/f6-background-ip"]     = ("Subsystems", 25, "wifi",          "F6: Background IP"),
-        ["subsystems/f7-data-sync"]         = ("Subsystems", 26, "refresh-ccw",   "F7: Data Sync"),
+        // Deep Dives — PiXL Script breakdown
+        ["subsystems/pixl-script/data-fields"]               = ("Deep Dives", 50, "list",          "Data Field Inventory"),
+        ["subsystems/pixl-script/fingerprinting-techniques"]  = ("Deep Dives", 51, "fingerprint",   "Fingerprinting Techniques"),
+        ["subsystems/pixl-script/bot-detection-engine"]      = ("Deep Dives", 52, "shield-alert",  "Bot Detection Engine"),
+        ["subsystems/pixl-script/evasion-detection"]         = ("Deep Dives", 53, "eye-off",       "Evasion Detection"),
+        ["subsystems/pixl-script/cross-signal-analysis"]     = ("Deep Dives", 54, "git-merge",     "Cross-Signal Analysis"),
+        ["subsystems/pixl-script/behavioral-analysis"]       = ("Deep Dives", 55, "mouse-pointer", "Behavioral Analysis"),
+        ["subsystems/pixl-script/delivery-mechanism"]        = ("Deep Dives", 56, "send",          "Delivery Mechanism"),
 
-        // Components (Health.Node: component)
-        ["components/ip-data-acquisition"]  = ("Components", 30, "hard-drive",    "IP Data Acquisition"),
+        // Database
+        ["database/schema-map"]             = ("Database",   30, "table",         "Schema Map"),
+        ["database/etl-procedures"]         = ("Database",   31, "file-code",     "ETL Procedures"),
+        ["database/sql-features"]           = ("Database",   32, "cpu",           "SQL 2025 Features"),
 
-        // PiXL Script — cross-cutting deep dives (slugs match DEMO_TOPICS in atlas.html)
-        ["subsystems/pixl-script"]                           = ("PiXL Script", 40, "code",          "PiXL Script"),
-        ["subsystems/pixl-script/data-fields"]               = ("PiXL Script", 41, "list",          "Data Field Inventory"),
-        ["subsystems/pixl-script/fingerprinting-techniques"] = ("PiXL Script", 42, "fingerprint",   "Fingerprinting Techniques"),
-        ["subsystems/pixl-script/bot-detection-engine"]      = ("PiXL Script", 43, "shield-alert",  "Bot Detection Engine"),
-        ["subsystems/pixl-script/evasion-detection"]         = ("PiXL Script", 44, "eye-off",       "Evasion Detection"),
-        ["subsystems/pixl-script/cross-signal-analysis"]     = ("PiXL Script", 45, "git-merge",     "Cross-Signal Analysis"),
-        ["subsystems/pixl-script/behavioral-analysis"]       = ("PiXL Script", 46, "mouse-pointer", "Behavioral Analysis"),
-        ["subsystems/pixl-script/delivery-mechanism"]        = ("PiXL Script", 47, "send",          "Delivery Mechanism"),
-
-        // Reference — cross-cutting database & operations docs
-        ["reference/schema-map"]            = ("Reference",  50, "table",         "Schema Map"),
-        ["reference/etl-procedures"]        = ("Reference",  51, "file-code",     "ETL Procedures"),
-        ["reference/sql-features"]          = ("Reference",  52, "cpu",           "SQL 2025 Features"),
-        ["reference/deployment"]            = ("Reference",  53, "rocket",        "Deployment"),
-        ["reference/monitoring"]            = ("Reference",  54, "activity",      "Monitoring"),
-        ["reference/troubleshooting"]       = ("Reference",  55, "wrench",        "Troubleshooting"),
+        // Operations
+        ["operations/deployment"]           = ("Operations", 40, "rocket",        "Deployment"),
+        ["operations/troubleshooting"]      = ("Operations", 41, "wrench",        "Troubleshooting"),
+        ["operations/monitoring"]           = ("Operations", 42, "activity",      "Monitoring"),
     };
 
     public MarkdownAtlasService(string docsRoot, ITrackingLogger logger)
