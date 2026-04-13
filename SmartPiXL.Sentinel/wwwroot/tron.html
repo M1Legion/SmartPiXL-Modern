@@ -368,6 +368,51 @@ body::before {
   box-shadow: 0 0 20px rgba(0,243,255,0.1), 0 0 40px rgba(0,243,255,0.05), inset 0 0 20px rgba(0,243,255,0.03);
 }
 
+/* Nav separator between view tabs and tool links */
+.nav-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--panel-border);
+  margin: 2px 10px;
+  flex-shrink: 0;
+}
+
+/* External page links — standalone (not grouped) */
+.nav-tool {
+  border-radius: 4px !important;
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  padding: 12px 22px;
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+.nav-tool:hover { opacity: 1; }
+
+/* Landing overlay tool links */
+.landing-tools {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.landing-tool-link {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 7px 18px;
+  border: 1px solid rgba(0,243,255,0.12);
+  border-radius: 3px;
+  transition: all 0.25s;
+}
+.landing-tool-link:hover {
+  color: var(--cyan);
+  border-color: rgba(0,243,255,0.4);
+  background: rgba(0,243,255,0.05);
+}
+
 /* --- PANELS --- */
 /*  PANELS - Holographic Tron Data Tiles  */
 /* Every panel is a holographic tile: scanlines + inner circuit grid +
@@ -1954,6 +1999,11 @@ body::before {
     <button class="landing-btn" onclick="enterView('insights')">INSIGHTS</button>
   </div>
   <div class="landing-hint">SELECT A VIEW TO ENTER THE GRID</div>
+  <div class="landing-tools">
+    <a class="landing-tool-link" href="/atlas">ATLAS</a>
+    <a class="landing-tool-link" href="/pipeline">PIPELINE EXPLORER</a>
+    <a class="landing-tool-link" href="/brilliantpixl">BRILLIANTPIXL</a>
+  </div>
 </div>
 
 <div class="dashboard hidden" id="dashboard">
@@ -1981,6 +2031,10 @@ body::before {
     <a class="nav-tab" id="nav-ops" onclick="toggleView('ops')">HEALTH</a>
     <a class="nav-tab" id="nav-pipeline" onclick="toggleView('pipeline')">PIPELINE</a>
     <a class="nav-tab" id="nav-insights" onclick="toggleView('insights')">INSIGHTS</a>
+    <div class="nav-sep"></div>
+    <a class="nav-tab nav-tool" href="/atlas">ATLAS</a>
+    <a class="nav-tab nav-tool" href="/pipeline">EXPLORER</a>
+    <a class="nav-tab nav-tool" href="/brilliantpixl">BRILLIANTPIXL</a>
   </div>
 
   <!-- HEALTH VIEW — Tree-Driven -->

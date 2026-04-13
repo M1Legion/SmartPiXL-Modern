@@ -64,9 +64,13 @@ public static class DashboardEndpoints
 
     // ── General-purpose endpoint cache ──────────────────────────────────
     // Keys by endpoint path, stores (data, expiry). Thread-safe via ConcurrentDictionary.
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (object? Data, DateTime Expiry)>
+    // Internal so the DashboardCacheWarmerService can pre-populate on startup.
+    internal static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (object? Data, DateTime Expiry)>
         _cache = new();
+
+    // Limit concurrent SQL queries to prevent I/O saturation on large tables.
+    private static readonly SemaphoreSlim _sqlGate = new(3, 3);
 
     /// <summary>Try to serve from cache. Returns true (and writes response) on hit.</summary>
     private static async Task<bool> TryServeCachedAsync(HttpContext ctx, string cacheKey)
@@ -79,10 +83,16 @@ public static class DashboardEndpoints
         return false;
     }
 
-    /// <summary>Store result in cache.</summary>
-    private static void CacheStore(string cacheKey, object? data)
+    /// <summary>Store result in cache with default TTL.</summary>
+    internal static void CacheStore(string cacheKey, object? data)
     {
         _cache[cacheKey] = (data, DateTime.UtcNow + CacheDuration);
+    }
+
+    /// <summary>Store result in cache with custom TTL (used by warmer for longer retention).</summary>
+    internal static void CacheStore(string cacheKey, object? data, TimeSpan ttl)
+    {
+        _cache[cacheKey] = (data, DateTime.UtcNow + ttl);
     }
 
     public static void MapDashboardEndpoints(this WebApplication app)
@@ -624,7 +634,7 @@ public static class DashboardEndpoints
         await conn.OpenAsync();
 
         await using var cmd = new SqlCommand(sql, conn);
-        cmd.CommandTimeout = 60;
+        cmd.CommandTimeout = 300;
 
         if (param is not null)
             cmd.Parameters.Add(param);
@@ -665,7 +675,7 @@ public static class DashboardEndpoints
 
         await using var cmd = new SqlCommand(spName, conn);
         cmd.CommandType = System.Data.CommandType.StoredProcedure;
-        cmd.CommandTimeout = 30;
+        cmd.CommandTimeout = 120;
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (await reader.ReadAsync())
@@ -760,6 +770,7 @@ public static class DashboardEndpoints
     /// </summary>
     private static async Task SafeExecuteAsync(HttpContext ctx, Func<Task> action)
     {
+        await _sqlGate.WaitAsync();
         try
         {
             await action();
@@ -772,6 +783,10 @@ public static class DashboardEndpoints
                 ctx.Response.StatusCode = 503;
                 await WriteJsonAsync(ctx, new { error = "Request failed", detail = ex.Message });
             }
+        }
+        finally
+        {
+            _sqlGate.Release();
         }
     }
 

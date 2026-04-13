@@ -97,6 +97,10 @@ builder.Services.AddSingleton<EmailNotificationService>();
 // it only provides the API surface for operator interaction.
 builder.Services.AddSingleton<RemediationService>();
 
+// DashboardCacheWarmerService: Pre-loads slow vw_Dash_* views into memory on
+// startup and refreshes every 5 minutes. Tron dashboard is instant from first load.
+builder.Services.AddHostedService<DashboardCacheWarmerService>();
+
 // MarkdownAtlasService: Reads docs/atlas/*.md, parses frontmatter + 4 tiers,
 // converts to HTML via Markdig, caches with FileSystemWatcher invalidation.
 builder.Services.AddSingleton(sp =>
@@ -156,7 +160,8 @@ app.Use(static (context, next) =>
     return next();
 });
 
-// Static files — tron.html, atlas.html, tron/*.mjs
+// Static files — index.html (home), tron.html, atlas.html, tron/*.mjs
+app.UseDefaultFiles(); // serves index.html at /
 var contentTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
 contentTypes.Mappings[".mjs"] = "application/javascript";
 contentTypes.Mappings[".glsl"] = "text/plain";
@@ -191,6 +196,7 @@ app.MapDashboardEndpoints();
 app.MapAtlasEndpoints();
 app.MapTrafficAlertEndpoints();
 app.MapHealthTreeEndpoints();
+app.MapBrilliantPiXLEndpoints();
 
 // ---------------------------------------------------------------------------
 // STARTUP LOGGING + GRACEFUL SHUTDOWN

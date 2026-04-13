@@ -27,15 +27,18 @@ public sealed class LeadQualityScoringServiceTests
     public void Score_should_return100_when_allSignalsPositive()
     {
         var signals = new LeadQualityScoringService.LeadSignals(
-            IsResidentialIp: true,           // +15
-            HasConsistentFingerprint: true,   // +12
-            MouseEntropy: 3.5,               // +12
-            FontCount: 10,                   // +10
-            HasCleanCanvas: true,            // +8
-            HasMatchingTimezone: true,        // +8
-            SessionHitNumber: 5,             // +10
-            IsKnownBot: false,               // +15
-            ContradictionCount: 0);          // +10
+            IsResidentialIp: true,           // +12
+            HasConsistentFingerprint: true,   // +10
+            MouseEntropy: 3.5,               // +8
+            FontCount: 10,                   // +8
+            HasCleanCanvas: true,            // +6
+            HasMatchingTimezone: true,        // +6
+            SessionHitNumber: 5,             // +8
+            IsKnownBot: false,               // +12
+            ContradictionCount: 0,           // +10
+            HasKeyboardLanguage: true,       // +6
+            HasScrollActivity: true,         // +8
+            HasSupportedOs: true);           // +6
 
         _service.Score(signals).Should().Be(100);
     }
@@ -56,7 +59,10 @@ public sealed class LeadQualityScoringServiceTests
             HasMatchingTimezone: false,
             SessionHitNumber: 1,
             IsKnownBot: true,
-            ContradictionCount: 3);
+            ContradictionCount: 3,
+            HasKeyboardLanguage: false,
+            HasScrollActivity: false,
+            HasSupportedOs: false);
 
         _service.Score(signals).Should().Be(0);
     }
@@ -66,30 +72,30 @@ public sealed class LeadQualityScoringServiceTests
     // ========================================================================
 
     [Fact]
-    public void Score_should_add15_when_residentialIp()
+    public void Score_should_add12_when_residentialIp()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { IsResidentialIp = true };
 
-        _service.Score(withSignal).Should().Be(15);
+        _service.Score(withSignal).Should().Be(12);
     }
 
     [Fact]
-    public void Score_should_add12_when_consistentFingerprint()
+    public void Score_should_add10_when_consistentFingerprint()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { HasConsistentFingerprint = true };
 
-        _service.Score(withSignal).Should().Be(12);
+        _service.Score(withSignal).Should().Be(10);
     }
 
     [Fact]
-    public void Score_should_add12_when_mouseEntropy_above2()
+    public void Score_should_add8_when_mouseEntropy_above2()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { MouseEntropy = 2.5 };
 
-        _service.Score(withSignal).Should().Be(12);
+        _service.Score(withSignal).Should().Be(8);
     }
 
     [Fact]
@@ -102,12 +108,12 @@ public sealed class LeadQualityScoringServiceTests
     }
 
     [Fact]
-    public void Score_should_add10_when_3OrMoreFonts()
+    public void Score_should_add8_when_3OrMoreFonts()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { FontCount = 3 };
 
-        _service.Score(withSignal).Should().Be(10);
+        _service.Score(withSignal).Should().Be(8);
     }
 
     [Fact]
@@ -120,30 +126,30 @@ public sealed class LeadQualityScoringServiceTests
     }
 
     [Fact]
-    public void Score_should_add8_when_cleanCanvas()
+    public void Score_should_add6_when_cleanCanvas()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { HasCleanCanvas = true };
 
-        _service.Score(withSignal).Should().Be(8);
+        _service.Score(withSignal).Should().Be(6);
     }
 
     [Fact]
-    public void Score_should_add8_when_matchingTimezone()
+    public void Score_should_add6_when_matchingTimezone()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { HasMatchingTimezone = true };
 
-        _service.Score(withSignal).Should().Be(8);
+        _service.Score(withSignal).Should().Be(6);
     }
 
     [Fact]
-    public void Score_should_add10_when_sessionHitNumber_2OrMore()
+    public void Score_should_add8_when_sessionHitNumber_2OrMore()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { SessionHitNumber = 2 };
 
-        _service.Score(withSignal).Should().Be(10);
+        _service.Score(withSignal).Should().Be(8);
     }
 
     [Fact]
@@ -156,12 +162,12 @@ public sealed class LeadQualityScoringServiceTests
     }
 
     [Fact]
-    public void Score_should_add15_when_notBot()
+    public void Score_should_add12_when_notBot()
     {
         var baseline = CreateAllNegative();
         var withSignal = baseline with { IsKnownBot = false };
 
-        _service.Score(withSignal).Should().Be(15);
+        _service.Score(withSignal).Should().Be(12);
     }
 
     [Fact]
@@ -173,6 +179,33 @@ public sealed class LeadQualityScoringServiceTests
         _service.Score(withSignal).Should().Be(10);
     }
 
+    [Fact]
+    public void Score_should_add6_when_keyboardLanguagePresent()
+    {
+        var baseline = CreateAllNegative();
+        var withSignal = baseline with { HasKeyboardLanguage = true };
+
+        _service.Score(withSignal).Should().Be(6);
+    }
+
+    [Fact]
+    public void Score_should_add8_when_scrollActivity()
+    {
+        var baseline = CreateAllNegative();
+        var withSignal = baseline with { HasScrollActivity = true };
+
+        _service.Score(withSignal).Should().Be(8);
+    }
+
+    [Fact]
+    public void Score_should_add6_when_supportedOs()
+    {
+        var baseline = CreateAllNegative();
+        var withSignal = baseline with { HasSupportedOs = true };
+
+        _service.Score(withSignal).Should().Be(6);
+    }
+
     // ========================================================================
     // COMBINED SCENARIOS
     // ========================================================================
@@ -181,20 +214,24 @@ public sealed class LeadQualityScoringServiceTests
     public void Score_should_returnTypicalHumanScore()
     {
         // Typical human visitor: residential, consistent FP, some mouse movement,
-        // fonts present, first page visit, not a bot, no contradictions
+        // fonts present, first page visit, not a bot, no contradictions, keyboard
+        // present, scrolled on page, supported OS
         var signals = new LeadQualityScoringService.LeadSignals(
-            IsResidentialIp: true,           // +15
-            HasConsistentFingerprint: true,   // +12
-            MouseEntropy: 3.0,               // +12
-            FontCount: 8,                    // +10
-            HasCleanCanvas: true,            // +8
-            HasMatchingTimezone: true,        // +8
+            IsResidentialIp: true,           // +12
+            HasConsistentFingerprint: true,   // +10
+            MouseEntropy: 3.0,               // +8
+            FontCount: 8,                    // +8
+            HasCleanCanvas: true,            // +6
+            HasMatchingTimezone: true,        // +6
             SessionHitNumber: 1,             // +0  (first hit)
-            IsKnownBot: false,               // +15
-            ContradictionCount: 0);          // +10
+            IsKnownBot: false,               // +12
+            ContradictionCount: 0,           // +10
+            HasKeyboardLanguage: true,       // +6
+            HasScrollActivity: true,         // +8
+            HasSupportedOs: true);           // +6
 
-        // 15+12+12+10+8+8+0+15+10 = 90
-        _service.Score(signals).Should().Be(90);
+        // 12+10+8+8+6+6+0+12+10+6+8+6 = 92
+        _service.Score(signals).Should().Be(92);
     }
 
     [Fact]
@@ -207,13 +244,16 @@ public sealed class LeadQualityScoringServiceTests
             MouseEntropy: 0.5,
             FontCount: 1,
             HasCleanCanvas: false,
-            HasMatchingTimezone: true,        // +8
-            SessionHitNumber: 3,             // +10
+            HasMatchingTimezone: true,        // +6
+            SessionHitNumber: 3,             // +8
             IsKnownBot: true,
-            ContradictionCount: 5);
+            ContradictionCount: 5,
+            HasKeyboardLanguage: false,
+            HasScrollActivity: false,
+            HasSupportedOs: false);
 
-        // 0+0+0+0+0+8+10+0+0 = 18
-        _service.Score(signals).Should().Be(18);
+        // 0+0+0+0+0+6+8+0+0+0+0+0 = 14
+        _service.Score(signals).Should().Be(14);
     }
 
     /// <summary>
@@ -229,7 +269,10 @@ public sealed class LeadQualityScoringServiceTests
             HasCleanCanvas: false,
             HasMatchingTimezone: false,
             SessionHitNumber: 1,   // 1 = first hit, no session bonus
-            IsKnownBot: true,      // is a bot → no +15
-            ContradictionCount: 1); // has contradictions → no +10
+            IsKnownBot: true,      // is a bot → no +12
+            ContradictionCount: 1, // has contradictions → no +10
+            HasKeyboardLanguage: false,
+            HasScrollActivity: false,
+            HasSupportedOs: false);
     }
 }

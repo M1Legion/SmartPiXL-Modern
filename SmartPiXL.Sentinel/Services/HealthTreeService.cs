@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using SmartPiXL.Configuration;
@@ -38,6 +39,8 @@ public sealed class HealthTreeService : IDisposable
     private readonly HttpClient _edgeHttp;
     private readonly HttpClient _forgeHttp;
     private readonly ITrackingLogger _logger;
+    private readonly MarkdownAtlasService _atlas;
+    private readonly string _wwwroot;
 
     // Tree structure (loaded once from SQL, refreshed on demand)
     private List<HealthTreeNode>? _treeNodes;
@@ -58,10 +61,14 @@ public sealed class HealthTreeService : IDisposable
 
     public HealthTreeService(
         IOptions<TrackingSettings> settings,
-        ITrackingLogger logger)
+        ITrackingLogger logger,
+        MarkdownAtlasService atlas,
+        IWebHostEnvironment env)
     {
         _settings = settings.Value;
         _logger = logger;
+        _atlas = atlas;
+        _wwwroot = env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot");
         _edgeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         _forgeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
     }
@@ -115,6 +122,23 @@ public sealed class HealthTreeService : IDisposable
         var edgeReport = edgeTask.Result;
         var forgeReport = forgeTask.Result;
         var sentinelProbes = sentinelTask.Result;
+
+        // Inject S2 Health Aggregation probes (require Edge/Forge results)
+        sentinelProbes["sentinel.s2-health-aggregation.edge-reachable"] = new ProbeState
+        {
+            Health = edgeReport is not null ? 1 : 0,
+            Metrics = new { Reachable = edgeReport is not null }
+        };
+        sentinelProbes["sentinel.s2-health-aggregation.forge-reachable"] = new ProbeState
+        {
+            Health = forgeReport is not null ? 1 : 0,
+            Metrics = new { Reachable = forgeReport is not null }
+        };
+        sentinelProbes["sentinel.s2-health-aggregation.tree-build"] = new ProbeState
+        {
+            Health = 1,
+            Metrics = new { BuildTimeMs = (int)sw.ElapsedMilliseconds }
+        };
 
         // 3. Build probe lookup dictionaries
         var edgeProbes = new Dictionary<string, ProbeState>();
@@ -381,6 +405,144 @@ public sealed class HealthTreeService : IDisposable
                 WorkingSetMB = Process.GetCurrentProcess().WorkingSet64 / (1024.0 * 1024.0)
             }
         };
+
+        // ================================================================
+        // S3: Dashboard API probes
+        // ================================================================
+
+        // Tron SPA — file exists on disk
+        var tronPath = Path.Combine(_wwwroot, "tron.html");
+        results["sentinel.s3-dashboard-api.tron-spa"] = new ProbeState
+        {
+            Health = File.Exists(tronPath) ? 1 : 0,
+            Metrics = new { FileExists = File.Exists(tronPath) }
+        };
+
+        // Pipeline SPA — file exists on disk
+        var pipelinePath = Path.Combine(_wwwroot, "pipeline.html");
+        results["sentinel.s3-dashboard-api.pipeline-spa"] = new ProbeState
+        {
+            Health = File.Exists(pipelinePath) ? 1 : 0,
+            Metrics = new { FileExists = File.Exists(pipelinePath) }
+        };
+
+        // Dashboard Endpoints — data source accessible
+        try
+        {
+            using var conn2 = new SqlConnection(_settings.ConnectionString);
+            conn2.Open();
+            using var cmd2 = conn2.CreateCommand();
+            cmd2.CommandText = "SELECT TOP 1 1 FROM Ops.DashboardSnapshot";
+            cmd2.CommandTimeout = 5;
+            var hasSnapshot = cmd2.ExecuteScalar() is not null;
+            results["sentinel.s3-dashboard-api.dash-endpoints"] = new ProbeState
+            {
+                Health = hasSnapshot ? 1 : 0,
+                Metrics = new { SnapshotExists = hasSnapshot }
+            };
+        }
+        catch (Exception ex)
+        {
+            results["sentinel.s3-dashboard-api.dash-endpoints"] = new ProbeState
+            {
+                Health = 0,
+                Metrics = new { Error = ex.Message }
+            };
+        }
+
+        // ================================================================
+        // S4: Atlas probes
+        // ================================================================
+
+        // Atlas SPA — file exists on disk
+        var atlasPath = Path.Combine(_wwwroot, "atlas.html");
+        results["sentinel.s4-atlas.atlas-spa"] = new ProbeState
+        {
+            Health = File.Exists(atlasPath) ? 1 : 0,
+            Metrics = new { FileExists = File.Exists(atlasPath) }
+        };
+
+        // Markdown Loader — sections loaded
+        try
+        {
+            var sections = _atlas.GetSections();
+            results["sentinel.s4-atlas.markdown-loader"] = new ProbeState
+            {
+                Health = sections.Count > 0 ? 1 : 0,
+                Metrics = new { SectionCount = sections.Count }
+            };
+        }
+        catch (Exception ex)
+        {
+            results["sentinel.s4-atlas.markdown-loader"] = new ProbeState
+            {
+                Health = 0,
+                Metrics = new { Error = ex.Message }
+            };
+        }
+
+        // Live Metrics — Docs.Metric table has rows
+        try
+        {
+            using var conn3 = new SqlConnection(_settings.ConnectionString);
+            conn3.Open();
+            using var cmd3 = conn3.CreateCommand();
+            cmd3.CommandText = "SELECT COUNT(*) FROM Docs.Metric";
+            cmd3.CommandTimeout = 5;
+            var metricCount = (int)cmd3.ExecuteScalar()!;
+            results["sentinel.s4-atlas.live-metrics"] = new ProbeState
+            {
+                Health = metricCount > 0 ? 1 : 0,
+                Metrics = new { MetricCount = metricCount }
+            };
+        }
+        catch (Exception ex)
+        {
+            results["sentinel.s4-atlas.live-metrics"] = new ProbeState
+            {
+                Health = 0,
+                Metrics = new { Error = ex.Message }
+            };
+        }
+
+        // ================================================================
+        // S5: BrilliantPiXL Metrics probes
+        // ================================================================
+
+        // BrilliantPiXL SPA — file exists on disk
+        var brilliantPath = Path.Combine(_wwwroot, "brilliantpixl.html");
+        results["sentinel.s5-brilliantpixl-metrics.brilliantpixl-spa"] = new ProbeState
+        {
+            Health = File.Exists(brilliantPath) ? 1 : 0,
+            Metrics = new { FileExists = File.Exists(brilliantPath) }
+        };
+
+        // JS Metrics API — data endpoint returns valid JSON with current data
+        try
+        {
+            using var conn4 = new SqlConnection(_settings.ConnectionString);
+            conn4.Open();
+            using var cmd4 = conn4.CreateCommand();
+            cmd4.CommandText = @"SELECT CASE WHEN EXISTS (
+                    SELECT 1 FROM PiXL.Parsed
+                    WHERE HitType = 'modern' AND ReceivedAt >= DATEADD(DAY, -7, GETUTCDATE())
+                ) THEN 1 ELSE 0 END";
+            cmd4.CommandTimeout = 10;
+            var hasRecentHits = (int)cmd4.ExecuteScalar()! == 1;
+            results["sentinel.s5-brilliantpixl-metrics.js-metrics-api"] = new ProbeState
+            {
+                Health = hasRecentHits ? 1 : 0,
+                Metrics = new { HasRecentJsHits = hasRecentHits }
+            };
+        }
+        catch (Exception ex)
+        {
+            results["sentinel.s5-brilliantpixl-metrics.js-metrics-api"] = new ProbeState
+            {
+                Health = 0,
+                Metrics = new { Error = ex.Message }
+            };
+        }
 
         return results;
     }

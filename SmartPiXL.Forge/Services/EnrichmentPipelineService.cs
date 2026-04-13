@@ -46,6 +46,7 @@ namespace SmartPiXL.Forge.Services;
 // FINAL SCORING:
 //  17. LeadQualityScoring — 0-100 score from positive human signals
 //                          (runs last to consume real Tier 3 values)
+//                          Includes: keyboard language, scroll activity, OS EOL
 //
 // DESIGN:
 //   Each enrichment service appends _srv_* params to TrackingData.QueryString.
@@ -93,6 +94,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
     private readonly FingerprintStabilityService _fingerprintStability;
     private readonly IpBehaviorService _ipBehavior;
     private readonly LeadQualityScoringService _leadQualityScoring;
+    private readonly OsEndOfLifeService _osEndOfLife;
 
     // ── Tier 3 enrichment services (Asymmetric Detection) ───────────────
     private readonly ContradictionMatrixService _contradictionMatrix;
@@ -136,7 +138,8 @@ public sealed class EnrichmentPipelineService : BackgroundService
         DeviceAgeEstimationService deviceAgeEstimation,
         BehavioralReplayService behavioralReplay,
         DeadInternetService deadInternet,
-        BackgroundIpEnrichmentService backgroundIp)
+        BackgroundIpEnrichmentService backgroundIp,
+        OsEndOfLifeService osEndOfLife)
     {
         _enrichmentChannel = channels.Enrichment;
         _sqlWriterChannel = channels.SqlWriter;
@@ -163,6 +166,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _behavioralReplay = behavioralReplay;
         _deadInternet = deadInternet;
         _backgroundIp = backgroundIp;
+        _osEndOfLife = osEndOfLife;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -598,6 +602,21 @@ public sealed class EnrichmentPipelineService : BackgroundService
             var fontCount = QueryParamReader.GetInt(qs, "fontCount");
             var canvasNoise = QueryParamReader.GetBool(qs, "canvasNoise");
 
+            // NEW: Keyboard language — keyboard layout present indicates real browser
+            var kbLayout = QueryParamReader.Get(qs, "kbLayout");
+            var hasKeyboardLanguage = !string.IsNullOrEmpty(kbLayout);
+
+            // NEW: Scroll activity — humans scroll, bots don't
+            var scrolled = QueryParamReader.GetBool(qs, "scrolled");
+            var scrollY = QueryParamReader.GetInt(qs, "scrollY");
+            var hasScrollActivity = scrolled && scrollY > 0;
+
+            // NEW: OS end-of-life check — supported OS is a positive signal
+            var osEolResult = _osEndOfLife.Check(uaResult.OS, uaResult.OSVersion);
+            var hasSupportedOs = osEolResult.Status == OsEolStatus.Supported;
+            if (osEolResult.Status == OsEolStatus.EndOfLife)
+                AppendParam(sb, "_srv_osEol", "1");
+
             var leadSignals = new LeadQualityScoringService.LeadSignals(
                 IsResidentialIp: !dnsResult.IsCloud && !dcResult.IsDatacenter,
                 HasConsistentFingerprint: !fpResult.SuspiciousVariation,
@@ -607,7 +626,10 @@ public sealed class EnrichmentPipelineService : BackgroundService
                 HasMatchingTimezone: arbitrageResult.TimezoneMatch,
                 SessionHitNumber: sessionResult.HitNumber,
                 IsKnownBot: isCrawler,
-                ContradictionCount: contradictionResult.Count);
+                ContradictionCount: contradictionResult.Count,
+                HasKeyboardLanguage: hasKeyboardLanguage,
+                HasScrollActivity: hasScrollActivity,
+                HasSupportedOs: hasSupportedOs);
             var leadScore = _leadQualityScoring.Score(in leadSignals);
             AppendParam(sb, "_srv_leadScore", leadScore.ToString(CultureInfo.InvariantCulture));
         }

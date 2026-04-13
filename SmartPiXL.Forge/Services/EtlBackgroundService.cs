@@ -90,12 +90,12 @@ public sealed class EtlBackgroundService : BackgroundService
             matchCmd.CommandTimeout = 300;
 
             await using var matchReader = await matchCmd.ExecuteReaderAsync(ct);
+            _metrics.RecordEtlMatchVisitsRun();
             if (await matchReader.ReadAsync(ct))
             {
                 var rowsProcessed = Convert.ToInt64(matchReader.GetValue(0));
                 var rowsMatched = Convert.ToInt64(matchReader.GetValue(1));
 
-                _metrics.RecordEtlMatchVisitsRun();
                 if (rowsProcessed > 0)
                     _logger.Info($"ETL match: {rowsProcessed} processed, {rowsMatched} matched by email");
             }
@@ -110,12 +110,12 @@ public sealed class EtlBackgroundService : BackgroundService
             legacyCmd.CommandTimeout = 300;
 
             await using var legacyReader = await legacyCmd.ExecuteReaderAsync(ct);
+            _metrics.RecordEtlMatchLegacyRun();
             if (await legacyReader.ReadAsync(ct))
             {
                 var rowsProcessed = Convert.ToInt64(legacyReader.GetValue(0));
                 var rowsMatched = Convert.ToInt64(legacyReader.GetValue(1));
 
-                _metrics.RecordEtlMatchLegacyRun();
                 if (rowsProcessed > 0)
                     _logger.Info($"ETL legacy match: {rowsProcessed} processed, {rowsMatched} matched by IP");
             }

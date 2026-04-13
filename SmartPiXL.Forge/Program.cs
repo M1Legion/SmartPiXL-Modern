@@ -132,6 +132,12 @@ builder.Services.AddHttpClient("DatacenterIp");
 builder.Services.AddSingleton<DatacenterIpService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatacenterIpService>());
 
+// OsEndOfLifeService: Downloads OS lifecycle data from endoflife.date at startup, refreshes daily.
+// Provides lock-free lookup for OS end-of-life status (lead scoring + bot scoring).
+builder.Services.AddHttpClient("OsEndOfLife");
+builder.Services.AddSingleton<OsEndOfLifeService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OsEndOfLifeService>());
+
 // BackgroundIpEnrichmentService: Lane 3 background workers.
 // Receives unique IPs from pipeline via fire-and-forget Enqueue().
 // Runs DNS/WHOIS async, populates caches for inline reads.
@@ -183,6 +189,10 @@ builder.Services.AddHostedService<ForgeReplayService>();
 // EtlBackgroundService: Runs identity resolution (usp_MatchVisits + usp_MatchLegacyVisits)
 // every 60 seconds. Parsing is handled by ParsedBulkInsertService.
 builder.Services.AddHostedService<EtlBackgroundService>();
+
+// DashboardRefreshService: Pre-aggregates BrilliantPiXL dashboard data every 30s.
+// Calls Dashboard.usp_RefreshBrilliantPiXL — Sentinel reads pre-computed JSON.
+builder.Services.AddHostedService<DashboardRefreshService>();
 
 // ParsedBulkInsertService: DISABLED — The Forge now writes directly to PiXL.Parsed
 // via SqlBulkCopyWriterService (merged pipeline). The two-step Raw → Parsed pipeline

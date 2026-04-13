@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartPiXL Sentinel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #030810;
+  --bg2: #060e1a;
+  --panel: rgba(6, 20, 40, 0.85);
+  --panel-border: rgba(0, 243, 255, 0.2);
+  --cyan: #00f3ff;
+  --cyan-dim: rgba(0, 243, 255, 0.5);
+  --cyan-ghost: rgba(0, 243, 255, 0.08);
+  --text: #d4eeff;
+  --text-dim: rgba(160, 200, 230, 0.7);
+  --mono: 'JetBrains Mono', 'Consolas', monospace;
+  --display: 'Inter', 'Segoe UI', sans-serif;
+}
+
+html, body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--display);
+}
+
+/* Scan lines */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,243,255,0.018) 2px, rgba(0,243,255,0.018) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,243,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,243,255,0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  position: relative;
+  z-index: 1;
+}
+
+.wordmark {
+  font-family: var(--display);
+  font-size: 2.8rem;
+  font-weight: 700;
+  letter-spacing: 12px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 30px var(--cyan-dim), 0 0 80px rgba(0,243,255,0.25);
+  animation: glow 4s ease-in-out infinite;
+  text-align: center;
+}
+
+@keyframes glow {
+  0%, 100% { text-shadow: 0 0 30px var(--cyan-dim), 0 0 80px rgba(0,243,255,0.25); }
+  50% { text-shadow: 0 0 50px var(--cyan), 0 0 100px rgba(0,243,255,0.5), 0 0 200px rgba(0,243,255,0.15); }
+}
+
+.subtitle {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 6px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-top: -6px;
+  margin-bottom: 56px;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 760px;
+}
+
+@media (max-width: 560px) {
+  .tools-grid { grid-template-columns: 1fr; }
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px 28px 24px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  backdrop-filter: blur(12px);
+}
+
+.tool-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.3;
+  transition: opacity 0.25s;
+}
+
+.tool-card:hover {
+  border-color: var(--cyan-dim);
+  background: rgba(0, 243, 255, 0.06);
+  box-shadow: 0 0 30px rgba(0,243,255,0.08), 0 0 60px rgba(0,243,255,0.04);
+}
+
+.tool-card:hover::before { opacity: 0.8; }
+
+.tool-name {
+  font-family: var(--display);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.tool-desc {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+.tool-arrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  margin-top: auto;
+  opacity: 0.5;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.tool-card:hover .tool-arrow {
+  opacity: 1;
+  color: var(--cyan);
+}
+
+.footer {
+  margin-top: 48px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  opacity: 0.35;
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="wordmark">SMARTPIXL</div>
+  <div class="subtitle">Sentinel — DevOps &amp; Intelligence Platform</div>
+
+  <div class="tools-grid">
+    <a class="tool-card" href="/tron">
+      <div class="tool-name">Tron</div>
+      <div class="tool-desc">Operations command center. System health, pipeline throughput, enrichment insights, and live infrastructure probes.</div>
+      <div class="tool-arrow">ENTER &rarr;</div>
+    </a>
+
+    <a class="tool-card" href="/atlas">
+      <div class="tool-name">Atlas</div>
+      <div class="tool-desc">Documentation portal. Internal architecture docs, subsystem walkthroughs, live system status, and metrics — four-tier access model.</div>
+      <div class="tool-arrow">OPEN &rarr;</div>
+    </a>
+
+    <a class="tool-card" href="/brilliantpixl">
+      <div class="tool-name">BrilliantPiXL</div>
+      <div class="tool-desc">Fingerprint metrics for the modern JS tracking script. Bot classification, signal coverage, device breakdown, and lead quality scoring.</div>
+      <div class="tool-arrow">VIEW &rarr;</div>
+    </a>
+
+    <a class="tool-card" href="/pipeline">
+      <div class="tool-name">Pipeline Explorer</div>
+      <div class="tool-desc">ETL pipeline visibility. Watermarks, processing lag, enrichment flow, and data pipeline health at a glance.</div>
+      <div class="tool-arrow">EXPLORE &rarr;</div>
+    </a>
+  </div>
+
+  <div class="footer">SMARTPIXL SENTINEL &bull; PORT 7500</div>
+</div>
+</body>
+</html>

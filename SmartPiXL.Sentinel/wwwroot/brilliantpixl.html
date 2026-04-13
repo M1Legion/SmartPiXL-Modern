@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BrilliantPiXL Metrics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:           #030810;
+  --bg2:          #060e1a;
+  --panel:        rgba(6, 20, 40, 0.90);
+  --panel-border: rgba(0, 243, 255, 0.18);
+  --panel-glow:   rgba(0, 243, 255, 0.04);
+  --cyan:         #00f3ff;
+  --cyan-dim:     rgba(0, 243, 255, 0.5);
+  --orange:       #ff6a00;
+  --red:          #ff2d55;
+  --green:        #00ff88;
+  --yellow:       #ffe14d;
+  --purple:       #b388ff;
+  --text:         #d4eeff;
+  --text-dim:     rgba(160, 200, 230, 0.6);
+  --mono:         'JetBrains Mono', 'Consolas', monospace;
+  --sans:         'Inter', 'Segoe UI', sans-serif;
+  --radius:       8px;
+}
+
+html { font-size: 15px; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--bg2);
+}
+header h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+header h1 span { color: var(--cyan); }
+header .meta {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+header .refresh-btn {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--cyan);
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+header .refresh-btn:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 8px rgba(0,243,255,0.2);
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+.dashboard {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 3rem;
+}
+
+/* ── KPI Strip ──────────────────────────────────────────────── */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.kpi {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  text-align: center;
+  position: relative;
+}
+.kpi .label {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.3rem;
+}
+.kpi .value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--cyan);
+}
+.kpi .value.green  { color: var(--green); }
+.kpi .value.orange { color: var(--orange); }
+.kpi .value.red    { color: var(--red); }
+.kpi .value.yellow { color: var(--yellow); }
+.kpi .value.purple { color: var(--purple); }
+
+/* ── Tooltip system ─────────────────────────────────────────── */
+.tip {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted var(--cyan-dim);
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 200;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0c1f38;
+  border: 1px solid var(--cyan-dim);
+  color: var(--text);
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-family: var(--sans);
+  font-weight: 400;
+  line-height: 1.55;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  max-width: 300px;
+  width: max-content;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tip:hover::after { opacity: 1; }
+/* For tips that overflow the left edge */
+.tip.tip-right::after { left: 0; transform: none; }
+/* For tips near the right edge */
+.tip.tip-left::after { left: auto; right: 0; transform: none; }
+
+/* ── Info icon on card headers ──────────────────────────────── */
+.info-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--cyan-dim);
+  color: var(--cyan-dim);
+  margin-left: 0.5rem;
+  cursor: help;
+  position: relative;
+  vertical-align: middle;
+  font-style: normal;
+  font-family: var(--sans);
+  transition: border-color 0.2s, color 0.2s;
+}
+.info-icon:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.info-icon::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #0c1f38;
+  border: 1px solid var(--cyan-dim);
+  color: var(--text);
+  padding: 0.65rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-family: var(--sans);
+  font-weight: 400;
+  line-height: 1.6;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  max-width: 320px;
+  width: max-content;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.info-icon:hover::after { opacity: 1; }
+
+/* ── Classification pills ───────────────────────────────────── */
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.pill-human   { background: rgba(0,255,136,0.12); color: var(--green); }
+.pill-known   { background: rgba(255,106,0,0.15); color: var(--orange); }
+.pill-likely  { background: rgba(255,45,85,0.12);  color: var(--red); }
+.pill-suspect { background: rgba(255,225,77,0.12); color: var(--yellow); }
+.pill-unscore { background: rgba(160,200,230,0.08); color: var(--text-dim); }
+.pill-current  { background: rgba(0,255,136,0.12); color: var(--green); }
+.pill-aging    { background: rgba(255,225,77,0.12); color: var(--yellow); }
+.pill-outdated { background: rgba(255,45,85,0.12);  color: var(--red); }
+.pill-unknown  { background: rgba(160,200,230,0.08); color: var(--text-dim); }
+.how-col { color: var(--text-dim); font-family: var(--sans); font-size: 0.7rem; font-style: italic; }
+
+/* ── Section ────────────────────────────────────────────────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.grid-1 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+@media (max-width: 900px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  min-height: 180px;
+}
+.card h2 {
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  color: var(--cyan-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(0,243,255,0.08);
+}
+.card .card-note {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  margin-bottom: 0.8rem;
+  line-height: 1.5;
+  font-style: italic;
+}
+.card.full-width {
+  grid-column: 1 / -1;
+}
+
+/* ── Tables ─────────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid rgba(0,243,255,0.05);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+tr:hover td { background: rgba(0,243,255,0.03); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.pct { text-align: right; color: var(--cyan-dim); }
+td.lead-high { color: var(--green); }
+td.lead-mid  { color: var(--yellow); }
+td.lead-low  { color: var(--orange); }
+
+/* ── Bar chart (CSS-only horizontal bars) ───────────────────── */
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.bar-row .bar-label {
+  min-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.bar-row .bar-track {
+  flex: 1;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.bar-row .bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  background: #0ea5c8;
+  border-radius: 3px;
+  transition: width 0.6s ease-out;
+}
+.bar-row .bar-fill.orange { background: #f97316; }
+.bar-row .bar-fill.green  { background: #22c55e; }
+.bar-row .bar-fill.purple { background: #a78bfa; }
+.bar-row .bar-value {
+  min-width: 48px;
+  text-align: right;
+  color: var(--text-dim);
+}
+
+/* ── Signal coverage meter ──────────────────────────────────── */
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.signal-row .sig-label {
+  min-width: 115px;
+  color: var(--text-dim);
+  cursor: help;
+}
+.signal-row .sig-bar {
+  flex: 1;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.signal-row .sig-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease-out;
+}
+.signal-row .sig-pct {
+  min-width: 50px;
+  text-align: right;
+  font-size: 0.72rem;
+}
+
+/* ── Loading / Error states ─────────────────────────────────── */
+.loading {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 2rem 0;
+  text-align: center;
+}
+.loading::after {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--cyan-dim);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-msg {
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 1rem 0;
+  text-align: center;
+}
+
+/* ── Glossary ───────────────────────────────────────────────── */
+.glossary dt {
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-top: 0.7rem;
+}
+.glossary dt:first-child { margin-top: 0; }
+.glossary dd {
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+footer {
+  text-align: center;
+  padding: 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  border-top: 1px solid var(--panel-border);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>Brilliant</span>PiXL Metrics</h1>
+  <div class="meta" id="lastUpdate">Loading...</div>
+  <button class="refresh-btn" onclick="loadAll()">&#x21bb; Refresh</button>
+</header>
+
+<div class="dashboard">
+
+  <!-- KPI STRIP -->
+  <div class="kpi-strip" id="kpiStrip">
+    <div class="kpi">
+      <div class="label tip" data-tip="Total page loads captured by the JavaScript fingerprint script in the last 7 days.">Page Loads</div>
+      <div class="value" id="kpi-total">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Visitors classified as real people — not flagged by user-agent matching or behavioral analysis.">Real Visitors</div>
+      <div class="value green" id="kpi-human">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Automated traffic — identified by matching known bot signatures (e.g. Googlebot) or by behavioral scoring above 50.">Bot Traffic</div>
+      <div class="value orange" id="kpi-bot">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Distinct IP addresses seen. One person may use multiple IPs (phone vs WiFi), or multiple people may share one (office).">Unique IPs</div>
+      <div class="value" id="kpi-ips">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Browsing sessions grouped by IP + time window. A new session starts after 30 minutes of inactivity.">Sessions</div>
+      <div class="value" id="kpi-sessions">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Average quality score (0–100) for real visitors. Higher = more engaged. Based on session length, page depth, mouse activity, and device quality.">Avg Lead Score</div>
+      <div class="value purple" id="kpi-lead">—</div>
+    </div>
+    <div class="kpi">
+      <div class="label tip" data-tip="Real visitors scoring 70+ out of 100 — showing strong engagement: meaningful time on site, mouse movement, and multiple pages viewed.">Strong Leads</div>
+      <div class="value green" id="kpi-hql">—</div>
+    </div>
+  </div>
+
+  <!-- ROW 1: Bot Classification + Daily Trend -->
+  <div class="grid-2">
+    <div class="card" id="cardBots">
+      <h2>Traffic Classification
+        <i class="info-icon" data-tip="Every visitor is classified by two methods: (1) user-agent matching against ~4,000 known bot signatures (Googlebot, Bingbot, GPTBot, etc.), and (2) a behavioral score from 0–100 based on mouse movement patterns, timing, and browser fingerprint consistency.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardDaily">
+      <h2>Daily Volume
+        <i class="info-icon" data-tip="Each bar shows the total page loads captured that day. The green portion represents real visitors; the remainder is bot traffic.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+  </div>
+
+  <!-- ROW 2: Traffic Channels + Landing Pages -->
+  <div class="grid-2">
+    <div class="card" id="cardChannels">
+      <h2>Traffic Sources
+        <i class="info-icon" data-tip="Where your real visitors came from, determined by the referring URL and in-app browser detection (e.g. Facebook's built-in browser). Only human traffic is shown here — bots are excluded.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardPages">
+      <h2>Top Landing Pages
+        <i class="info-icon" data-tip="The first page a real visitor saw when they arrived on the site. Only human traffic is shown.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+  </div>
+
+  <!-- ROW 3: Signal Coverage + Lead Quality + Evasion -->
+  <div class="grid-3">
+    <div class="card" id="cardSignals">
+      <h2>Data Collection Quality
+        <i class="info-icon" data-tip="Shows what percentage of real visitors provided each type of device data. Higher coverage = more complete visitor profiles. Some signals depend on browser support — e.g. Browser Hints only work in Chrome-based browsers.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardLeads">
+      <h2>Visitor Quality
+        <i class="info-icon" data-tip="Scores predict how likely a visitor is to be a genuine, engaged prospect (0–100). Based on session length, page depth, mouse engagement, device quality, and geographic relevance. Higher tiers indicate stronger engagement.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardEvasion">
+      <h2>Privacy Tool Detection
+        <i class="info-icon" data-tip="Detects visitors using tools to hide their identity: anti-fingerprint browsers, browser automation (Selenium/Puppeteer), canvas blockers, or fingerprint spoofing extensions. Not inherently malicious — privacy-conscious users trigger these too.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+  </div>
+
+  <!-- ROW 4: Devices + Screens + Geo -->
+  <div class="grid-3">
+    <div class="card" id="cardDevices">
+      <h2>Devices &amp; Platforms
+        <i class="info-icon" data-tip="What browsers, operating systems, and device types your real visitors use. Parsed from the browser's user-agent string and client hint headers.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardScreens">
+      <h2>Screen Sizes
+        <i class="info-icon" data-tip="The screen resolution reported by each real visitor's device. Helps distinguish phone vs tablet vs desktop traffic.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardGeo">
+      <h2>Visitor Locations
+        <i class="info-icon" data-tip="Geographic location determined by IP address lookup (MaxMind GeoIP database). Accuracy varies — typically city-level for broadband, less precise for mobile networks.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+  </div>
+
+  <!-- ROW 5: OS Versions -->
+  <div class="grid-1">
+    <div class="card" id="cardOSVersions">
+      <h2>Operating System Versions
+        <i class="info-icon" data-tip="OS and version breakdown for real visitors. Currency shows whether the OS version is current, aging (1–2 major versions behind), or outdated (3+ versions behind or end-of-life).">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+  </div>
+
+  <!-- ROW 6: Bot Names + Glossary -->
+  <div class="grid-2">
+    <div class="card" id="cardBotNames">
+      <h2>Known Bots by Name
+        <i class="info-icon" data-tip="Bots that identify themselves in their user-agent string. These are typically search engine crawlers, AI training bots, and monitoring services. Legitimate bots announce who they are — malicious ones usually don't.">?</i>
+      </h2>
+      <div class="loading">Loading</div>
+    </div>
+    <div class="card" id="cardGlossary">
+      <h2>How to Read This Dashboard</h2>
+      <dl class="glossary">
+        <dt>Real Visitor vs Bot</dt>
+        <dd>Every page load is checked two ways: first against a database of ~4,000 known bot user-agent strings, then scored 0–100 on behavioral patterns. Score below 30 with no bot match = real person.</dd>
+        <dt>Lead Score</dt>
+        <dd>A 0–100 quality rating for each real visitor. Factors: time spent on site, pages viewed, mouse activity, device quality, and location relevance. 70+ is a strong lead.</dd>
+        <dt>Data Signals</dt>
+        <dd>The fingerprint script collects device characteristics — screen size, graphics card, audio processing, etc. Each signal helps distinguish unique devices. More signals = more accurate identification.</dd>
+        <dt>Privacy Tools</dt>
+        <dd>Some visitors use tools that block or spoof device data. We detect these via inconsistencies in reported vs actual capabilities. Not always malicious — some are privacy-conscious users.</dd>
+        <dt>Dwell Time</dt>
+        <dd>How long a visitor stayed on a page before navigating away or closing the tab. Measured in seconds.</dd>
+      </dl>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  SmartPiXL Sentinel &mdash; BrilliantPiXL Metrics &mdash; <span id="footerTime"></span>
+</footer>
+
+<script>
+const API = '/api/brilliantpixl';
+const fmt = n => n == null ? '—' : Number(n).toLocaleString();
+const pct = (n, total) => total ? ((n / total) * 100).toFixed(1) + '%' : '—';
+const leadClass = s => s >= 70 ? 'lead-high' : s >= 55 ? 'lead-mid' : 'lead-low';
+
+async function fetchJson(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function setContent(id, html) {
+  const el = document.getElementById(id);
+  if (el) {
+    const h2 = el.querySelector('h2');
+    const frag = document.createRange().createContextualFragment(html);
+    while (el.lastChild && el.lastChild !== h2) el.removeChild(el.lastChild);
+    el.appendChild(frag);
+  }
+}
+
+// Scale value to percentage, using sqrt for outlier-heavy data
+function scaleBar(val, maxVal, useLog) {
+  if (!maxVal || !val) return 0;
+  if (useLog) {
+    // Square-root scaling: compresses outliers, expands small values
+    return (Math.sqrt(val) / Math.sqrt(maxVal)) * 100;
+  }
+  return (val / maxVal) * 100;
+}
+
+function barChart(items, labelKey, valueKey, maxVal, colorClass) {
+  items = items.filter(r => r[valueKey] > 0);
+  if (!items.length) return '<div class="error-msg">No data</div>';
+  if (!maxVal) maxVal = Math.max(...items.map(r => r[valueKey] || 0));
+  // Use sqrt scaling when the top value is 10x+ the median
+  const sorted = items.map(r => r[valueKey]).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const useLog = maxVal > median * 10;
+  return items.map(r => {
+    const w = Math.max(scaleBar(r[valueKey], maxVal, useLog), 3).toFixed(1);
+    return `<div class="bar-row">
+      <span class="bar-label" title="${esc(r[labelKey])}">${esc(r[labelKey])}</span>
+      <span class="bar-track"><span class="bar-fill ${colorClass||''}" style="width:${w}%"></span></span>
+      <span class="bar-value">${fmt(r[valueKey])}</span>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+// Classification descriptions for the "how we know" column
+const classInfo = {
+  'Known Bot':   { pill: 'pill-known',   how: 'User-agent matches a known bot signature' },
+  'Likely Bot':  { pill: 'pill-likely',   how: 'Behavioral score ≥ 50 (movement / timing anomalies)' },
+  'Suspicious':  { pill: 'pill-suspect',  how: 'Behavioral score 30–49 (some bot-like signals)' },
+  'Unscored':    { pill: 'pill-unscore',  how: 'Not enough data to score (typically single-page visit)' },
+  'Human':       { pill: 'pill-human',    how: 'No bot match + behavioral score under 30' },
+};
+
+// ── LOAD FUNCTIONS ────────────────────────────────────────────
+async function loadSummary() {
+  try {
+    const d = await fetchJson('/summary');
+    document.getElementById('kpi-total').textContent = fmt(d.totalHits);
+    document.getElementById('kpi-human').textContent = fmt(d.humanHits);
+    document.getElementById('kpi-bot').textContent = fmt(d.botHits);
+    document.getElementById('kpi-ips').textContent = fmt(d.uniqueIPs);
+    document.getElementById('kpi-sessions').textContent = fmt(d.uniqueSessions);
+    document.getElementById('kpi-lead').textContent = d.avgLeadScore ?? '—';
+    document.getElementById('kpi-hql').textContent = fmt(d.highQualityLeads);
+    document.getElementById('lastUpdate').textContent =
+      'Last 7 days \u2022 Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('lastUpdate').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function loadBots() {
+  try {
+    const data = await fetchJson('/bots');
+    const total = data.reduce((s, r) => s + r.hits, 0);
+    let html = '<table><tr><th>Type</th><th>Count</th><th>Share</th><th>IPs</th><th>How We Know</th></tr>';
+    for (const r of data) {
+      const ci = classInfo[r.classification] || { pill: '', how: '' };
+      html += `<tr>
+        <td><span class="pill ${ci.pill}">${r.classification}</span></td>
+        <td class="num">${fmt(r.hits)}</td>
+        <td class="pct">${pct(r.hits, total)}</td>
+        <td class="num">${fmt(r.uniqueIPs)}</td>
+        <td class="how-col">${ci.how}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    setContent('cardBots', html);
+  } catch (e) {
+    setContent('cardBots', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadDaily() {
+  try {
+    const data = await fetchJson('/daily');
+    if (!data.length) { setContent('cardDaily', '<div class="error-msg">No data</div>'); return; }
+    const maxH = Math.max(...data.map(r => r.totalHits || 0));
+    let html = '<div class="card-note"><span style="color:#22c55e">&block;</span> Real visitors &nbsp; <span style="color:#0ea5c8;opacity:0.35">&block;</span> Bot traffic</div>';
+    for (const r of data.slice(0, 14)) {
+      const d = new Date(r.hitDate).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+      const totalW = maxH ? Math.max((r.totalHits / maxH) * 100, 3).toFixed(1) : 0;
+      const humanPct = r.totalHits ? ((r.humanHits / r.totalHits) * 100).toFixed(1) : '0';
+      const botColor = 'rgba(14,165,200,0.30)';
+      const barBg = r.humanHits > 0
+        ? `background:linear-gradient(90deg, #22c55e ${humanPct}%, ${botColor} ${humanPct}%)`
+        : `background:${botColor}`;
+      html += `<div class="bar-row">
+        <span class="bar-label">${d}</span>
+        <span class="bar-track">
+          <span class="bar-fill" style="width:${totalW}%;${barBg}"></span>
+        </span>
+        <span class="bar-value" title="${humanPct}% real (${r.humanHits}) / ${r.botHits} bots">${fmt(r.totalHits)}</span>
+      </div>`;
+    }
+    setContent('cardDaily', html);
+  } catch (e) {
+    setContent('cardDaily', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadChannels() {
+  try {
+    const data = await fetchJson('/channels');
+    let html = '<table><tr>';
+    html += '<th>Source</th>';
+    html += '<th class="tip" data-tip="Total page loads from this source">Loads</th>';
+    html += '<th>Share</th>';
+    html += '<th class="tip" data-tip="Unique IP addresses from this source">Visitors</th>';
+    html += '<th class="tip" data-tip="Average lead quality score (0–100) for this source">Quality</th>';
+    html += '<th class="tip" data-tip="Average time spent on the page before leaving">Dwell</th>';
+    html += '</tr>';
+    for (const r of data) {
+      html += `<tr>
+        <td>${esc(r.channel)}</td>
+        <td class="num">${fmt(r.hits)}</td>
+        <td class="pct">${r.pctOfTotal ?? '—'}%</td>
+        <td class="num">${fmt(r.uniqueVisitors)}</td>
+        <td class="num ${leadClass(r.avgLeadScore)}">${r.avgLeadScore ?? '—'}</td>
+        <td class="num">${r.avgDwellSec != null ? Math.round(r.avgDwellSec) + 's' : '—'}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    setContent('cardChannels', html);
+  } catch (e) {
+    setContent('cardChannels', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadPages() {
+  try {
+    const data = await fetchJson('/pages');
+    let html = '<table><tr>';
+    html += '<th>Page</th><th>Loads</th><th>Visitors</th>';
+    html += '<th class="tip" data-tip="Average lead quality score for visitors who landed on this page">Quality</th>';
+    html += '<th class="tip" data-tip="Average time spent before leaving">Dwell</th>';
+    html += '</tr>';
+    for (const r of data) {
+      const path = (r.pagePath || '/').length > 35 ? r.pagePath.substring(0, 35) + '\u2026' : (r.pagePath || '/');
+      html += `<tr>
+        <td title="${esc(r.pagePath)}">${esc(path)}</td>
+        <td class="num">${fmt(r.hits)}</td>
+        <td class="num">${fmt(r.uniqueVisitors)}</td>
+        <td class="num ${leadClass(r.avgLeadScore)}">${r.avgLeadScore ?? '—'}</td>
+        <td class="num">${r.avgDwellSec != null ? Math.round(r.avgDwellSec) + 's' : '—'}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    setContent('cardPages', html);
+  } catch (e) {
+    setContent('cardPages', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadSignals() {
+  try {
+    const d = await fetchJson('/signals');
+    const t = d.totalHumanHits || 1;
+    const signals = [
+      { label: 'Canvas',          val: d.hasCanvas,      unique: d.uniqueCanvas,
+        tip: 'A unique image drawn by the browser. Different hardware produces different images — like a visual device fingerprint.' },
+      { label: 'WebGL (3D)',      val: d.hasWebGL,       unique: d.uniqueWebGL,
+        tip: '3D graphics fingerprint. Reveals GPU model and driver version unique to each device.' },
+      { label: 'Audio',           val: d.hasAudio,       unique: null,
+        tip: 'A tiny sound processed by the browser. Different audio hardware produces measurably different outputs.' },
+      { label: 'Graphics Card',   val: d.hasGPU,         unique: d.uniqueGPU,
+        tip: 'The GPU model reported by the browser. Helps identify exact device hardware.' },
+      { label: 'CPU Cores',       val: d.hasCores,       unique: null,
+        tip: 'Number of processor cores. Helps distinguish device tiers (e.g. 8-core flagship vs 4-core budget phone).' },
+      { label: 'RAM',             val: d.hasMemory,      unique: null,
+        tip: 'Device memory reported by the browser. Only available in Chrome-based browsers.' },
+      { label: 'Network Type',    val: d.hasNetwork,     unique: null,
+        tip: 'Connection type (4G, WiFi, etc.). Helps distinguish mobile vs desktop visitors.' },
+      { label: 'Mouse Activity',  val: d.hasMouseMoves,  unique: null,
+        tip: 'Whether the visitor moved their mouse. Bots typically don\'t generate realistic mouse movements.' },
+      { label: 'Browser Hints',   val: d.hasClientHints, unique: null,
+        tip: 'Modern headers reporting architecture, platform version, and device model. Chrome-based browsers only.' },
+    ];
+    let html = `<div class="card-note">${fmt(t)} real visitors measured &bull; ${fmt(d.uniqueResolutions)} distinct screen sizes</div>`;
+    for (const s of signals) {
+      const p = ((s.val / t) * 100).toFixed(1);
+      const fill = p >= 90 ? 'background:var(--green)' : p >= 50 ? 'background:var(--yellow)' : 'background:var(--orange)';
+      const minW = p > 0 ? Math.max(parseFloat(p), 2.5) : 0;
+      const extra = s.unique ? ` (${s.unique} unique)` : '';
+      html += `<div class="signal-row">
+        <span class="sig-label tip" data-tip="${esc(s.tip)}">${s.label}</span>
+        <span class="sig-bar"><span class="sig-fill" style="width:${minW}%;${fill}"></span></span>
+        <span class="sig-pct">${p}%${extra}</span>
+      </div>`;
+    }
+    setContent('cardSignals', html);
+  } catch (e) {
+    setContent('cardSignals', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadLeads() {
+  try {
+    const data = await fetchJson('/leads');
+    const nonZero = data.filter(r => r.hits > 0);
+    if (!nonZero.length) { setContent('cardLeads', '<div class="error-msg">No data</div>'); return; }
+    const maxH = Math.max(...nonZero.map(r => r.hits || 0));
+    const colors = { 'Excellent': 'green', 'High': 'green', 'Good': '', 'Fair': 'orange', 'Low': 'orange' };
+    let html = '<div class="card-note">Higher tiers = more engaged, higher-quality visitors.</div>';
+    for (const r of nonZero) {
+      const colorKey = Object.keys(colors).find(k => r.scoreBucket.includes(k)) || '';
+      const w = Math.max((r.hits / maxH) * 100, 3).toFixed(1);
+      html += `<div class="bar-row">
+        <span class="bar-label">${esc(r.scoreBucket)}</span>
+        <span class="bar-track"><span class="bar-fill ${colors[colorKey]||''}" style="width:${w}%"></span></span>
+        <span class="bar-value">${fmt(r.hits)}</span>
+      </div>`;
+    }
+    setContent('cardLeads', html);
+  } catch (e) {
+    setContent('cardLeads', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadEvasion() {
+  try {
+    const data = await fetchJson('/evasion');
+    const s = data.summary;
+    const rows = [
+      { label: 'Canvas Spoofing',       count: s.canvasEvasions,
+        tip: 'The canvas image fingerprint appears tampered with — suggests anti-fingerprint tools.' },
+      { label: 'WebGL Spoofing',        count: s.webGLEvasions,
+        tip: 'The 3D graphics fingerprint was altered — a sign of privacy browsers or anti-detect tools.' },
+      { label: 'Browser Automation',     count: s.webDriverDetected,
+        tip: 'Selenium, Puppeteer, or similar automation tools detected — the browser is being controlled by a script.' },
+      { label: 'Fingerprint Spoofing',   count: s.evasionToolHits,
+        tip: 'Known fingerprint-modification tools detected (e.g. FingerprintSwitcher, Canvas Blocker).' },
+      { label: 'Advanced Evasion',       count: s.evasionV2Hits,
+        tip: 'Second-generation detection: cross-referencing multiple signals that don\'t match (e.g. reported OS vs actual font rendering).' },
+    ];
+    let html = '<table><tr><th>Detection</th><th>Count</th></tr>';
+    for (const r of rows) {
+      const hasData = r.count > 0;
+      html += `<tr>
+        <td><span class="tip" data-tip="${esc(r.tip)}">${r.label}</span></td>
+        <td class="num" style="${hasData ? 'color:var(--orange)' : ''}">${fmt(r.count)}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    if (data.signals && data.signals.length) {
+      html += '<div style="margin-top:0.8rem;font-size:0.7rem;color:var(--text-dim);font-family:var(--mono);text-transform:uppercase;">specific signals seen</div>';
+      for (const r of data.signals.filter(s => s.hits > 0).slice(0, 5)) {
+        html += `<div class="bar-row" style="font-size:0.72rem;">
+          <span class="bar-label" style="min-width:180px;">${esc(r.signal)}</span>
+          <span class="bar-value">${fmt(r.hits)}</span>
+        </div>`;
+      }
+    }
+    setContent('cardEvasion', html);
+  } catch (e) {
+    setContent('cardEvasion', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadDevices() {
+  try {
+    const data = await fetchJson('/devices');
+    function renderSection(title, items, colorClass) {
+      if (!items || !items.length) return '';
+      const filtered = items.filter(r => r.hits > 0);
+      if (!filtered.length) return '';
+      const max = Math.max(...filtered.map(r => r.hits || 0));
+      let h = `<div style="font-size:0.7rem;color:var(--text-dim);font-family:var(--mono);margin:0.7rem 0 0.5rem;">${title}</div>`;
+      for (const r of filtered.slice(0, 5)) {
+        const w = Math.max((r.hits / max) * 100, 3).toFixed(1);
+        h += `<div class="bar-row" style="font-size:0.72rem;">
+          <span class="bar-label" style="min-width:100px;">${esc(r.name || '(unknown)')}</span>
+          <span class="bar-track"><span class="bar-fill ${colorClass}" style="width:${w}%"></span></span>
+          <span class="bar-value">${fmt(r.hits)}</span>
+        </div>`;
+      }
+      return h;
+    }
+    let html = renderSection('BROWSERS', data.browsers, '');
+    html += renderSection('OPERATING SYSTEM', data.oses, 'purple');
+    html += renderSection('DEVICE TYPE', data.deviceTypes, 'green');
+    if (!html) html = '<div class="error-msg">No data</div>';
+    setContent('cardDevices', html);
+  } catch (e) {
+    setContent('cardDevices', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadScreens() {
+  try {
+    const data = await fetchJson('/screens');
+    setContent('cardScreens', barChart(data, 'resolution', 'hits', 0, ''));
+  } catch (e) {
+    setContent('cardScreens', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadGeo() {
+  try {
+    const data = await fetchJson('/geo');
+    if (!data.length) { setContent('cardGeo', '<div class="error-msg">No data</div>'); return; }
+    let html = '<table><tr><th>Location</th><th>Visits</th><th>IPs</th>';
+    html += '<th class="tip" data-tip="Average lead quality score for visitors from this location">Quality</th></tr>';
+    for (const r of data.slice(0, 15)) {
+      html += `<tr>
+        <td>${esc(r.city)}, ${esc(r.region)}</td>
+        <td class="num">${fmt(r.hits)}</td>
+        <td class="num">${fmt(r.uniqueIPs)}</td>
+        <td class="num ${leadClass(r.avgLeadScore)}">${r.avgLeadScore ?? '—'}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    setContent('cardGeo', html);
+  } catch (e) {
+    setContent('cardGeo', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+async function loadBotNames() {
+  try {
+    const data = await fetchJson('/bot-names');
+    if (!data.length) {
+      setContent('cardBotNames', '<div class="card-note">No named bots detected in this period.</div>');
+      return;
+    }
+    setContent('cardBotNames', barChart(data, 'botName', 'hits', 0, 'orange'));
+  } catch (e) {
+    setContent('cardBotNames', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+// OS version currency definitions (as of 2026)
+// current = latest major, aging = 1-2 behind, outdated = 3+ behind or EOL
+const osCurrency = {
+  'Windows':  v => { const n = parseFloat(v); return n >= 11 ? 'current' : 'outdated'; },
+  'Mac OS X': v => { const n = parseFloat(v); return n >= 15 ? 'current' : n >= 14 ? 'aging' : n > 0 ? 'outdated' : 'unknown'; },
+  'macOS':    v => { const n = parseFloat(v); return n >= 15 ? 'current' : n >= 14 ? 'aging' : n > 0 ? 'outdated' : 'unknown'; },
+  'iOS':      v => { const n = parseFloat(v); return n >= 18 ? 'current' : n >= 17 ? 'aging' : n > 0 ? 'outdated' : 'unknown'; },
+  'Android':  v => { const n = parseFloat(v); return n >= 15 ? 'current' : n >= 14 ? 'aging' : n > 0 ? 'outdated' : 'unknown'; },
+  'Chrome OS':v => 'current',
+  'Linux':    v => 'current',
+};
+
+function getOSCurrency(os, ver) {
+  if (!os || os === '(unknown)' || !ver || ver === '(unknown)') return 'unknown';
+  const fn = osCurrency[os];
+  return fn ? fn(ver) : 'unknown';
+}
+
+const currencyLabels = {
+  current:  { text: 'Current',  pill: 'pill-current' },
+  aging:    { text: 'Aging',    pill: 'pill-aging' },
+  outdated: { text: 'Outdated', pill: 'pill-outdated' },
+  unknown:  { text: '—',        pill: 'pill-unknown' },
+};
+
+async function loadOSVersions() {
+  try {
+    const data = await fetchJson('/os-versions');
+    if (!data.length) { setContent('cardOSVersions', '<div class="error-msg">No data</div>'); return; }
+
+    // Summary counts
+    let curCount = 0, agingCount = 0, outdatedCount = 0, unkCount = 0;
+    for (const r of data) {
+      const c = getOSCurrency(r.os, r.version);
+      if (c === 'current') curCount += r.hits;
+      else if (c === 'aging') agingCount += r.hits;
+      else if (c === 'outdated') outdatedCount += r.hits;
+      else unkCount += r.hits;
+    }
+    const total = curCount + agingCount + outdatedCount + unkCount;
+    const pct = n => total ? (n / total * 100).toFixed(1) : '0';
+
+    let html = '<div style="display:flex;gap:1.5rem;margin-bottom:1rem;font-family:var(--mono);font-size:0.75rem;">';
+    html += `<span style="color:var(--green);">Current: <b>${pct(curCount)}%</b></span>`;
+    html += `<span style="color:var(--yellow);">Aging: <b>${pct(agingCount)}%</b></span>`;
+    html += `<span style="color:var(--red);">Outdated: <b>${pct(outdatedCount)}%</b></span>`;
+    if (unkCount > 0) html += `<span style="color:var(--text-dim);">Unknown: <b>${pct(unkCount)}%</b></span>`;
+    html += '</div>';
+
+    html += '<table><tr><th>OS</th><th>Version</th><th>Hits</th><th>Share</th><th>Status</th></tr>';
+    const visible = data.filter(r => r.sharePct >= 1.0);
+    for (const r of visible) {
+      const c = getOSCurrency(r.os, r.version);
+      const label = currencyLabels[c];
+      html += `<tr>
+        <td>${esc(r.os)}</td>
+        <td style="font-family:var(--mono);">${esc(r.version)}</td>
+        <td class="num">${fmt(r.hits)}</td>
+        <td class="num">${r.sharePct != null ? r.sharePct + '%' : '—'}</td>
+        <td><span class="pill ${label.pill}">${label.text}</span></td>
+      </tr>`;
+    }
+    const otherCount = data.length - visible.length;
+    if (otherCount > 0) {
+      const otherHits = data.filter(r => r.sharePct < 1.0).reduce((s, r) => s + r.hits, 0);
+      const otherPct = total ? (otherHits / total * 100).toFixed(1) : '0';
+      html += `<tr style="color:var(--text-dim);font-style:italic;">
+        <td colspan="2">${otherCount} other versions</td>
+        <td class="num">${fmt(otherHits)}</td>
+        <td class="num">${otherPct}%</td>
+        <td></td>
+      </tr>`;
+    }
+    html += '</table>';
+    setContent('cardOSVersions', html);
+  } catch (e) {
+    setContent('cardOSVersions', `<div class="error-msg">${e.message}</div>`);
+  }
+}
+
+// ── ORCHESTRATOR ──────────────────────────────────────────────
+function loadAll() {
+  loadSummary();
+  loadBots();
+  loadDaily();
+  loadChannels();
+  loadPages();
+  loadSignals();
+  loadLeads();
+  loadEvasion();
+  loadDevices();
+  loadScreens();
+  loadGeo();
+  loadOSVersions();
+  loadBotNames();
+}
+
+document.getElementById('footerTime').textContent = new Date().toLocaleDateString();
+loadAll();
+
+// Auto-refresh every 60 seconds
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
