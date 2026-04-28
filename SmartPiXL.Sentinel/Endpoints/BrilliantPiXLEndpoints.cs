@@ -385,7 +385,7 @@ public static class BrilliantPiXLEndpoints
         await using var cmd = new SqlCommand(
             "SELECT JsonPayload FROM Dashboard.BrilliantPiXL WHERE EndpointName = @n", conn);
         cmd.Parameters.AddWithValue("@n", endpointName);
-        cmd.CommandTimeout = 10;
+        cmd.CommandTimeout = 60;
         return (string?)await cmd.ExecuteScalarAsync(ct);
     }
 }

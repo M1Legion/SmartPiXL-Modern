@@ -177,6 +177,14 @@ builder.Services.AddHostedService<PipeListenerService>();
 // writes to SqlWriter channel.
 builder.Services.AddHostedService<EnrichmentPipelineService>();
 
+// Phase 0: GeoStitchBuffer merges the main beacon with its geo-followup on
+// the enriched side of the pipeline before records reach the SQL writer.
+// Registered as a hosted service so its sweep timer starts/stops with Forge
+// and flushes parked records on shutdown.
+builder.Services.AddSingleton<GeoStitchMetrics>();
+builder.Services.AddSingleton<GeoStitchBuffer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GeoStitchBuffer>());
+
 // SqlBulkCopyWriterService: Drains SqlWriter channel → parse inline → SqlBulkCopy → PiXL.Parsed.
 builder.Services.AddHostedService<SqlBulkCopyWriterService>();
 

@@ -33,7 +33,7 @@ namespace SmartPiXL.Forge.Services;
 internal static class ParsedRecordParser
 {
     /// <summary>Number of columns written to PiXL.Parsed (excludes SourceId which is SEQUENCE-generated).</summary>
-    internal const int ColumnCount = 252;
+    internal const int ColumnCount = 266;
 
     /// <summary>
     /// Column names for <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> mappings.
@@ -329,6 +329,28 @@ internal static class ParsedRecordParser
         "Srv_Priority",             // 249 — varchar  ← '_srv_priority'
         "Srv_TlsVersion",           // 250 — varchar  ← '_srv_tlsVer'  (placeholder — needs reverse proxy)
         "Srv_TlsCipher",            // 251 — varchar  ← '_srv_tlsCipher' (placeholder — needs reverse proxy)
+
+        // ── User Geolocation (cols 252–264) ────────────────────────────
+        // Populated only on "geo followup" beacons when the user grants the
+        // browser geolocation prompt. See SmartPiXL/SQL/82_UserGeolocation.sql.
+        "UserLat",                  // 252 — dec(9,6) ← '_usr_lat'
+        "UserLon",                  // 253 — dec(9,6) ← '_usr_lon'
+        "UserAccuracyM",            // 254 — int      ← '_usr_acc_m'
+        "UserAltitudeM",            // 255 — dec(9,2) ← '_usr_alt'
+        "UserAltitudeAccuracyM",    // 256 — int      ← '_usr_alt_acc_m'
+        "UserHeadingDeg",           // 257 — dec(5,2) ← '_usr_head'
+        "UserSpeedMps",             // 258 — dec(7,2) ← '_usr_speed'
+        "UserGeoTimestamp",         // 259 — dt2(3)   ← '_usr_geo_ts' (epoch ms)
+        "UserGeoStatus",            // 260 — varchar  ← '_usr_geo_status'
+        "UserGeoErrorCode",         // 261 — tinyint  ← '_usr_geo_err'
+        "UserClockSkewMs",          // 262 — int      ← computed (ReceivedAt - geo_ts)
+        "UserGeoIsMoving",          // 263 — bit      ← '_usr_moving'
+        "UserGeoVsIpKm",            // 264 — int      ← computed (haversine vs MaxMind)
+
+        // ── Phase 0 stitch key ─────────────────────────────────────────
+        "HitId",                    // 265 — uniqueidentifier ← '_hit_id'
+                                    //        Generated client-side per script execution.
+                                    //        Forge GeoStitchBuffer merges followups on this key.
     ];
 
     /// <summary>
@@ -675,7 +697,97 @@ internal static class ParsedRecordParser
         v[250] = QsStr(qs, "_srv_tlsVer");                      // Srv_TlsVersion
         v[251] = QsStr(qs, "_srv_tlsCipher");                   // Srv_TlsCipher
 
+        // ════════════════════════════════════════════════════════════════
+        // USER GEOLOCATION (cols 252–264)
+        // Values only populated on a _geo_followup=1 beacon. See
+        // PiXLScript.cs geolocation capture block + SQL/82_UserGeolocation.sql.
+        // ════════════════════════════════════════════════════════════════
+        v[252] = QsDec(qs, "_usr_lat");                         // UserLat
+        v[253] = QsDec(qs, "_usr_lon");                         // UserLon
+        v[254] = QsInt(qs, "_usr_acc_m");                       // UserAccuracyM
+        v[255] = QsDec(qs, "_usr_alt");                         // UserAltitudeM
+        v[256] = QsInt(qs, "_usr_alt_acc_m");                   // UserAltitudeAccuracyM
+        v[257] = QsDec(qs, "_usr_head");                        // UserHeadingDeg
+        v[258] = QsDec(qs, "_usr_speed");                       // UserSpeedMps
+
+        // UserGeoTimestamp — client sends epoch ms (pos.timestamp). Convert to DATETIME2(3).
+        var geoTsRaw = Qs(qs, "_usr_geo_ts");
+        DateTime? geoTs = null;
+        if (geoTsRaw is not null && long.TryParse(geoTsRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var geoTsMs))
+        {
+            try { geoTs = DateTimeOffset.FromUnixTimeMilliseconds(geoTsMs).UtcDateTime; }
+            catch { /* out of range → NULL */ }
+        }
+        v[259] = (object?)geoTs ?? DBNull.Value;                // UserGeoTimestamp
+        v[260] = QsStr(qs, "_usr_geo_status");                  // UserGeoStatus
+        v[261] = QsInt(qs, "_usr_geo_err");                     // UserGeoErrorCode
+
+        // UserClockSkewMs — (server ReceivedAt) - (client geo timestamp), in ms.
+        // Large magnitudes indicate a spoofed clock or stale cached fix.
+        if (geoTs.HasValue)
+        {
+            var skewMs = (long)(receivedAt - geoTs.Value).TotalMilliseconds;
+            // Clamp to INT range to avoid overflow in edge cases.
+            if (skewMs > int.MaxValue) skewMs = int.MaxValue;
+            else if (skewMs < int.MinValue) skewMs = int.MinValue;
+            v[262] = (int)skewMs;
+        }
+        else
+        {
+            v[262] = DBNull.Value;                              // UserClockSkewMs
+        }
+
+        v[263] = QsBit(qs, "_usr_moving");                      // UserGeoIsMoving
+
+        // UserGeoVsIpKm — haversine distance between the user-granted lat/lon
+        // and the MaxMind IP-based lat/lon. Large mismatch = strong VPN signal.
+        // Only compute when BOTH values are present (both are decimal objects).
+        if (v[252] is decimal uLat && v[253] is decimal uLon
+            && v[201] is decimal mLat && v[202] is decimal mLon)
+        {
+            var km = HaversineKm((double)uLat, (double)uLon, (double)mLat, (double)mLon);
+            if (!double.IsNaN(km) && !double.IsInfinity(km))
+            {
+                var kmInt = (int)Math.Round(Math.Min(km, int.MaxValue));
+                v[264] = kmInt;
+            }
+            else
+            {
+                v[264] = DBNull.Value;
+            }
+        }
+        else
+        {
+            v[264] = DBNull.Value;                              // UserGeoVsIpKm
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // HIT ID (col 265) — parsed from '_hit_id' QS param.
+        // Primary stitch key for the Forge GeoStitchBuffer. NULL is tolerated
+        // for legacy callers / synthetic traffic / pre-Phase-0 script cache.
+        // ════════════════════════════════════════════════════════════════
+        var hitIdRaw = Qs(qs, "_hit_id");
+        v[265] = !string.IsNullOrEmpty(hitIdRaw) && Guid.TryParse(hitIdRaw, out var hitGuid)
+            ? hitGuid
+            : (object)DBNull.Value;
+
         return v;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // HAVERSINE — great-circle distance in km between two lat/lon points.
+    // Used for UserGeoVsIpKm (granted-position vs IP-geo mismatch).
+    // ════════════════════════════════════════════════════════════════════
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double R = 6371.0088; // mean Earth radius, km
+        var dLat = (lat2 - lat1) * Math.PI / 180.0;
+        var dLon = (lon2 - lon1) * Math.PI / 180.0;
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+              + Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0)
+              * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return R * c;
     }
 
     // ════════════════════════════════════════════════════════════════════

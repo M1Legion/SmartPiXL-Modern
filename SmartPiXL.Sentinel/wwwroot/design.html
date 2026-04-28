@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartPiXL // DESIGN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* ============================================================================
+   TRON DESIGN — Blueprint-style tree editor
+   ============================================================================ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#030810; --bg2:#060e1a;
+  --panel:rgba(6,20,40,0.92); --panel-border:rgba(0,243,255,0.22);
+  --cyan:#00f3ff; --cyan-dim:rgba(0,243,255,0.5); --cyan-ghost:rgba(0,243,255,0.08);
+  --orange:#ff6a00; --red:#ff2d55; --green:#00ff88; --yellow:#ffe14d; --magenta:#ff2dff;
+  --text:#d4eeff; --text-dim:rgba(160,200,230,0.7);
+  --mono:'JetBrains Mono','Consolas',monospace; --display:'Inter','Segoe UI',sans-serif;
+  --tier-platform:#ff2dff; --tier-system:#00f3ff; --tier-subsystem:#ffe14d;
+  --tier-component:#ff6a00; --tier-probe:#00ff88;
+}
+html{font-size:15px}
+body{
+  font-family:var(--display);background:var(--bg);color:var(--text);
+  min-height:100vh;overflow:hidden;position:relative;
+}
+body::after{
+  content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,243,255,0.025) 2px,rgba(0,243,255,0.025) 4px);
+  pointer-events:none;z-index:9999;animation:scanDrift 8s linear infinite;
+}
+@keyframes scanDrift{0%{transform:translateY(0)}100%{transform:translateY(4px)}}
+
+/* ---- APP CHROME ---- */
+.chrome{
+  position:fixed;top:0;left:0;right:0;height:56px;z-index:50;
+  display:flex;align-items:center;gap:24px;padding:0 24px;
+  background:linear-gradient(180deg,rgba(6,20,40,0.95),rgba(6,20,40,0.7));
+  border-bottom:1px solid var(--panel-border);
+  backdrop-filter:blur(8px);
+}
+.chrome .brand{font-family:var(--mono);font-weight:600;letter-spacing:3px;color:var(--cyan)}
+.chrome .brand span{color:var(--text-dim);font-weight:400}
+.chrome nav{display:flex;gap:14px;margin-left:auto;font-family:var(--mono);font-size:12px;letter-spacing:2px}
+.chrome nav a{color:var(--text-dim);text-decoration:none;padding:6px 10px;border:1px solid transparent;transition:all .15s}
+.chrome nav a:hover,.chrome nav a.active{color:var(--cyan);border-color:var(--panel-border);background:var(--cyan-ghost)}
+
+.toolbar{
+  position:fixed;top:56px;left:0;right:0;height:44px;z-index:40;
+  display:flex;align-items:center;gap:10px;padding:0 16px;
+  background:rgba(3,8,16,0.85);border-bottom:1px solid var(--panel-border);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:1.5px;
+}
+.toolbar button,.toolbar .pill{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 11px;background:var(--cyan-ghost);color:var(--cyan);
+  border:1px solid var(--panel-border);cursor:pointer;font-family:inherit;font-size:inherit;letter-spacing:1px;
+  transition:all .12s;text-transform:uppercase;
+}
+.toolbar button:hover{background:rgba(0,243,255,0.18);box-shadow:0 0 12px rgba(0,243,255,0.25)}
+.toolbar button.primary{background:rgba(0,255,136,0.15);color:var(--green);border-color:rgba(0,255,136,0.4)}
+.toolbar button.danger{background:rgba(255,45,85,0.15);color:var(--red);border-color:rgba(255,45,85,0.4)}
+.toolbar .spacer{flex:1}
+.toolbar .stat{color:var(--text-dim)}
+.toolbar .stat strong{color:var(--cyan);font-weight:500}
+.toolbar input.search{
+  background:var(--bg2);border:1px solid var(--panel-border);color:var(--text);
+  padding:5px 10px;font-family:var(--mono);font-size:11.5px;width:240px;
+}
+.toolbar input.search:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 10px rgba(0,243,255,0.25)}
+
+/* ---- CANVAS VIEWPORT ---- */
+.viewport{
+  position:fixed;top:100px;left:0;right:360px;bottom:0;
+  background:var(--bg);overflow:hidden;cursor:grab;
+}
+.viewport.grabbing{cursor:grabbing}
+.viewport::before{
+  content:'';position:absolute;inset:0;
+  background:
+    linear-gradient(rgba(0,243,255,0.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,243,255,0.05) 1px,transparent 1px),
+    linear-gradient(rgba(0,243,255,0.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,243,255,0.02) 1px,transparent 1px);
+  background-size:120px 120px,120px 120px,24px 24px,24px 24px;
+  background-position:var(--gx,0) var(--gy,0);
+  pointer-events:none;
+}
+.world{position:absolute;top:0;left:0;width:1px;height:1px;transform-origin:0 0;will-change:transform}
+.edges{position:absolute;top:0;left:0;width:10000px;height:10000px;pointer-events:none;overflow:visible}
+.edges path{fill:none;stroke:var(--cyan-dim);stroke-width:1.5;filter:drop-shadow(0 0 3px rgba(0,243,255,0.4))}
+.edges path.active{stroke:var(--cyan);stroke-width:2;filter:drop-shadow(0 0 6px rgba(0,243,255,0.8))}
+
+/* ---- NODES ---- */
+.node{
+  position:absolute;width:240px;min-height:84px;
+  background:linear-gradient(180deg,rgba(6,20,40,0.97),rgba(3,12,24,0.97));
+  border:1px solid var(--panel-border);border-left:3px solid var(--tier);
+  padding:10px 12px;font-family:var(--display);cursor:move;
+  box-shadow:0 2px 10px rgba(0,0,0,0.5),inset 0 0 20px rgba(0,243,255,0.04);
+  transition:border-color .15s,box-shadow .15s;
+}
+.node:hover{border-color:var(--cyan-dim);box-shadow:0 2px 16px rgba(0,243,255,0.25)}
+.node.selected{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan),0 0 24px rgba(0,243,255,0.5)}
+.node.reparenting{border-style:dashed;border-color:var(--yellow)}
+.node[data-lifecycle="planned"]{opacity:.6;border-style:dashed}
+.node[data-lifecycle="deprecated"]{opacity:.55;filter:grayscale(.4)}
+.node[data-lifecycle="removed"]{display:none}
+.node .tier{font-family:var(--mono);font-size:9.5px;letter-spacing:2px;color:var(--tier);text-transform:uppercase;margin-bottom:4px;opacity:.9}
+.node .name{font-weight:600;font-size:13.5px;color:var(--text);line-height:1.25;margin-bottom:4px}
+.node .slug{font-family:var(--mono);font-size:10px;color:var(--text-dim);word-break:break-all;margin-bottom:6px}
+.node .badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.node .badge{font-family:var(--mono);font-size:9px;padding:1px 5px;border:1px solid var(--panel-border);color:var(--text-dim);letter-spacing:.5px}
+.node .badge.bound{color:var(--green);border-color:rgba(0,255,136,0.3)}
+.node .badge.files{color:var(--cyan);border-color:var(--cyan-dim)}
+.node .ports{position:absolute;left:0;right:0;pointer-events:none}
+.node .port{position:absolute;width:10px;height:10px;background:var(--bg);border:2px solid var(--tier);border-radius:50%;transform:translate(-50%,-50%)}
+.node .port.in{top:0;left:50%}
+.node .port.out{bottom:0;left:50%;top:auto;transform:translate(-50%,50%)}
+
+/* ---- INSPECTOR ---- */
+.inspector{
+  position:fixed;top:100px;right:0;bottom:0;width:360px;z-index:30;
+  background:var(--panel);border-left:1px solid var(--panel-border);
+  backdrop-filter:blur(6px);display:flex;flex-direction:column;
+  box-shadow:-4px 0 20px rgba(0,0,0,0.4);
+}
+.inspector .head{
+  padding:14px 16px;border-bottom:1px solid var(--panel-border);
+  display:flex;align-items:center;gap:10px;
+}
+.inspector .head .tier-chip{
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  padding:3px 7px;background:var(--tier);color:var(--bg);font-weight:600;
+}
+.inspector .head h2{font-size:14px;font-weight:600;flex:1;word-break:break-word}
+.inspector .tabs{display:flex;border-bottom:1px solid var(--panel-border);font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;overflow-x:auto}
+.inspector .tabs button{
+  background:transparent;border:none;color:var(--text-dim);padding:10px 12px;cursor:pointer;
+  border-bottom:2px solid transparent;text-transform:uppercase;white-space:nowrap;
+}
+.inspector .tabs button:hover{color:var(--cyan)}
+.inspector .tabs button.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.inspector .body{flex:1;overflow-y:auto;padding:14px 16px;font-size:12.5px}
+.inspector .empty{color:var(--text-dim);padding:60px 20px;text-align:center;font-family:var(--mono);font-size:11px;letter-spacing:1.5px}
+.inspector label{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:2px;color:var(--text-dim);margin:12px 0 4px;text-transform:uppercase}
+.inspector input,.inspector textarea,.inspector select{
+  width:100%;background:var(--bg2);border:1px solid var(--panel-border);color:var(--text);
+  padding:6px 8px;font-family:var(--mono);font-size:11.5px;resize:vertical;
+}
+.inspector textarea{min-height:60px;font-family:var(--mono)}
+.inspector textarea.json{min-height:140px;color:var(--cyan)}
+.inspector input:focus,.inspector textarea:focus,.inspector select:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 8px rgba(0,243,255,0.2)}
+.inspector .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.inspector .btn{
+  display:inline-block;padding:5px 10px;background:var(--cyan-ghost);color:var(--cyan);
+  border:1px solid var(--panel-border);cursor:pointer;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:1px;text-transform:uppercase;margin-top:8px;
+}
+.inspector .btn:hover{background:rgba(0,243,255,0.15)}
+.inspector .btn.danger{color:var(--red);border-color:rgba(255,45,85,0.4)}
+.inspector .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.inspector .chip{
+  display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;
+  padding:3px 7px;background:var(--cyan-ghost);border:1px solid var(--panel-border);color:var(--text);
+}
+.inspector .chip button{background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:0 2px}
+.inspector .codelink{display:flex;gap:6px;align-items:center;margin:4px 0;font-family:var(--mono);font-size:11px;padding:6px 8px;background:var(--bg2);border:1px solid var(--panel-border)}
+.inspector .codelink .kind{color:var(--yellow);font-size:9px;padding:1px 5px;border:1px solid var(--yellow);opacity:.8}
+.inspector .codelink .path{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inspector .codelink .primary-star{color:var(--yellow)}
+.inspector .codelink button{background:none;border:none;color:var(--red);cursor:pointer;font-size:14px}
+.inspector .decisions-list{margin-top:10px}
+.inspector .decision{background:var(--bg2);border:1px solid var(--panel-border);padding:8px;margin-bottom:6px;font-size:11px}
+.inspector .decision .title{color:var(--cyan);font-weight:600;margin-bottom:2px}
+.inspector .decision .status{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--text-dim)}
+
+/* ---- MINIMAP ---- */
+.minimap{
+  position:fixed;right:376px;bottom:16px;width:200px;height:140px;z-index:25;
+  background:rgba(3,8,16,0.9);border:1px solid var(--panel-border);
+  overflow:hidden;
+}
+.minimap svg{width:100%;height:100%}
+.minimap .vp{fill:none;stroke:var(--cyan);stroke-width:1}
+.minimap .mnode{fill:var(--cyan-dim)}
+
+/* ---- MODAL ---- */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:center;justify-content:center}
+.modal-backdrop.open{display:flex}
+.modal{background:var(--panel);border:1px solid var(--cyan-dim);padding:24px;min-width:420px;max-width:600px;box-shadow:0 0 40px rgba(0,243,255,0.3)}
+.modal h3{font-family:var(--mono);letter-spacing:2px;color:var(--cyan);margin-bottom:16px;font-size:14px;text-transform:uppercase}
+.modal .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+/* ---- TOAST ---- */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(200%);
+  background:var(--bg2);border:1px solid var(--cyan);color:var(--cyan);
+  padding:10px 18px;font-family:var(--mono);font-size:11px;letter-spacing:2px;z-index:300;
+  transition:transform .3s ease;box-shadow:0 0 20px rgba(0,243,255,0.4)
+}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.error{color:var(--red);border-color:var(--red);box-shadow:0 0 20px rgba(255,45,85,0.4)}
+</style>
+</head>
+<body>
+
+<!-- ============================================ CHROME ============================================ -->
+<div class="chrome">
+  <div class="brand">SMARTPIXL <span>// DESIGN</span></div>
+  <nav>
+    <a href="/tron">TRON</a>
+    <a href="/brilliantpixl">BRILLIANT</a>
+    <a href="/atlas">ATLAS</a>
+    <a href="/design" class="active">DESIGN</a>
+  </nav>
+</div>
+
+<!-- ============================================ TOOLBAR ============================================ -->
+<div class="toolbar">
+  <button id="btn-add" title="Add child of selected node">+ NODE</button>
+  <button id="btn-delete" class="danger" title="Soft-delete selected node">– DELETE</button>
+  <button id="btn-fit" title="Fit all nodes in view">FIT</button>
+  <button id="btn-reset-zoom">1:1</button>
+  <button id="btn-autolayout" title="Re-layout by hierarchy">AUTO-LAYOUT</button>
+  <button id="btn-save" class="primary" title="Flush any pending position saves">SAVE ALL</button>
+  <input class="search" id="search" placeholder="search slug, name, owner..." />
+  <div class="spacer"></div>
+  <div class="stat">NODES <strong id="stat-nodes">0</strong></div>
+  <div class="stat">PROBES <strong id="stat-probes">0</strong></div>
+  <div class="stat">LINKS <strong id="stat-links">0</strong></div>
+  <div class="stat">ZOOM <strong id="stat-zoom">100%</strong></div>
+</div>
+
+<!-- ============================================ VIEWPORT ============================================ -->
+<div class="viewport" id="viewport">
+  <div class="world" id="world">
+    <svg class="edges" id="edges"></svg>
+    <div id="nodes-layer"></div>
+  </div>
+</div>
+
+<!-- ============================================ INSPECTOR ============================================ -->
+<aside class="inspector" id="inspector">
+  <div id="insp-empty" class="empty">— SELECT A NODE —</div>
+  <div id="insp-content" style="display:none;flex:1;display:none;flex-direction:column;min-height:0">
+    <div class="head">
+      <span class="tier-chip" id="tier-chip">NODE</span>
+      <h2 id="insp-name">—</h2>
+    </div>
+    <div class="tabs">
+      <button data-tab="main" class="active">MAIN</button>
+      <button data-tab="health">HEALTH</button>
+      <button data-tab="binding">BINDING</button>
+      <button data-tab="copy">COPY</button>
+      <button data-tab="files">FILES</button>
+      <button data-tab="decisions">DECISIONS</button>
+    </div>
+    <div class="body" id="insp-body"></div>
+  </div>
+</aside>
+
+<div class="minimap" id="minimap"><svg viewBox="0 0 200 140"><g id="mm-nodes"></g><rect class="vp" id="mm-vp" /></svg></div>
+
+<div class="modal-backdrop" id="modal"><div class="modal" id="modal-inner"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================================
+//  STATE
+// ============================================================================
+const state = {
+  nodes: [],          // flat array of node objects from API
+  nodesById: new Map(),
+  codeLinks: [],
+  decisions: [],
+  selectedId: null,
+  activeTab: 'main',
+  // Viewport
+  scale: 1,
+  tx: 0,
+  ty: 0,
+  // Drag/pan
+  panStart: null,
+  dragNode: null,
+  dragOffset: null,
+  pendingPositions: new Map(),
+  saveDebounceTimer: null,
+};
+
+const $  = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const world    = $('#world');
+const edges    = $('#edges');
+const nodesL   = $('#nodes-layer');
+const viewport = $('#viewport');
+const toastEl  = $('#toast');
+
+// ============================================================================
+//  API HELPERS
+// ============================================================================
+async function api(method, url, body) {
+  const opts = { method, headers:{} };
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const r = await fetch(url, opts);
+  if (!r.ok) { const txt = await r.text(); throw new Error(`${r.status} ${txt || r.statusText}`); }
+  return r.status === 204 ? null : r.json();
+}
+function toast(msg, isErr=false) {
+  toastEl.textContent = msg;
+  toastEl.classList.toggle('error', isErr);
+  toastEl.classList.add('show');
+  setTimeout(()=>toastEl.classList.remove('show'), 2500);
+}
+
+// ============================================================================
+//  LOAD + RENDER
+// ============================================================================
+async function loadTree() {
+  try {
+    const data = await api('GET', '/api/design/tree');
+    state.nodes     = data.nodes.filter(n => n.isActive);
+    state.codeLinks = data.codeLinks;
+    state.decisions = data.decisions;
+    state.nodesById.clear();
+    state.nodes.forEach(n => state.nodesById.set(n.nodeId, n));
+    render();
+    updateStats();
+    // If nothing selected, fit to view.
+    if (state.selectedId === null) fitToView();
+  } catch (e) { toast('LOAD FAILED: ' + e.message, true); }
+}
+
+function updateStats() {
+  $('#stat-nodes').textContent  = state.nodes.length;
+  $('#stat-probes').textContent = state.nodes.filter(n=>n.nodeType==='probe').length;
+  $('#stat-links').textContent  = state.codeLinks.length;
+}
+
+function render() {
+  renderNodes();
+  renderEdges();
+  applyTransform();
+  renderMinimap();
+}
+
+function renderNodes() {
+  nodesL.innerHTML = '';
+  for (const n of state.nodes) {
+    const el = document.createElement('div');
+    el.className = 'node';
+    el.dataset.id = n.nodeId;
+    el.dataset.lifecycle = n.lifecycle || 'active';
+    el.style.setProperty('--tier', tierColor(n.nodeType));
+    el.style.left = (n.layoutX ?? 0) + 'px';
+    el.style.top  = (n.layoutY ?? 0) + 'px';
+    if (n.nodeId === state.selectedId) el.classList.add('selected');
+    const binding = parseJson(n.probeBinding);
+    const files = state.codeLinks.filter(l => l.nodeId === n.nodeId).length;
+    el.innerHTML = `
+      <div class="tier">${escape(n.nodeType || '?')}${n.icon?' ◆ '+escape(n.icon):''}</div>
+      <div class="name">${escape(n.name || '(unnamed)')}</div>
+      <div class="slug">${escape(n.slug || '')}</div>
+      <div class="badges">
+        ${binding && binding.kind ? `<span class="badge bound">BOUND ${escape(binding.kind)}</span>` : ''}
+        ${files > 0 ? `<span class="badge files">${files} FILE${files===1?'':'S'}</span>` : ''}
+        ${n.owner ? `<span class="badge">@${escape(n.owner)}</span>` : ''}
+      </div>
+      <div class="ports"><span class="port in"></span><span class="port out"></span></div>`;
+    nodesL.appendChild(el);
+  }
+}
+
+function renderEdges() {
+  const paths = [];
+  for (const n of state.nodes) {
+    if (n.parentId == null) continue;
+    const p = state.nodesById.get(n.parentId);
+    if (!p) continue;
+    const x1 = (p.layoutX ?? 0) + 120, y1 = (p.layoutY ?? 0) + 84;
+    const x2 = (n.layoutX ?? 0) + 120, y2 = (n.layoutY ?? 0);
+    const mid = (y1 + y2) / 2;
+    const active = n.nodeId === state.selectedId || p.nodeId === state.selectedId;
+    paths.push(`<path d="M${x1} ${y1} C${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}" ${active?'class="active"':''} />`);
+  }
+  edges.innerHTML = paths.join('');
+}
+
+function applyTransform() {
+  world.style.transform = `translate(${state.tx}px,${state.ty}px) scale(${state.scale})`;
+  $('#stat-zoom').textContent = Math.round(state.scale * 100) + '%';
+  viewport.style.setProperty('--gx', (state.tx % (120*state.scale)) + 'px');
+  viewport.style.setProperty('--gy', (state.ty % (120*state.scale)) + 'px');
+}
+
+function renderMinimap() {
+  const g = $('#mm-nodes');
+  if (state.nodes.length === 0) { g.innerHTML=''; return; }
+  const xs = state.nodes.map(n=>n.layoutX??0), ys = state.nodes.map(n=>n.layoutY??0);
+  const minX = Math.min(...xs), maxX = Math.max(...xs) + 240;
+  const minY = Math.min(...ys), maxY = Math.max(...ys) + 84;
+  const w = maxX - minX, h = maxY - minY;
+  const sx = 200 / w, sy = 140 / h, s = Math.min(sx, sy) * 0.95;
+  g.innerHTML = state.nodes.map(n => {
+    const x = ((n.layoutX??0) - minX) * s + 5;
+    const y = ((n.layoutY??0) - minY) * s + 5;
+    return `<rect class="mnode" x="${x}" y="${y}" width="${240*s}" height="${84*s}" />`;
+  }).join('');
+  const vpX = ((-state.tx)/state.scale - minX) * s + 5;
+  const vpY = ((-state.ty)/state.scale - minY) * s + 5;
+  const vp = $('#mm-vp');
+  vp.setAttribute('x', vpX); vp.setAttribute('y', vpY);
+  vp.setAttribute('width',  (viewport.clientWidth  / state.scale) * s);
+  vp.setAttribute('height', (viewport.clientHeight / state.scale) * s);
+}
+
+function tierColor(t) {
+  switch(t){case 'platform':return 'var(--tier-platform)';case 'system':return 'var(--tier-system)';
+    case 'subsystem':return 'var(--tier-subsystem)';case 'component':return 'var(--tier-component)';
+    case 'probe':return 'var(--tier-probe)';default:return 'var(--cyan)';}
+}
+
+// ============================================================================
+//  PAN / ZOOM / DRAG
+// ============================================================================
+viewport.addEventListener('mousedown', e => {
+  if (e.target.closest('.node')) return;          // node drag handled separately
+  state.panStart = { x: e.clientX - state.tx, y: e.clientY - state.ty };
+  viewport.classList.add('grabbing');
+  select(null);
+});
+window.addEventListener('mousemove', e => {
+  if (state.panStart) {
+    state.tx = e.clientX - state.panStart.x;
+    state.ty = e.clientY - state.panStart.y;
+    applyTransform(); renderMinimap();
+  } else if (state.dragNode) {
+    const n = state.dragNode;
+    const x = (e.clientX - state.tx) / state.scale - state.dragOffset.x;
+    const y = (e.clientY - state.ty) / state.scale - state.dragOffset.y;
+    n.layoutX = x; n.layoutY = y;
+    const el = nodesL.querySelector(`.node[data-id="${n.nodeId}"]`);
+    if (el) { el.style.left = x + 'px'; el.style.top = y + 'px'; }
+    renderEdges();
+    state.pendingPositions.set(n.nodeId, { x, y });
+    scheduleSave();
+  }
+});
+window.addEventListener('mouseup', () => {
+  state.panStart = null; state.dragNode = null;
+  viewport.classList.remove('grabbing');
+});
+viewport.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
+  const newScale = Math.max(0.15, Math.min(3, state.scale * factor));
+  const rect = viewport.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  state.tx = mx - (mx - state.tx) * (newScale / state.scale);
+  state.ty = my - (my - state.ty) * (newScale / state.scale);
+  state.scale = newScale;
+  applyTransform(); renderMinimap();
+}, { passive:false });
+
+nodesL.addEventListener('mousedown', e => {
+  const el = e.target.closest('.node');
+  if (!el) return;
+  e.stopPropagation();
+  const id = +el.dataset.id;
+  select(id);
+  const n = state.nodesById.get(id);
+  state.dragNode = n;
+  state.dragOffset = {
+    x: (e.clientX - state.tx)/state.scale - (n.layoutX ?? 0),
+    y: (e.clientY - state.ty)/state.scale - (n.layoutY ?? 0),
+  };
+});
+
+function scheduleSave() {
+  clearTimeout(state.saveDebounceTimer);
+  state.saveDebounceTimer = setTimeout(flushPositions, 400);
+}
+async function flushPositions() {
+  if (state.pendingPositions.size === 0) return;
+  const entries = [...state.pendingPositions.entries()];
+  state.pendingPositions.clear();
+  await Promise.all(entries.map(([id, p]) =>
+    api('POST', `/api/design/node/${id}/position`, p).catch(e => toast('POS SAVE FAIL: '+e.message, true))));
+}
+
+// ============================================================================
+//  SELECTION + INSPECTOR
+// ============================================================================
+function select(id) {
+  state.selectedId = id;
+  $$('.node').forEach(el => el.classList.toggle('selected', +el.dataset.id === id));
+  renderEdges();
+  renderInspector();
+}
+
+function renderInspector() {
+  const n = state.selectedId ? state.nodesById.get(state.selectedId) : null;
+  if (!n) { $('#insp-empty').style.display='block'; $('#insp-content').style.display='none'; return; }
+  $('#insp-empty').style.display='none';
+  $('#insp-content').style.display='flex';
+  $('#insp-content').style.flexDirection='column';
+  const chip = $('#tier-chip');
+  chip.textContent = n.nodeType || '?';
+  chip.style.setProperty('--tier', tierColor(n.nodeType));
+  chip.style.background = tierColor(n.nodeType);
+  $('#insp-name').textContent = n.name || '(unnamed)';
+
+  // Tabs
+  $$('.inspector .tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === state.activeTab);
+    b.onclick = () => { state.activeTab = b.dataset.tab; renderInspector(); };
+  });
+
+  const body = $('#insp-body');
+  switch (state.activeTab) {
+    case 'main':      body.innerHTML = mainTab(n); bindMain(n); break;
+    case 'health':    body.innerHTML = healthTab(n); bindJson(n, 'healthRules', 'hr'); break;
+    case 'binding':   body.innerHTML = bindingTab(n); bindJson(n, 'probeBinding', 'pb'); break;
+    case 'copy':      body.innerHTML = copyTab(n); bindCopy(n); break;
+    case 'files':     body.innerHTML = filesTab(n); bindFiles(n); break;
+    case 'decisions': body.innerHTML = decisionsTab(n); bindDecisions(n); break;
+  }
+}
+
+// --- TAB RENDERERS ---
+function mainTab(n) {
+  const parents = state.nodes.filter(x => x.nodeId !== n.nodeId)
+    .map(p => `<option value="${p.nodeId}" ${p.nodeId===n.parentId?'selected':''}>${escape(p.slug)}</option>`).join('');
+  return `
+    <label>SLUG (STABLE ID)</label><input data-f="slug" value="${attr(n.slug)}" />
+    <label>NAME</label><input data-f="name" value="${attr(n.name)}" />
+    <label>TIER</label>
+    <select data-f="nodeType">
+      ${['platform','system','subsystem','component','probe'].map(t=>`<option ${t===n.nodeType?'selected':''}>${t}</option>`).join('')}
+    </select>
+    <label>PARENT</label>
+    <select data-f="parentId"><option value="">(root)</option>${parents}</select>
+    <div class="row2">
+      <div><label>LIFECYCLE</label>
+        <select data-f="lifecycle">
+          ${['planned','active','deprecated','removed'].map(l=>`<option ${l===(n.lifecycle||'active')?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div><label>SORT ORDER</label><input type="number" data-f="sortOrder" value="${n.sortOrder ?? 0}" /></div>
+    </div>
+    <div class="row2">
+      <div><label>OWNER</label><input data-f="owner" value="${attr(n.owner)}" /></div>
+      <div><label>ICON</label><input data-f="icon" value="${attr(n.icon)}" /></div>
+    </div>
+    <label>DESCRIPTION (ONE-LINE)</label>
+    <textarea data-f="description" style="min-height:50px">${escape(n.description)}</textarea>
+    <button class="btn" id="save-main">SAVE</button>
+  `;
+}
+function healthTab(n) {
+  return `
+    <label>HEALTH RULES (JSON)</label>
+    <textarea class="json" data-f="hr">${escape(n.healthRules || '')}</textarea>
+    <p style="color:var(--text-dim);font-size:10.5px;margin-top:6px;font-family:var(--mono);line-height:1.5">
+      Shape:<br>
+      { "metrics":[{ "key","label","unit","source":{"kind":"forgeHealth","subsystem","probe","metricPath"},<br>
+      &nbsp;&nbsp;"direction":"higherIsBetter","expected":60,<br>
+      &nbsp;&nbsp;"bands":{"green":"&gt;=50","yellow":"20..49","red":"&lt;20"},"description" }] }
+    </p>
+    <button class="btn" id="save-hr">SAVE</button>`;
+}
+function bindingTab(n) {
+  return `
+    <label>PROBE BINDING (JSON)</label>
+    <textarea class="json" data-f="pb">${escape(n.probeBinding || '')}</textarea>
+    <p style="color:var(--text-dim);font-size:10.5px;margin-top:6px;font-family:var(--mono);line-height:1.5">
+      kind: edgeHealth | forgeHealth | sentinelLocal | sqlQuery | httpProbe | aggregate<br>
+      For forge: { "kind":"forgeHealth", "subsystem":"F1: Ingest", "probeName":"Pipe Listener" }
+    </p>
+    <button class="btn" id="save-pb">SAVE</button>`;
+}
+function copyTab(n) {
+  return `
+    <label>MARKETING (public-facing)</label>
+    <textarea data-f="descMarketing">${escape(n.descMarketing)}</textarea>
+    <label>MANAGEMENT (ops / business)</label>
+    <textarea data-f="descManagement">${escape(n.descManagement)}</textarea>
+    <label>DEVELOPER (technical)</label>
+    <textarea data-f="descDeveloper">${escape(n.descDeveloper)}</textarea>
+    <button class="btn" id="save-copy">SAVE</button>`;
+}
+function filesTab(n) {
+  const links = state.codeLinks.filter(l => l.nodeId === n.nodeId);
+  return `
+    <div>
+      ${links.map(l => `
+        <div class="codelink">
+          <span class="kind">${escape(l.kind)}</span>
+          ${l.isPrimary?'<span class="primary-star">★</span>':''}
+          <span class="path" title="${attr(l.path)}">${escape(l.path)}</span>
+          <button data-del="${l.codeLinkId}" title="remove">×</button>
+        </div>`).join('') || '<div style="color:var(--text-dim);font-size:11px;padding:8px 0">No files claimed.</div>'}
+    </div>
+    <label>ADD FILE CLAIM</label>
+    <div class="row2">
+      <select id="cl-kind">
+        ${['code','sql','doc','test','config','script'].map(k=>`<option>${k}</option>`).join('')}
+      </select>
+      <label style="margin:0;display:flex;align-items:center;gap:6px;color:var(--yellow)">
+        <input type="checkbox" id="cl-primary" style="width:auto" /> PRIMARY
+      </label>
+    </div>
+    <input id="cl-path" placeholder="SmartPiXL.Forge/Services/..." style="margin-top:6px" />
+    <input id="cl-notes" placeholder="notes (optional)" style="margin-top:6px" />
+    <button class="btn" id="cl-add">ADD</button>`;
+}
+function decisionsTab(n) {
+  const mine = state.decisions.filter(d => d.nodeId === n.nodeId);
+  return `
+    <div class="decisions-list">
+      ${mine.map(d => `
+        <div class="decision">
+          <div class="title">${escape(d.title)}</div>
+          <div>${escape(d.decision)}</div>
+          ${d.rationale?`<div style="color:var(--text-dim);margin-top:4px"><em>${escape(d.rationale)}</em></div>`:''}
+          <div class="status">${escape(d.status)} · ${new Date(d.decidedAt).toISOString().substring(0,10)}</div>
+        </div>`).join('') || '<div style="color:var(--text-dim);font-size:11px;padding:8px 0">No decisions logged.</div>'}
+    </div>
+    <label>NEW DECISION</label>
+    <input id="d-slug" placeholder="slug-like-this" />
+    <input id="d-title" placeholder="Title" style="margin-top:6px" />
+    <textarea id="d-decision" placeholder="What was decided"></textarea>
+    <textarea id="d-rationale" placeholder="Why" style="margin-top:6px"></textarea>
+    <button class="btn" id="d-add">ADD DECISION</button>`;
+}
+
+// --- TAB BINDERS ---
+function bindMain(n) {
+  $('#save-main').onclick = async () => {
+    const patch = collect('data-f', ['slug','name','nodeType','parentId','lifecycle','sortOrder','owner','icon','description']);
+    if (patch.parentId === '') patch.parentId = null;
+    else if (patch.parentId != null) patch.parentId = +patch.parentId;
+    if (patch.sortOrder != null) patch.sortOrder = +patch.sortOrder;
+
+    // Reparent is separate if parent changed
+    const newParentId = patch.parentId;
+    delete patch.parentId;
+
+    try {
+      await api('PATCH', `/api/design/node/${n.nodeId}`, patch);
+      if (newParentId !== n.parentId) {
+        await api('POST', `/api/design/node/${n.nodeId}/reparent`, { newParentId });
+      }
+      toast('SAVED');
+      await loadTree();
+    } catch(e) { toast('SAVE FAILED: '+e.message, true); }
+  };
+}
+function bindJson(n, field, sel) {
+  $('#save-'+sel).onclick = async () => {
+    const val = document.querySelector(`[data-f="${sel}"]`).value.trim();
+    if (val) { try { JSON.parse(val); } catch(e) { toast('INVALID JSON', true); return; } }
+    try {
+      const patch = {}; patch[field] = val || null;
+      await api('PATCH', `/api/design/node/${n.nodeId}`, patch);
+      toast('SAVED'); await loadTree();
+    } catch(e) { toast('SAVE FAILED: '+e.message, true); }
+  };
+}
+function bindCopy(n) {
+  $('#save-copy').onclick = async () => {
+    const patch = collect('data-f', ['descMarketing','descManagement','descDeveloper']);
+    try { await api('PATCH', `/api/design/node/${n.nodeId}`, patch); toast('SAVED'); await loadTree(); }
+    catch(e){ toast('SAVE FAILED: '+e.message, true); }
+  };
+}
+function bindFiles(n) {
+  $$('#insp-body [data-del]').forEach(b => b.onclick = async () => {
+    try { await api('DELETE', `/api/design/code-link/${b.dataset.del}`); await loadTree(); }
+    catch(e){ toast('DELETE FAILED: '+e.message, true); }
+  });
+  $('#cl-add').onclick = async () => {
+    const body = {
+      kind: $('#cl-kind').value,
+      path: $('#cl-path').value.trim(),
+      isPrimary: $('#cl-primary').checked,
+      notes: $('#cl-notes').value.trim() || null
+    };
+    if (!body.path) { toast('PATH REQUIRED', true); return; }
+    try { await api('POST', `/api/design/node/${n.nodeId}/code-link`, body); toast('LINK ADDED'); await loadTree(); }
+    catch(e){ toast('ADD FAILED: '+e.message, true); }
+  };
+}
+function bindDecisions(n) {
+  $('#d-add').onclick = async () => {
+    const body = {
+      nodeId: n.nodeId,
+      slug: $('#d-slug').value.trim(),
+      title: $('#d-title').value.trim(),
+      decision: $('#d-decision').value.trim(),
+      rationale: $('#d-rationale').value.trim() || null,
+    };
+    if (!body.slug || !body.title || !body.decision) { toast('SLUG, TITLE, DECISION REQUIRED', true); return; }
+    try { await api('POST', '/api/design/decision', body); toast('DECISION LOGGED'); await loadTree(); }
+    catch(e){ toast('ADD FAILED: '+e.message, true); }
+  };
+}
+
+function collect(attr, fields) {
+  const out = {};
+  for (const f of fields) {
+    const el = document.querySelector(`[${attr}="${f}"]`);
+    if (!el) continue;
+    out[f] = el.value;
+  }
+  return out;
+}
+
+// ============================================================================
+//  TOOLBAR ACTIONS
+// ============================================================================
+$('#btn-add').onclick = async () => {
+  const parent = state.selectedId ? state.nodesById.get(state.selectedId) : null;
+  const slug = prompt('New node slug (e.g. edge.my-component):');
+  if (!slug) return;
+  const name = prompt('Display name:', slug.split('.').pop()) || slug;
+  const nodeType = prompt('Tier (platform/system/subsystem/component/probe):', parent ? nextTier(parent.nodeType) : 'component') || 'component';
+  const body = {
+    parentId: parent ? parent.nodeId : null,
+    slug, name, nodeType,
+    lifecycle: 'active',
+    layoutX: parent ? (parent.layoutX ?? 0) + 280 : 0,
+    layoutY: parent ? (parent.layoutY ?? 0) + 180 : 0,
+  };
+  try { const r = await api('POST', '/api/design/node', body); toast('CREATED #' + r.nodeId); await loadTree(); select(r.nodeId); }
+  catch(e) { toast('CREATE FAILED: '+e.message, true); }
+};
+$('#btn-delete').onclick = async () => {
+  if (!state.selectedId) { toast('SELECT A NODE FIRST', true); return; }
+  const n = state.nodesById.get(state.selectedId);
+  if (!confirm(`Soft-delete ${n.slug}? (Lifecycle='removed', IsActive=0)`)) return;
+  try { await api('DELETE', `/api/design/node/${n.nodeId}`); toast('DELETED'); state.selectedId=null; await loadTree(); }
+  catch(e) { toast('DELETE FAILED: '+e.message, true); }
+};
+$('#btn-fit').onclick = fitToView;
+$('#btn-reset-zoom').onclick = () => { state.scale = 1; applyTransform(); renderMinimap(); };
+$('#btn-autolayout').onclick = autoLayout;
+$('#btn-save').onclick = async () => { await flushPositions(); toast('ALL SAVED'); };
+$('#search').oninput = e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) { $$('.node').forEach(el => el.style.opacity = ''); return; }
+  for (const el of $$('.node')) {
+    const n = state.nodesById.get(+el.dataset.id);
+    const hit = n.slug.toLowerCase().includes(q) || (n.name||'').toLowerCase().includes(q) || (n.owner||'').toLowerCase().includes(q);
+    el.style.opacity = hit ? '' : '0.18';
+  }
+};
+
+function fitToView() {
+  if (state.nodes.length === 0) return;
+  const xs = state.nodes.map(n=>n.layoutX??0), ys = state.nodes.map(n=>n.layoutY??0);
+  const minX = Math.min(...xs), maxX = Math.max(...xs) + 240;
+  const minY = Math.min(...ys), maxY = Math.max(...ys) + 84;
+  const w = maxX - minX, h = maxY - minY;
+  const vw = viewport.clientWidth, vh = viewport.clientHeight;
+  const s = Math.min(vw / (w + 200), vh / (h + 200), 1);
+  state.scale = Math.max(s, 0.2);
+  state.tx = (vw - (minX + maxX) * state.scale) / 2;
+  state.ty = (vh - (minY + maxY) * state.scale) / 2;
+  applyTransform(); renderMinimap();
+}
+
+async function autoLayout() {
+  // Tidy hierarchical tree (Reingold-Tilford, simplified):
+  //   post-order → each subtree claims a horizontal slot = max(children sum, node width)
+  //   pre-order  → children spread across that slot, parent centered above them.
+  const NODE_W = 240, NODE_H = 84, H_GAP = 24, V_GAP = 96;
+  const SLOT = NODE_W + H_GAP;
+
+  const childrenOf = new Map();
+  for (const n of state.nodes) {
+    const p = (n.parentId != null && state.nodesById.has(n.parentId)) ? n.parentId : 0;
+    if (!childrenOf.has(p)) childrenOf.set(p, []);
+    childrenOf.get(p).push(n);
+  }
+  for (const arr of childrenOf.values()) {
+    arr.sort((a,b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.slug.localeCompare(b.slug));
+  }
+
+  const roots = state.nodes.filter(n => n.parentId == null || !state.nodesById.has(n.parentId));
+  roots.sort((a,b) => a.slug.localeCompare(b.slug));
+
+  const subtreeW = new Map();
+  function measure(n) {
+    const kids = childrenOf.get(n.nodeId) || [];
+    if (kids.length === 0) { subtreeW.set(n.nodeId, SLOT); return SLOT; }
+    let w = 0;
+    for (const k of kids) w += measure(k);
+    w = Math.max(w, SLOT);
+    subtreeW.set(n.nodeId, w);
+    return w;
+  }
+
+  const payloads = [];
+  function place(n, x0, depth) {
+    const w = subtreeW.get(n.nodeId);
+    n.layoutX = Math.round(x0 + w / 2 - NODE_W / 2);
+    n.layoutY = depth * (NODE_H + V_GAP);
+    payloads.push({ id: n.nodeId, x: n.layoutX, y: n.layoutY });
+    let cx = x0;
+    for (const k of (childrenOf.get(n.nodeId) || [])) {
+      place(k, cx, depth + 1);
+      cx += subtreeW.get(k.nodeId);
+    }
+  }
+
+  let cursorX = 0;
+  for (const r of roots) {
+    measure(r);
+    place(r, cursorX, 0);
+    cursorX += subtreeW.get(r.nodeId) + SLOT;   // gap between separate roots
+  }
+
+  render();
+  fitToView();
+  await Promise.all(payloads.map(p =>
+    api('POST', `/api/design/node/${p.id}/position`, { x: p.x, y: p.y })
+      .catch(e => console.warn('pos save', p.id, e.message))));
+  toast('AUTO-LAYOUT APPLIED · ' + payloads.length + ' NODES');
+}
+
+function nextTier(parent) {
+  const order = ['platform','system','subsystem','component','probe'];
+  const i = order.indexOf(parent);
+  return order[Math.min(i+1, order.length-1)];
+}
+
+// ============================================================================
+//  UTILITIES
+// ============================================================================
+function escape(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function attr(s) { return escape(s).replace(/"/g, '&quot;'); }
+function parseJson(s) { if (!s) return null; try { return JSON.parse(s); } catch { return null; } }
+
+window.addEventListener('resize', renderMinimap);
+window.addEventListener('beforeunload', flushPositions);
+
+// ============================================================================
+//  BOOT
+// ============================================================================
+loadTree();
+</script>
+</body>
+</html>

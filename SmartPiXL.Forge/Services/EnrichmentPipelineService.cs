@@ -109,6 +109,11 @@ public sealed class EnrichmentPipelineService : BackgroundService
     // ── Forge failover writer (enriched records → JSONL on disk) ───────
     private readonly ForgeFailoverWriter _failoverWriter;
 
+    // ── Phase 0: merge geo-followup beacons with their main beacon before
+    //    they reach the SQL writer channel. Keyed on HitId. Without this,
+    //    every page view lands as two rows in PiXL.Parsed.
+    private readonly Enrichments.GeoStitchBuffer _geoStitchBuffer;
+
     // ── Adaptive worker scaling ─────────────────────────────────────────
     private volatile int _targetWorkerCount;
     private int _maxWorkers;
@@ -139,7 +144,8 @@ public sealed class EnrichmentPipelineService : BackgroundService
         BehavioralReplayService behavioralReplay,
         DeadInternetService deadInternet,
         BackgroundIpEnrichmentService backgroundIp,
-        OsEndOfLifeService osEndOfLife)
+        OsEndOfLifeService osEndOfLife,
+        Enrichments.GeoStitchBuffer geoStitchBuffer)
     {
         _enrichmentChannel = channels.Enrichment;
         _sqlWriterChannel = channels.SqlWriter;
@@ -167,6 +173,7 @@ public sealed class EnrichmentPipelineService : BackgroundService
         _deadInternet = deadInternet;
         _backgroundIp = backgroundIp;
         _osEndOfLife = osEndOfLife;
+        _geoStitchBuffer = geoStitchBuffer;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -300,10 +307,14 @@ public sealed class EnrichmentPipelineService : BackgroundService
                     // channel or failover, the enrichment work was done.
                     _metrics.Record(Stage.Enrichment, ts);
 
-                    if (!_sqlWriterChannel.Writer.TryWrite(enriched))
-                    {
-                        _failoverWriter.Append(enriched);                        _metrics.RecordFailover();                        _logger.Debug($"Worker {workerId}: SQL writer channel full — record persisted to failover");
-                    }
+                    // Phase 0: hand every enriched record to the geo stitch
+                    // buffer instead of writing directly to the SQL channel.
+                    // The buffer either emits immediately (merged pair /
+                    // legacy record without HitId) or parks the record until
+                    // its pair arrives or the 20 s window expires. Emission
+                    // uses the same TryWrite + failover path as the legacy
+                    // route, so failover behaviour is unchanged.
+                    _geoStitchBuffer.Handle(enriched);
 
                     processedCount++;
                     if (processedCount % 10_000 == 0)

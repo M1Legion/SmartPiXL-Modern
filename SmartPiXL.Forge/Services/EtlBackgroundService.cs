@@ -217,7 +217,7 @@ public sealed class EtlBackgroundService : BackgroundService
             // Advance watermark
             await using (var upCmd = conn.CreateCommand())
             {
-                upCmd.CommandText = "UPDATE ETL.Watermark SET LastProcessedId = @ToId WHERE ProcessName = 'ProcessDimensions'";
+                upCmd.CommandText = "UPDATE ETL.Watermark SET LastProcessedId = @ToId, LastRunAt = SYSUTCDATETIME() WHERE ProcessName = 'ProcessDimensions'";
                 upCmd.Parameters.AddWithValue("@ToId", toId);
                 upCmd.CommandTimeout = 30;
                 await upCmd.ExecuteNonQueryAsync(ct);

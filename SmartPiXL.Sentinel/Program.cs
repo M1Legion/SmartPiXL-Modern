@@ -197,6 +197,7 @@ app.MapAtlasEndpoints();
 app.MapTrafficAlertEndpoints();
 app.MapHealthTreeEndpoints();
 app.MapBrilliantPiXLEndpoints();
+app.MapDesignEndpoints();
 
 // ---------------------------------------------------------------------------
 // STARTUP LOGGING + GRACEFUL SHUTDOWN

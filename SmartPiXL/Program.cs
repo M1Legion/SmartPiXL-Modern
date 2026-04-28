@@ -198,8 +198,37 @@ app.Use(static (context, next) =>
     headers["X-Content-Type-Options"] = "nosniff";                     // Prevent MIME sniffing
     headers["X-Frame-Options"] = "DENY";                               // Prevent clickjacking
     headers["Referrer-Policy"] = "strict-origin-when-cross-origin";    // Limit Referer leakage
-    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"; // Kill risky APIs
-    headers["Content-Security-Policy"] = "default-src 'none'";         // Pixel endpoint: no HTML rendering
+
+    // Permissions-Policy + CSP are set at response-start time so we can apply
+    // different rules to HTML landing pages (which host the PiXL script and
+    // need geolocation) vs the pixel/GIF/JS tracking endpoints (locked down).
+    context.Response.OnStarting(static state =>
+    {
+        var ctx = (HttpContext)state;
+        var h = ctx.Response.Headers;
+        var ct = ctx.Response.ContentType ?? string.Empty;
+        var isHtml = ct.Contains("text/html", StringComparison.OrdinalIgnoreCase);
+
+        if (isHtml)
+        {
+            // HTML pages: allow same-origin scripts and geolocation so the
+            // Brilliant PiXL tag can load and prompt for location.
+            h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self)";
+            h["Content-Security-Policy"] =
+                "default-src 'self'; " +
+                "script-src 'self' 'unsafe-inline'; " +
+                "style-src 'self' 'unsafe-inline'; " +
+                "img-src 'self' data:; " +
+                "connect-src 'self'";
+        }
+        else
+        {
+            // Pixel / JS / GIF endpoints: no HTML rendering surface, lock down.
+            h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+            h["Content-Security-Policy"] = "default-src 'none'";
+        }
+        return Task.CompletedTask;
+    }, context);
 
     // HSTS: only add when the request arrived over HTTPS to avoid
     // breaking plain-HTTP dev/test flows.

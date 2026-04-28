@@ -61,13 +61,18 @@ public sealed class DashboardRefreshService : BackgroundService
         await using var conn = new SqlConnection(_settings.ConnectionString);
         await conn.OpenAsync(ct);
 
-        // Read watermark — quick check for new modern rows
+        // Read watermark — quick check for new rows. SourceId is the identity PK
+        // and is strictly monotonic, so TOP 1 DESC is a single-row backwards seek
+        // on PK_PiXL_Parsed regardless of fragmentation or row count. HitType filter
+        // removed deliberately: new SourceId => new data, HitType is irrelevant here.
+        // NOLOCK avoids shared-lock contention with concurrent SqlBulkCopy inserts.
         long currentMax;
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT ISNULL(MAX(SourceId), 0) FROM PiXL.Parsed WHERE HitType = 'modern'";
+            cmd.CommandText = "SELECT TOP 1 ISNULL(SourceId, 0) FROM PiXL.Parsed WITH (NOLOCK) ORDER BY SourceId DESC";
             cmd.CommandTimeout = 10;
-            currentMax = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+            var result = await cmd.ExecuteScalarAsync(ct);
+            currentMax = result is null || result is DBNull ? 0 : Convert.ToInt64(result);
         }
 
         bool newData = currentMax > _lastWatermark;

@@ -26,7 +26,40 @@ public static class PiXLScript
         var perf = w.performance || {};
         var data = {};
         data._v = '%%CANARY%%';
-        
+
+        // ================================================================
+        // HitId — unique identifier for THIS pixel-script execution.
+        // Generated once here. Stamped on every beacon we fire (main +
+        // geo-followup + future delta beacons) so Forge can stitch them
+        // into one row in PiXL.Parsed.
+        //
+        // Note: NOT the same as a SmartPiXL 'Session' — Session means a
+        // multi-page visit. HitId means 'one tag firing on one page view'.
+        // ================================================================
+        var hitId = (function() {
+            try {
+                if (w.crypto && typeof w.crypto.randomUUID === 'function') {
+                    return w.crypto.randomUUID();
+                }
+                if (w.crypto && w.crypto.getRandomValues) {
+                    var b = new Uint8Array(16);
+                    w.crypto.getRandomValues(b);
+                    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+                    b[8] = (b[8] & 0x3f) | 0x80; // variant
+                    var h = [];
+                    for (var i = 0; i < 16; i++) h.push((b[i] + 0x100).toString(16).slice(1));
+                    return h[0]+h[1]+h[2]+h[3]+'-'+h[4]+h[5]+'-'+h[6]+h[7]+'-'+h[8]+h[9]+'-'+h[10]+h[11]+h[12]+h[13]+h[14]+h[15];
+                }
+            } catch(e) {}
+            // Last-resort fallback: time + random. Not a real UUID but unique enough
+            // for stitching inside our 20s buffer window.
+            var ts = Date.now().toString(16);
+            var r1 = Math.floor(Math.random() * 0xffffffff).toString(16);
+            var r2 = Math.floor(Math.random() * 0xffffffff).toString(16);
+            return (ts + '-' + r1 + '-' + r2 + '-fallback').slice(0, 36);
+        })();
+        data._hit_id = hitId;
+
         var safeGet = function(obj, prop, fallback) {
             try {
                 var val = obj[prop];
@@ -1318,6 +1351,203 @@ public static class PiXLScript
             document.removeEventListener('scroll', scrollHandler);
         };
         
+        // ================================================================
+        // GEOLOCATION CAPTURE (navigator.geolocation — standard browser JS API)
+        // ================================================================
+        // Strategy: maximize consent rate using 3s engagement timing (Option C)
+        // with first-user-gesture fallback (Option A). Whichever trips first wins.
+        //
+        // Results are delivered via a SEPARATE beacon tagged _geo_followup=1
+        // so the main beacon is never delayed waiting for the permission prompt.
+        // Forge/ETL link the two rows by SessionId (re-derived server-side from
+        // IP+UA+deviceHash — which the followup carries as a minimal identifier
+        // payload).
+        //
+        // Status values: granted, denied, pre_denied, unavailable, timeout,
+        // no_response, not_supported, blocked_policy
+        // ================================================================
+        (function() {
+            if (!navigator.geolocation) return; // not_supported — skip silently
+
+            var geoFired = false;
+            var geoDone = false;
+            var geoStart = Date.now();
+            var scriptUrl = (function() {
+                try {
+                    var cs = document.currentScript;
+                    if (cs && cs.src) return cs.src;
+                } catch(e) {}
+                return '{{PIXL_URL}}';
+            })();
+            var geoBeaconUrl = scriptUrl
+                .replace(/_SMART\.js(\?.*)?$/i, '_SMART.GIF')
+                .replace(/_SMART\.GIF$/i, '_SMART.DATA');
+            var geoGifUrl = scriptUrl.replace(/_SMART\.js(\?.*)?$/i, '_SMART.GIF');
+
+            var sendGeoFollowup = function(payload) {
+                if (geoDone) return;
+                geoDone = true;
+                // HitId is the primary stitch key — Forge matches this followup
+                // to the main beacon in its GeoStitchBuffer keyed on _hit_id.
+                // The deviceHash / ua / tz / screen-dims below are legacy
+                // secondary identifiers kept as fallback only.
+                payload._geo_followup = 1;
+                payload._hit_id = hitId;
+                try { payload.ua = navigator.userAgent || ''; } catch(e) {}
+                try { payload.lang = navigator.language || ''; } catch(e) {}
+                try { payload.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e) {}
+                try { payload.sw = screen.width; payload.sh = screen.height; } catch(e) {}
+                try { payload.pd = window.devicePixelRatio || 1; } catch(e) {}
+                if (data.deviceHash) payload.deviceHash = data.deviceHash;
+                if (data._srv_sessionId) payload._srv_sessionId = data._srv_sessionId;
+                payload._geo_captureMs = Date.now() - geoStart;
+
+                var parts = [];
+                for (var k in payload) {
+                    if (payload[k] !== '' && payload[k] !== null && payload[k] !== undefined) {
+                        parts.push(k + '=' + encodeURIComponent(payload[k]));
+                    }
+                }
+                var body = parts.join('&');
+                var sent = false;
+                if (navigator.sendBeacon) {
+                    try {
+                        sent = navigator.sendBeacon(
+                            geoBeaconUrl,
+                            new Blob([body], {type: 'application/x-www-form-urlencoded'}));
+                    } catch(e) { sent = false; }
+                }
+                if (!sent) {
+                    try { new Image().src = geoGifUrl + '?' + body; } catch(e) {}
+                }
+            };
+
+            var onGeoError = function(err) {
+                // PositionError.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
+                var code = err && err.code ? err.code : 0;
+                var status = 'unavailable';
+                if (code === 1) status = 'denied';
+                else if (code === 2) status = 'unavailable';
+                else if (code === 3) status = 'timeout';
+                sendGeoFollowup({
+                    _usr_geo_status: status,
+                    _usr_geo_err: code
+                });
+            };
+
+            var onGeoSuccess = function(pos) {
+                var c = pos.coords || {};
+                var p = {
+                    _usr_geo_status: 'granted',
+                    _usr_lat:         c.latitude != null ? c.latitude.toFixed(6) : '',
+                    _usr_lon:         c.longitude != null ? c.longitude.toFixed(6) : '',
+                    _usr_acc_m:       c.accuracy != null ? Math.round(c.accuracy) : '',
+                    _usr_alt:         c.altitude != null ? c.altitude.toFixed(2) : '',
+                    _usr_alt_acc_m:   c.altitudeAccuracy != null ? Math.round(c.altitudeAccuracy) : '',
+                    _usr_head:        c.heading != null ? c.heading.toFixed(2) : '',
+                    _usr_speed:       c.speed != null ? c.speed.toFixed(2) : '',
+                    _usr_geo_ts:      pos.timestamp || Date.now()
+                };
+
+                // 3-second watchPosition to capture motion deltas. If the user is
+                // walking/driving, heading and speed will become non-null / change.
+                // We overwrite the initial fix's movement fields with the last
+                // observed values, then cancel the watch and beacon.
+                var moved = 0;
+                var watchId = -1;
+                var onWatch = function(wp) {
+                    var wc = wp.coords || {};
+                    if (wc.speed != null && wc.speed > 0.5) moved = 1;
+                    if (wc.heading != null) moved = 1;
+                    if (wc.speed != null) p._usr_speed = wc.speed.toFixed(2);
+                    if (wc.heading != null) p._usr_head = wc.heading.toFixed(2);
+                    if (wc.latitude != null) p._usr_lat = wc.latitude.toFixed(6);
+                    if (wc.longitude != null) p._usr_lon = wc.longitude.toFixed(6);
+                };
+                try {
+                    watchId = navigator.geolocation.watchPosition(
+                        onWatch,
+                        function() {},
+                        { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 });
+                } catch(e) {}
+                setTimeout(function() {
+                    try { if (watchId >= 0) navigator.geolocation.clearWatch(watchId); } catch(e) {}
+                    p._usr_moving = moved;
+                    sendGeoFollowup(p);
+                }, 3200);
+            };
+
+            var fireGeo = function() {
+                if (geoFired) return;
+                geoFired = true;
+
+                // Permissions API pre-check so we can distinguish 'pre_denied'
+                // (a prior block for this origin — no prompt shown) from
+                // 'denied' (user clicks Block on our prompt this session).
+                var proceed = function(state) {
+                    if (state === 'denied') {
+                        sendGeoFollowup({ _usr_geo_status: 'pre_denied' });
+                        return;
+                    }
+                    // 'granted' or 'prompt' → call the API.
+                    var responded = false;
+                    var noResponseTimer = setTimeout(function() {
+                        if (!responded) sendGeoFollowup({ _usr_geo_status: 'no_response' });
+                    }, 15000);
+                    try {
+                        navigator.geolocation.getCurrentPosition(
+                            function(pos) {
+                                responded = true;
+                                clearTimeout(noResponseTimer);
+                                onGeoSuccess(pos);
+                            },
+                            function(err) {
+                                responded = true;
+                                clearTimeout(noResponseTimer);
+                                onGeoError(err);
+                            },
+                            // enableHighAccuracy=false: desktop browsers hang trying to
+                            // reach non-existent GPS hardware and fire TIMEOUT. Low-accuracy
+                            // (WiFi/IP) returns in < 1s and is plenty precise for our use.
+                            // maximumAge=300000: accept a 5-min-old cached fix (instant return).
+                            { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+                    } catch(e) {
+                        responded = true;
+                        clearTimeout(noResponseTimer);
+                        sendGeoFollowup({ _usr_geo_status: 'blocked_policy' });
+                    }
+                };
+
+                if (navigator.permissions && navigator.permissions.query) {
+                    try {
+                        navigator.permissions.query({ name: 'geolocation' }).then(
+                            function(r) { proceed(r && r.state ? r.state : 'prompt'); },
+                            function()  { proceed('prompt'); });
+                    } catch(e) { proceed('prompt'); }
+                } else {
+                    proceed('prompt');
+                }
+            };
+
+            // Trigger 1 — Option C: 3 seconds of engagement. A/B studies show
+            // this produces the highest consent rate (user has demonstrated
+            // intent to read the page, so the prompt feels relevant).
+            var engagementTimer = setTimeout(fireGeo, 3000);
+
+            // Trigger 2 — Option A fallback: first user gesture. Belt-and-suspenders
+            // for pages where the user interacts before the 3s timer fires.
+            var onFirstGesture = function() {
+                clearTimeout(engagementTimer);
+                document.removeEventListener('mousedown', onFirstGesture, true);
+                document.removeEventListener('touchstart', onFirstGesture, true);
+                document.removeEventListener('keydown', onFirstGesture, true);
+                fireGeo();
+            };
+            document.addEventListener('mousedown', onFirstGesture, true);
+            document.addEventListener('touchstart', onFirstGesture, true);
+            document.addEventListener('keydown', onFirstGesture, true);
+        })();
+
         var sendPiXL = function() {
             calculateMouseEntropy();
             // Integrity sentinel: bitmask of which fingerprint functions produced data.

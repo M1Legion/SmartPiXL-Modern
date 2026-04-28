@@ -106,6 +106,12 @@ public static partial class TrackingEndpoints
         // ============================================================================
         app.MapGet("/", async (HttpContext ctx) =>
         {
+            // Prevent browser caching of the landing page so script-tag changes
+            // propagate immediately without a hard refresh. Page is tiny.
+            ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Response.Headers.Pragma = "no-cache";
+            ctx.Response.Headers["Expires"] = "0";
+
             var indexPath = _wwwrootPath != null ? Path.Combine(_wwwrootPath, "index.html") : null;
             if (indexPath != null && File.Exists(indexPath))
             {

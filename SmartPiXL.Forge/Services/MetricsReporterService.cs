@@ -36,6 +36,7 @@ public sealed class MetricsReporterService : BackgroundService
     private readonly BehavioralReplayService? _behavioralReplay;
     private readonly CrossCustomerIntelService? _crossCustomer;
     private readonly SessionStitchingService? _sessionStitching;
+    private readonly OsEndOfLifeService? _osEol;
 
     private const int ReportIntervalSeconds = 10;
 
@@ -54,7 +55,8 @@ public sealed class MetricsReporterService : BackgroundService
         DeadInternetService? deadInternet = null,
         BehavioralReplayService? behavioralReplay = null,
         CrossCustomerIntelService? crossCustomer = null,
-        SessionStitchingService? sessionStitching = null)
+        SessionStitchingService? sessionStitching = null,
+        OsEndOfLifeService? osEol = null)
     {
         _metrics = metrics;
         _channels = channels;
@@ -71,6 +73,7 @@ public sealed class MetricsReporterService : BackgroundService
         _behavioralReplay = behavioralReplay;
         _crossCustomer = crossCustomer;
         _sessionStitching = sessionStitching;
+        _osEol = osEol;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -147,5 +150,9 @@ public sealed class MetricsReporterService : BackgroundService
         // F6: Background IP processing state
         if (_bgIp is not null)
             _metrics.SampleBgIpProcessingState(_bgIp.DnsEnabled, _bgIp.WhoisEnabled);
+
+        // F7: OS EOL Acquisition
+        if (_osEol is not null)
+            _metrics.SampleOsEolState(_osEol.IsLoaded, _osEol.ProductCount, _osEol.TotalCycles);
     }
 }

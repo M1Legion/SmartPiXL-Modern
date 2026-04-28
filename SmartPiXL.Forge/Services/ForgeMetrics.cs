@@ -159,6 +159,11 @@ public sealed class ForgeMetrics
     private long _ipAcqLastRun;              // Stopwatch ticks
     private long _ipAcqLifetimeFailures;
 
+    // F7: OS EOL Acquisition
+    private int _osEolIsLoaded;              // 1 = at least one product loaded
+    private int _osEolProductCount;          // number of products loaded
+    private int _osEolTotalCycles;           // total release cycles across products
+
     /// <summary>Starts a high-resolution timer. Call <see cref="Record"/> with the result.</summary>
     public static long StartTimer() => Stopwatch.GetTimestamp();
 
@@ -455,6 +460,14 @@ public sealed class ForgeMetrics
     public void RecordIpAcqLifetimeFailure() =>
         Interlocked.Increment(ref _ipAcqLifetimeFailures);
 
+    // F7: OS EOL Acquisition
+    public void SampleOsEolState(bool isLoaded, int productCount, int totalCycles)
+    {
+        Volatile.Write(ref _osEolIsLoaded, isLoaded ? 1 : 0);
+        Volatile.Write(ref _osEolProductCount, productCount);
+        Volatile.Write(ref _osEolTotalCycles, totalCycles);
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // HEALTH TREE — Derives all 29 probes from cumulative state.
     // ══════════════════════════════════════════════════════════════════
@@ -597,6 +610,16 @@ public sealed class ForgeMetrics
             new() { Name = "DB-IP", Health = uptimeSeconds < maxIpAcqAge || ipAcqAge < maxIpAcqAge ? 1 : 0, Metrics = new
             {
                 SecondsSinceLastRun = ipAcqLastTicks > 0 ? ipAcqAge : -1
+            }},
+            new() { Name = "OS EOL Data Loaded", Health = Volatile.Read(ref _osEolIsLoaded), Metrics = new
+            {
+                ProductCount = Volatile.Read(ref _osEolProductCount),
+                TotalCycles = Volatile.Read(ref _osEolTotalCycles)
+            }},
+            new() { Name = "OS EOL All Products", Health = Volatile.Read(ref _osEolProductCount) >= 5 ? 1 : 0, Metrics = new
+            {
+                ProductCount = Volatile.Read(ref _osEolProductCount),
+                ExpectedProducts = 5
             }}
         ]);
 

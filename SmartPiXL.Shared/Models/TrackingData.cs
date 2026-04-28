@@ -99,4 +99,18 @@ public sealed record TrackingData
     /// reason as UserAgent: fast direct-column queries in SQL.
     /// </summary>
     public string? Referer { get; init; }
+
+    /// <summary>
+    /// Client-generated UUIDv4 for a single pixel-script execution. Stamped on
+    /// every beacon that execution fires (main + geo followup + future delta
+    /// beacons) via the <c>_hit_id</c> query param. Forge's <c>GeoStitchBuffer</c>
+    /// uses this as the primary merge key so one script execution produces one
+    /// row in <c>PiXL.Parsed</c>. NULL for legacy callers and pre-Phase-0 cached
+    /// scripts.
+    ///
+    /// NOT the same as <see cref="SmartPiXL.Shared.Models.TrackingData"/>'s session
+    /// concept — Session means a multi-page visit. HitId means "this one tag firing
+    /// on this one page view".
+    /// </summary>
+    public Guid? HitId { get; init; }
 }
