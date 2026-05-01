@@ -22,7 +22,7 @@ public sealed class IpRangeLookupServiceTests
         var mockLogger = new Mock<ITrackingLogger>();
         var settings = new TrackingSettings
         {
-            ConnectionString = "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True"
+            ConnectionString = "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;Encrypt=True;TrustServerCertificate=True"
         };
         var mockOptions = Options.Create(settings);
         _service = new IpRangeLookupService(mockOptions, mockLogger.Object);

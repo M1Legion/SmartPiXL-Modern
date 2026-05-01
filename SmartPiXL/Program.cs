@@ -49,21 +49,9 @@ if (!string.IsNullOrEmpty(sqlUser) && !string.IsNullOrEmpty(sqlPass))
 {
     builder.Services.PostConfigure<TrackingSettings>(settings =>
     {
-        settings.XavierSmartPiXLConnectionString = RewriteToSqlAuth(
+        settings.XavierSmartPiXLConnectionString = ConnectionStringHelper.RewriteToSqlAuth(
             settings.XavierSmartPiXLConnectionString, sqlUser, sqlPass);
     });
-}
-
-static string? RewriteToSqlAuth(string? connStr, string user, string password)
-{
-    if (string.IsNullOrEmpty(connStr)) return connStr;
-    var csb = new SqlConnectionStringBuilder(connStr)
-    {
-        IntegratedSecurity = false,
-        UserID = user,
-        Password = password
-    };
-    return csb.ConnectionString;
 }
 
 var logSettings = builder.Configuration

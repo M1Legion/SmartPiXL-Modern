@@ -7,7 +7,7 @@ namespace SmartPiXL.Tests;
 /// Tests for IpClassification readonly record struct - value semantics,
 /// default values, and the IpType enum.
 /// </summary>
-public sealed class IpClassificationTests
+public sealed class IpClassificationModelTests
 {
     [Fact]
     public void Constructor_should_setAllProperties()

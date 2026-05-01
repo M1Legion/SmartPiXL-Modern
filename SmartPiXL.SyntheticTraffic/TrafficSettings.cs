@@ -48,7 +48,7 @@ public sealed class TrafficSettings
 
     /// <summary>SQL connection string for baseline/final metric queries.</summary>
     public string ConnectionString { get; set; } =
-        "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;TrustServerCertificate=True";
+        "Server=localhost\\SQL2025;Database=SmartPiXL;Integrated Security=True;Encrypt=True;TrustServerCertificate=True";
 
     /// <summary>Path to Research/data/ directory containing RIR delegation files.</summary>
     public string RirDataDirectory { get; set; } = "..\\Research\\data";
